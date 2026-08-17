@@ -1,5 +1,9 @@
 # P2000T Teletekst Cartridge
 
+[![Latest release](https://img.shields.io/github/v/release/ifilot/p2000t-teletekst-cartridge?display_name=tag&sort=semver)](https://github.com/ifilot/p2000t-teletekst-cartridge/releases/latest)
+[![Build and release](https://github.com/ifilot/p2000t-teletekst-cartridge/actions/workflows/build-and-release.yml/badge.svg?branch=master)](https://github.com/ifilot/p2000t-teletekst-cartridge/actions/workflows/build-and-release.yml)
+[![License](https://img.shields.io/github/license/ifilot/p2000t-teletekst-cartridge)](LICENSE)
+
 This repository contains the public hardware and client side of the P2000T
 Teletekst project:
 
@@ -11,6 +15,14 @@ Teletekst project:
 
 The current release version of both the cartridge and Pico W firmware is
 `v0.1.0`. The P2WP wire protocol remains version `2`.
+
+## Downloads
+
+Download the latest release artifacts:
+
+- [P2000T cartridge ROM (`p2wp-cartridge.bin`)](https://github.com/ifilot/p2000t-teletekst-cartridge/releases/latest/download/p2wp-cartridge.bin)
+- [Raspberry Pi Pico W firmware (`p2wp-pico-w.uf2`)](https://github.com/ifilot/p2000t-teletekst-cartridge/releases/latest/download/p2wp-pico-w.uf2)
+- [Raspberry Pi Pico 2 W firmware (`p2wp-pico-2-w.uf2`)](https://github.com/ifilot/p2000t-teletekst-cartridge/releases/latest/download/p2wp-pico-2-w.uf2)
 
 ## Compilation
 
