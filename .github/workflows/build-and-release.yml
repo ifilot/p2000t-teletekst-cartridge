@@ -16,7 +16,7 @@ jobs:
     name: Build cartridge
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Z80 assembler
         run: sudo apt-get update && sudo apt-get install --yes z80asm
@@ -46,10 +46,15 @@ jobs:
             name: Pico 2 W
             artifact: p2wp-pico-2-w.uf2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      - name: Install Pico build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake gcc-arm-none-eabi libnewlib-arm-none-eabi ninja-build
 
       - name: Check out Pico SDK
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: raspberrypi/pico-sdk
           ref: 2.1.1
