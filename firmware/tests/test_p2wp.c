@@ -1,0 +1,281 @@
+#include "p2wp.h"
+#include "teletekst.h"
+
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+
+static void test_crc(void) {
+    static const uint8_t input[] = "123456789";
+    assert(p2wp_crc16(input, sizeof(input) - 1u) == 0x29b1u);
+}
+
+static void test_round_trip(void) {
+    p2wp_frame_t source = {
+        .version = P2WP_VERSION,
+        .flags = P2WP_FLAG_RESPONSE,
+        .type = P2WP_TYPE_ECHO,
+        .sequence = 0x7e,
+        .payload_length = 6,
+        .payload = {0x00, 0x7d, 0x7e, 0xff, 0xaa, 0x55},
+    };
+    uint8_t encoded[P2WP_MAX_ENCODED];
+    const size_t encoded_length = p2wp_encode(&source, encoded, sizeof(encoded));
+    assert(encoded_length != 0u);
+
+    p2wp_parser_t parser;
+    p2wp_frame_t decoded;
+    p2wp_parser_init(&parser);
+    p2wp_parse_result_t result = P2WP_PARSE_NONE;
+    for (size_t index = 0; index < encoded_length; ++index) {
+        result = p2wp_parser_feed(&parser, encoded[index], &decoded);
+    }
+
+    assert(result == P2WP_PARSE_FRAME);
+    assert(decoded.version == source.version);
+    assert(decoded.flags == source.flags);
+    assert(decoded.type == source.type);
+    assert(decoded.sequence == source.sequence);
+    assert(decoded.payload_length == source.payload_length);
+    assert(memcmp(decoded.payload, source.payload, source.payload_length) == 0);
+}
+
+static void test_corruption(void) {
+    p2wp_frame_t source = {
+        .version = P2WP_VERSION,
+        .type = P2WP_TYPE_ECHO,
+        .payload_length = 1,
+        .payload = {0x42},
+    };
+    uint8_t encoded[P2WP_MAX_ENCODED];
+    const size_t encoded_length = p2wp_encode(&source, encoded, sizeof(encoded));
+    assert(encoded_length > 5u);
+    encoded[4] ^= 0x01u;
+
+    p2wp_parser_t parser;
+    p2wp_frame_t decoded;
+    p2wp_parser_init(&parser);
+    p2wp_parse_result_t result = P2WP_PARSE_NONE;
+    for (size_t index = 0; index < encoded_length; ++index) {
+        result = p2wp_parser_feed(&parser, encoded[index], &decoded);
+    }
+    assert(result == P2WP_PARSE_ERROR);
+}
+
+static void test_profile_save_round_trip(void) {
+    p2wp_frame_t source = {
+        .version = P2WP_VERSION,
+        .type = P2WP_TYPE_WIFI_PROFILE_SAVE,
+        .sequence = 0x20,
+        .payload_length = 1u + 63u,
+    };
+    source.payload[0] = 63u;
+    for (size_t index = 1u; index < source.payload_length; ++index) {
+        source.payload[index] = index % 2u == 0u
+            ? P2WP_DELIMITER
+            : P2WP_ESCAPE;
+    }
+
+    uint8_t encoded[P2WP_MAX_ENCODED];
+    const size_t encoded_length = p2wp_encode(
+        &source,
+        encoded,
+        sizeof(encoded)
+    );
+    assert(encoded_length != 0u);
+
+    p2wp_parser_t parser;
+    p2wp_frame_t decoded;
+    p2wp_parser_init(&parser);
+    p2wp_parse_result_t result = P2WP_PARSE_NONE;
+    for (size_t index = 0u; index < encoded_length; ++index) {
+        result = p2wp_parser_feed(&parser, encoded[index], &decoded);
+    }
+    assert(result == P2WP_PARSE_FRAME);
+    assert(decoded.type == P2WP_TYPE_WIFI_PROFILE_SAVE);
+    assert(decoded.payload_length == source.payload_length);
+    assert(memcmp(decoded.payload, source.payload, source.payload_length) == 0);
+}
+
+static void append_text(
+    char *buffer,
+    size_t capacity,
+    size_t *length,
+    const char *text
+) {
+    const size_t text_length = strlen(text);
+    assert(text_length < capacity - *length);
+    memcpy(buffer + *length, text, text_length);
+    *length += text_length;
+    buffer[*length] = '\0';
+}
+
+static size_t build_teletekst_json(char *json, size_t capacity) {
+    size_t length = 0u;
+    append_text(
+        json,
+        capacity,
+        &length,
+        "{\"nextSubPage\":\"100-2\",\"content\":\""
+    );
+
+    for (unsigned column = 0u; column < 21u; ++column) {
+        append_text(json, capacity, &length, " ");
+    }
+    append_text(
+        json,
+        capacity,
+        &length,
+        "<span class=\\\"green \\\"> NOS Teletekst</span>"
+        "<span class=\\\"yellow \\\"> 100 </span>\\n"
+    );
+
+    append_text(
+        json,
+        capacity,
+        &length,
+        "&#xF020;<span class=\\\"blue bg-blue \\\">&#xF020;</span>"
+        "<span class=\\\"bg-blue \\\">&#xF020;&#xF03c;"
+    );
+    for (unsigned column = 0u; column < 36u; ++column) {
+        append_text(json, capacity, &length, "&#xF020;");
+    }
+    append_text(json, capacity, &length, "</span>\\n");
+
+    append_text(json, capacity, &length, " Belgi&euml;");
+    for (unsigned column = 0u; column < 33u; ++column) {
+        append_text(json, capacity, &length, " ");
+    }
+    append_text(json, capacity, &length, "\\n");
+
+    append_text(
+        json,
+        capacity,
+        &length,
+        " <span class=\\\"black bg-white \\\">X</span>"
+    );
+    for (unsigned column = 2u; column < TELETEKST_COLUMNS; ++column) {
+        append_text(json, capacity, &length, " ");
+    }
+    append_text(json, capacity, &length, "\\n");
+
+    append_text(
+        json,
+        capacity,
+        &length,
+        " #&pound;_&#x2190;&#x2192;"
+    );
+    for (unsigned column = 6u; column < TELETEKST_COLUMNS; ++column) {
+        append_text(json, capacity, &length, " ");
+    }
+    append_text(json, capacity, &length, "\\n");
+
+    for (unsigned row = 5u; row < TELETEKST_SOURCE_ROWS; ++row) {
+        for (unsigned column = 0u; column < TELETEKST_COLUMNS; ++column) {
+            append_text(json, capacity, &length, " ");
+        }
+        append_text(json, capacity, &length, "\\n");
+    }
+    append_text(json, capacity, &length, "\"}");
+    return length;
+}
+
+typedef struct {
+    uint8_t glyph;
+    uint8_t foreground;
+    uint8_t background;
+    uint8_t graphics;
+} rendered_cell_t;
+
+static void render_saa5050_row(
+    const uint8_t input[TELETEKST_COLUMNS],
+    rendered_cell_t rendered[TELETEKST_COLUMNS]
+) {
+    uint8_t foreground = 7u;
+    uint8_t background = 0u;
+    uint8_t graphics = 0u;
+    for (size_t column = 0u; column < TELETEKST_COLUMNS; ++column) {
+        const uint8_t value = input[column];
+        rendered[column].glyph = ' ';
+        rendered[column].foreground = foreground;
+        rendered[column].background = background;
+        rendered[column].graphics = graphics;
+        if ((value & 0x7fu) < 0x20u) {
+            const uint8_t control = value & 0x7fu;
+            if (control >= 1u && control <= 7u) {
+                foreground = control;
+                graphics = 0u;
+            } else if (control >= 0x11u && control <= 0x17u) {
+                foreground = control - 0x10u;
+                graphics = 1u;
+            } else if (control == 0x1cu) {
+                background = 0u;
+                rendered[column].background = background;
+            } else if (control == 0x1du) {
+                background = foreground;
+                rendered[column].background = background;
+            }
+            continue;
+        }
+        rendered[column].glyph = value & 0x7fu;
+        if ((value & 0x80u) != 0u) {
+            rendered[column].foreground = background;
+            rendered[column].background = foreground;
+        }
+    }
+}
+
+static void test_teletekst_conversion(void) {
+    char json[16384];
+    const size_t json_length = build_teletekst_json(json, sizeof(json));
+    uint8_t screen[TELETEKST_SCREEN_SIZE];
+    uint8_t next_subpage = 0u;
+    assert(teletekst_decode_nos_json(
+        json,
+        json_length,
+        100u,
+        screen,
+        &next_subpage
+    ));
+    assert(next_subpage == 2u);
+
+    rendered_cell_t row[TELETEKST_COLUMNS];
+    render_saa5050_row(screen, row);
+    assert(row[22].glyph == 'N');
+    assert(row[22].foreground == 2u);
+    assert(row[22].background == 0u);
+    assert(row[36].glyph == '1');
+    assert(row[36].foreground == 3u);
+
+    render_saa5050_row(screen + TELETEKST_COLUMNS, row);
+    assert(row[3].glyph == 0x3cu);
+    assert(row[3].foreground == 7u);
+    assert(row[3].background == 4u);
+    assert(row[3].graphics == 1u);
+
+    render_saa5050_row(screen + 2u * TELETEKST_COLUMNS, row);
+    assert(row[1].glyph == 'B');
+    assert(row[6].glyph == 'e');
+
+    render_saa5050_row(screen + 3u * TELETEKST_COLUMNS, row);
+    assert(row[1].glyph == 'X');
+    assert(row[1].foreground == 0u);
+    assert(row[1].background == 7u);
+
+    render_saa5050_row(screen + 4u * TELETEKST_COLUMNS, row);
+    assert(row[1].glyph == 0x5fu); // hash is not ASCII 23h on the P2000T
+    assert(row[2].glyph == 0x23u); // 23h is the pound glyph
+    assert(row[3].glyph == 0x60u); // closest available horizontal bar
+    assert(row[4].glyph == 0x5bu); // left arrow
+    assert(row[5].glyph == 0x5du); // right arrow
+}
+
+int main(void) {
+    test_crc();
+    test_round_trip();
+    test_corruption();
+    test_profile_save_round_trip();
+    test_teletekst_conversion();
+    puts("p2wp tests passed");
+    return 0;
+}

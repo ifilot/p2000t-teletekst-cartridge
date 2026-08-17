@@ -1,0 +1,85 @@
+
+(rules PCB p2000t-pico-web-interface
+  (snap_angle 
+    fortyfive_degree
+  )
+  (autoroute_settings
+    (fanout off)
+    (autoroute on)
+    (postroute on)
+    (vias on)
+    (via_costs 50)
+    (plane_via_costs 5)
+    (start_ripup_costs 100)
+    (start_pass_no 676)
+    (layer_rule F.Cu
+      (active on)
+      (preferred_direction vertical)
+      (preferred_direction_trace_costs 1.0)
+      (against_preferred_direction_trace_costs 2.2)
+    )
+    (layer_rule B.Cu
+      (active on)
+      (preferred_direction horizontal)
+      (preferred_direction_trace_costs 1.0)
+      (against_preferred_direction_trace_costs 1.8)
+    )
+  )
+  (rule
+    (width 250.0)
+    (clear 200.0)
+    (clear 125.0 (type smd_to_turn_gap))
+    (clear 50.0 (type smd_smd))
+  )
+  (padstack "Via[0-1]_800:400_um"
+    (shape
+      (circle F.Cu 800.0 0.0 0.0)
+    )
+    (shape
+      (circle B.Cu 800.0 0.0 0.0)
+    )
+    (attach off)
+  )
+  (via 
+    "Via[0-1]_800:400_um" "Via[0-1]_800:400_um" default
+  )
+  (via 
+    "Via[0-1]_800:400_um-kicad_default" "Via[0-1]_800:400_um" "kicad_default"
+  )
+  (via_rule
+    default "Via[0-1]_800:400_um"
+  )
+  (via_rule
+    "kicad_default" "Via[0-1]_800:400_um-kicad_default"
+  )
+  (class default
+    (clearance_class default)
+    (via_rule default)
+    (rule
+      (width 250.0)
+    )
+    (circuit 
+      (use_layer F.Cu B.Cu)
+    )
+  )
+  (class "kicad_default"
+    +5V GND ~{RDx41} "TX_FULL" "RX_ACK_PENDING" ~{Px40} "Net-(U8-P=R)" ~{RD}
+    ~{Px42} ~{Px41} ~{RDx42} +3V3 "Net-(U5B-~{R})" "~{TX_CLR}" ~{RES} ~{WR}
+    ~{IORQ} A0 A1 A2 A7 A6 A5 A4
+    "~{RES_3V3}" D7 D6 D5 D4 D3 D2 D1
+    D0 PD12 PD13 PD14 PD15 PD0 PD1 PD2
+    PD3 PD4 PD5 PD6 PD7 PD8 PD9 PD10
+    PD11 "RX_READY" "~{RX_ACK_CLR}" "WIFI_UP" BUSY "Net-(A1-RUN)" ERROR "unconnected-(A1-GPIO27_ADC1-Pad32)"
+    "unconnected-(A1-AGND-Pad33)" "unconnected-(A1-GPIO28_ADC2-Pad34)" "unconnected-(A1-ADC_VREF-Pad35)" "unconnected-(A1-3V3_EN-Pad37)" "unconnected-(A1-VBUS-Pad40)" "TX_READY" "Net-(U5A-~{R})" ~{WRx40}
+    "unconnected-(U5B-~{Q}-Pad8)" "unconnected-(U9-~{Y7}-Pad7)" "unconnected-(U9-~{Y6}-Pad9)" "unconnected-(U9-~{Y5}-Pad10)" "unconnected-(U9-~{Y4}-Pad11)" "unconnected-(U9-~{Y3}-Pad12)" "unconnected-(U7-Pad11)" "unconnected-(U6-Pad11)"
+    "unconnected-(J1-Pin_1a-Pad1a)" "unconnected-(J1-Pin_7b-Pad7b)" "unconnected-(J1-Pin_11b-Pad11b)" "unconnected-(J1-Pin_12a-Pad12a)"
+    (clearance_class "kicad_default")
+    (via_rule kicad_default)
+    (rule
+      (width 250.0)
+    )
+    (circuit 
+      (use_layer F.Cu B.Cu)
+    )
+  )
+)
