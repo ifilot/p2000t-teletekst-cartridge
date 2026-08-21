@@ -3,9 +3,55 @@
 P2WP/2 is a reliable, framed request/response protocol carried by the three
 I/O ports on the P2000T Pico W interface. Multi-byte fields are little-endian.
 
+## Status and conformance
+
+This document is the normative specification for protocol version 2. The key
+words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and
+**MAY** describe conformance requirements.
+
+A conforming host implementation MUST implement the hardware handshake,
+framing, escaping, CRC validation, sequence matching, finite timeouts, and
+`HELLO`. A conforming peripheral MUST implement the same link layer, respond to
+`HELLO`, reject invalid requests with a protocol error when possible, and MUST
+NOT send an unsolicited frame. Features advertised in the `HELLO` capability
+byte are optional, but an endpoint MUST implement every feature that it
+advertises.
+
+The following terms are used throughout this specification:
+
+- **Host**: the P2000T and the only endpoint permitted to initiate requests.
+- **Peripheral**: the Pico W or Pico 2 W interface.
+- **Body**: the unescaped header, payload, and CRC between frame delimiters.
+- **Transaction**: one request and its matching response, including retries.
+- **Session**: the sequence of transactions established by a valid `HELLO`.
+
+All quantities are unsigned unless explicitly described as signed. All
+multi-byte integers use little-endian byte order.
+
+(protocol-overview)=
+## Protocol overview
+
+After either endpoint starts or resets, the host establishes a session with
+`HELLO`. It then sends one request at a time and waits for the matching
+response. Long-running Wi-Fi and Internet operations are started by one
+transaction and observed through separate status transactions. This keeps the
+local link responsive and bounds every request/response exchange.
+
+(hardware-transport)=
 ## Hardware transport
 
 The P2000T is the host and the Pico W is the peripheral.
+
+For a circuit-level explanation of the address decoder, data buffers, and
+handshake flip-flops, see {doc}`hardware`.
+
+```{figure} images/hardware-transport.svg
+:alt: Block diagram of the bidirectional byte lanes and handshake signals between the P2000T, cartridge logic, and Pico W
+:width: 100%
+
+The cartridge provides one eight-bit data lane in each direction. Handshake
+signals ensure that neither endpoint overwrites an unread byte.
+```
 
 | Port | P2000T operation | Name | Purpose |
 | --- | --- | --- | --- |
@@ -38,7 +84,7 @@ advisory or diagnostic.
 4. The Pico samples GPIO0 through GPIO7.
 5. The Pico drives `TX_CLR` low until `TX_FULL` clears, then releases it high.
 
-The host must never write while `TX_READY` is zero, because doing so overwrites
+The host MUST NOT write while `TX_READY` is zero, because doing so overwrites
 the byte latch.
 
 ### Pico to host byte transfer
@@ -51,13 +97,13 @@ the byte latch.
 6. The Pico first clears `RX_READY`, then drives `RX_ACK_CLR` low until
    `RX_ACK_PENDING` clears, and finally releases `RX_ACK_CLR` high.
 
-Both endpoints must use a finite timeout for every wait. A transport timeout
+Both endpoints MUST use a finite timeout for every wait. A transport timeout
 aborts the partial frame and causes transaction recovery.
 
 ## Framing
 
 `0x7E` is the frame delimiter. A frame consists of a delimiter, an escaped
-body, and a closing delimiter. A closing delimiter may also serve as the
+body, and a closing delimiter. A closing delimiter MAY also serve as the
 opening delimiter for the next frame. Repeated delimiters are idle fill.
 
 Within the body, bytes `0x7E` and `0x7D` are encoded as `0x7D` followed by the
@@ -75,8 +121,14 @@ The unescaped body is:
 | 6 | N | Payload |
 | 6+N | 2 | CRC-16, low byte first |
 
-The initial maximum payload is 512 bytes. Implementations may advertise a
-smaller limit during `HELLO`, but must reject a frame rather than truncate it.
+The protocol maximum payload is 512 bytes. Implementations MAY advertise a
+smaller receive limit during `HELLO`. An endpoint MUST NOT send a payload larger
+than the negotiated limit; a receiver MUST reject an oversized frame rather
+than truncate it.
+
+The Teletekst application profile uses fixed 240-byte row responses. A host
+that intends to advertise or use the Internet-fetch capability MUST therefore
+advertise a receive limit of at least 240 bytes.
 
 ### Flags
 
@@ -85,7 +137,12 @@ smaller limit during `HELLO`, but must reject a frame rather than truncate it.
 | 0 | `RESPONSE` | Frame is a response |
 | 1 | `ERROR` | Response payload starts with an error code |
 | 2 | `MORE` | Additional chunks belong to this transaction |
-| 3-7 | reserved | Must be sent as zero and ignored on receipt |
+| 3-7 | reserved | Sent as zero and ignored on receipt |
+
+A request MUST clear `RESPONSE` and `ERROR`. A successful response MUST set
+`RESPONSE` and clear `ERROR`. An error response MUST set both bits and contain
+at least the one-byte error code. Reserved bits MUST be sent as zero and MUST
+be ignored on receipt.
 
 ### CRC
 
@@ -99,33 +156,52 @@ P2WP/2 uses CRC-16/CCITT-FALSE:
 - input and output are not reflected
 - final XOR: `0x0000`
 
-A receiver silently discards malformed, oversized, truncated, or CRC-invalid
-frames. It may set its local error indication and statistics counter.
+The standard ASCII check value is `CRC("123456789") = 0x29B1`. A version-2
+`HELLO` request with sequence zero and a 240-byte host limit has the following
+wire representation. Its unescaped body CRC is `0xD9B2`, transmitted low byte
+first. None of the body bytes require escaping in this example.
+
+```text
+7e 02 00 01 00 08 00 50 32 57 50 02 02 f0 00 b2 d9 7e
+```
+
+A receiver MUST silently discard malformed, oversized, truncated, or
+CRC-invalid frames because their header cannot be trusted. It MAY set its local
+error indication and statistics counter.
 
 ## Transactions and recovery
 
-The P2000T is the only request initiator in P2WP/2. The Pico sends a frame only
-in response to a valid request. This avoids unsolicited traffic and lets future
-web events be retrieved with polling requests.
+The P2000T is the only request initiator in P2WP/2. The Pico MUST send a frame
+only in response to a valid request. This avoids unsolicited traffic and lets
+future web events be retrieved with polling requests.
 
+- The host MUST have no more than one transaction in flight.
 - A new request uses the next sequence number modulo 256.
-- A response uses the request's type and sequence number and sets `RESPONSE`.
+- A response MUST use the request's type and sequence number and set `RESPONSE`.
 - An empty successful response is the acknowledgement for a command with no
   result data.
 - On timeout, the host retries the identical request with the identical
   sequence number. Three attempts are recommended.
-- The Pico caches the most recent request identity and complete response. An
-  identical retry resends that response without repeating side effects.
-- Reuse of the most recent sequence number for different request content is a
-  protocol error.
+- The peripheral MUST cache the most recent successfully processed request
+  identity and complete response. An identical retry resends that response
+  without repeating side effects. Error responses for rejected requests MAY be
+  sent without caching because they perform no side effects.
+- Reuse of the most recent sequence number for different request content MUST
+  produce `SEQUENCE_CONFLICT`.
 - After all retries fail, the host abandons the partial frame and starts again
   with `HELLO`.
 - A valid non-duplicate `HELLO` starts a session and invalidates older cached
   transaction state.
 
+The host accepts a response only when its protocol version, type, sequence,
+payload length, flags, and CRC are valid for the outstanding request. It MUST
+discard all other frames and retry or re-establish the session. The host MUST
+increment its sequence number only after accepting a complete response.
+
 An inter-byte timeout resets only the frame parser. Transaction timeouts are
-message-specific; the MWE uses a short local-link timeout, while future network
-operations may use longer timeouts or chunked progress responses.
+message-specific; the reference implementation uses a short local-link
+timeout, while network operations MAY use longer timeouts or chunked progress
+responses.
 
 ## Version 2 messages
 
@@ -147,6 +223,10 @@ operations may use longer timeouts or chunked progress responses.
 | `0x31` | `TELETEKST_FETCH_STATUS` | Empty | Fetch state, error, byte count, and next subpage |
 | `0x32` | `TELETEKST_FETCH_ROWS` | Chunk index | Six display-ready rows |
 
+`LINK_STATS` reserves its message number for a future statistics format. A
+host MUST NOT depend on this message until a payload format is specified. A
+version-2 peripheral MAY respond with `UNKNOWN_TYPE`.
+
 The eight-byte `HELLO` request is:
 
 | Offset | Field |
@@ -165,25 +245,42 @@ The eight-byte `HELLO` response is:
 | 5 | Capability bits (`bit 0`: `ECHO`, `bit 1`: Wi-Fi provisioning, `bit 2`: Internet fetch, `bit 3`: encrypted Wi-Fi profile) |
 | 6-7 | Negotiated maximum payload |
 
-`HELLO` is independent of Wi-Fi state and must work while `WIFI_UP` is zero.
+The capability byte is defined as follows:
+
+| Bit | Name | Meaning |
+| ---: | --- | --- |
+| 0 | `ECHO` | `ECHO` request support |
+| 1 | `WIFI` | Wi-Fi scan, connect, and status support |
+| 2 | `INTERNET` | Teletekst Internet-fetch support |
+| 3 | `WIFI_PROFILE` | Encrypted Wi-Fi profile support |
+| 4-7 | reserved | Sent as zero and ignored on receipt |
+
+The selected version MUST fall within the host's advertised range. The
+negotiated maximum payload is the smaller of the host and peripheral limits and
+MUST be non-zero. Reserved capability bits MUST be sent as zero and ignored on
+receipt.
+
+`HELLO` is independent of Wi-Fi state and MUST work while `WIFI_UP` is zero.
 
 If the `ERROR` flag is set, the first payload byte is one of:
 
-| Code | Meaning |
-| ---: | --- |
-| `0x01` | Unsupported version |
-| `0x02` | Unknown message type |
-| `0x03` | Invalid payload |
-| `0x04` | Sequence conflict |
-| `0x05` | Internal error |
-| `0x06` | Wi-Fi hardware or driver unavailable |
-| `0x07` | Wi-Fi operation already in progress |
+| Code | Name | Meaning |
+| ---: | --- | --- |
+| `0x01` | `UNSUPPORTED_VERSION` | Unsupported version |
+| `0x02` | `UNKNOWN_TYPE` | Unknown message type |
+| `0x03` | `INVALID_PAYLOAD` | Invalid payload |
+| `0x04` | `SEQUENCE_CONFLICT` | Sequence conflict |
+| `0x05` | `INTERNAL` | Internal error |
+| `0x06` | `WIFI_UNAVAILABLE` | Wi-Fi hardware or driver unavailable |
+| `0x07` | `WIFI_BUSY` | Wi-Fi operation already in progress |
+
+Unknown error codes MUST be treated as an unspecified transaction failure.
 
 ## Wi-Fi provisioning
 
 Scanning and connecting are asynchronous so the Pico can acknowledge every
 link transaction quickly. The host starts an operation and polls its status;
-it must not hold a P2WP transaction open for the duration of a radio scan,
+it MUST NOT hold a P2WP transaction open for the duration of a radio scan,
 authentication exchange, or DHCP request.
 
 `WIFI_SCAN_STATUS` returns three bytes:
@@ -218,14 +315,14 @@ A `WIFI_CONNECT` request contains:
 | 1 | Password length, 0-63 |
 | 2 | Password bytes, not zero-terminated |
 
-The password must be empty for an open network and 8-63 bytes for a secured
+The password MUST be empty for an open network and 8-63 bytes for a secured
 network. `WIFI_STATUS` returns one state byte: `0` disconnected, `1`
 connecting, `2` connected with an IP address, `3` SSID not found, `4`
 authentication failed, or `5` connection failed/timed out.
 
 ## Encrypted Wi-Fi profile
 
-The Pico may store one optional Wi-Fi profile. Profile operations are
+The Pico MAY store one optional Wi-Fi profile. Profile operations are
 asynchronous because authenticated decryption and flash updates can take longer
 than one link transaction. The host starts an operation and polls
 `WIFI_PROFILE_STATUS`, which returns:
@@ -264,9 +361,8 @@ who can dump and analyse the complete device flash.
 
 Teletekst retrieval is asynchronous. Source `0` uses the public JSON endpoint
 at `teletekst-data.nos.nl` over verified HTTPS; source `1` uses the compatible
-P2000T Teletekst endpoint at `teletekst.philips-p2000t.nl` over verified
-HTTPS. A
-`TELETEKST_FETCH_START` request contains:
+P2000T Teletekst endpoint at `teletekst.philips-p2000t.nl` over verified HTTPS.
+A `TELETEKST_FETCH_START` request contains:
 
 | Offset | Field |
 | ---: | --- |
@@ -279,7 +375,7 @@ HTTPS. A
 | Offset | Field |
 | ---: | --- |
 | 0 | State: `0` idle, `1` connecting/requesting, `2` receiving, `3` complete, `4` failed |
-| 1 | Error: `0` none, `1` not connected, `2` TLS setup, `3` request start, `4` network, `5` HTTP status, `6` response too large, `7` invalid data |
+| 1 | Error: `0` none, `1` not connected, `2` TLS setup, `3` request start, `4` network, `5` HTTP status, `6` response too large, `7` invalid data, `8` page not found |
 | 2-3 | HTTP response bytes received so far, little-endian |
 | 4 | Next subpage number, or zero when the API supplies none |
 
@@ -287,7 +383,7 @@ After state `3`, request chunk indexes `0` through `3` from
 `TELETEKST_FETCH_ROWS`. Each successful response is exactly 240 bytes: six
 consecutive 40-column rows ready to copy to the SAA5050-backed display. Together
 the chunks provide the P2000T's 24 visible rows. Compatible source documents
-may have 25 rows; row 25 contains Fastext prompts and is intentionally omitted.
+MAY have 25 rows; row 25 contains Fastext prompts and is intentionally omitted.
 
 The Pico translates HTML colour classes and Unicode private-use mosaic glyphs
 into native SAA5050 bytes. Because foreground and graphics controls occupy a
@@ -296,3 +392,25 @@ positions against the desired visual cells rather than inserting bytes and
 shifting text. Background controls and inverse video are considered as
 additional ways to reproduce the requested colours. A new successful fetch
 replaces the cached screen and subpage metadata.
+
+## Implementation requirements
+
+Before an implementation is considered conforming, verify that it:
+
+- uses only `RX_READY` and `TX_READY` for the mandatory byte handshake;
+- applies a finite timeout to every byte and transaction wait;
+- escapes only `0x7D` and `0x7E`, and calculates CRC over unescaped bytes;
+- validates the complete frame before acting on its payload;
+- permits only one outstanding host request;
+- retries with byte-for-byte identical request content and sequence numbers;
+- increments the sequence only after accepting a matching response;
+- starts or re-establishes every session with `HELLO`;
+- respects the negotiated payload limit and advertised capability bits;
+- treats all Wi-Fi and Internet operations as asynchronous; and
+- does not expose saved credentials through the host protocol.
+
+## Client examples
+
+- {doc}`basic` implements a portable link diagnostic in P2000T BASIC.
+- {doc}`assembly` explains the production Z80 implementation and reusable
+  transport routines.

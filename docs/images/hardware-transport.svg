@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 650" role="img" aria-labelledby="title description">
+  <title id="title">P2000T to Pico W hardware transport</title>
+  <desc id="description">Block diagram of the bidirectional eight-bit data paths, I/O ports, and handshake signals between the P2000T, cartridge logic, and Pico W.</desc>
+  <defs>
+    <style>
+      text { fill: #000; font-family: Arial, Helvetica, sans-serif; }
+      .title { font-size: 28px; font-weight: 700; }
+      .heading { font-size: 21px; font-weight: 700; }
+      .label { font-size: 17px; font-weight: 700; }
+      .small { font-size: 15px; }
+      .tiny { font-size: 13px; }
+      .device { fill: #fff; stroke: #000; stroke-width: 3; }
+      .block { fill: #fff; stroke: #000; stroke-width: 2; }
+      .lane { fill: #fff; stroke: #000; stroke-width: 2; stroke-dasharray: 8 6; }
+      .signal { fill: none; stroke: #000; stroke-width: 3; }
+      .control { fill: none; stroke: #000; stroke-width: 2; }
+      .tip { fill: #000; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="650" fill="#fff"/>
+  <text x="600" y="42" text-anchor="middle" class="title">P2WP/2 hardware transport</text>
+
+  <rect x="30" y="75" width="230" height="535" rx="10" class="device"/>
+  <text x="145" y="112" text-anchor="middle" class="heading">P2000T</text>
+  <text x="145" y="136" text-anchor="middle" class="small">host</text>
+
+  <rect x="940" y="75" width="230" height="535" rx="10" class="device"/>
+  <text x="1055" y="112" text-anchor="middle" class="heading">Pico W</text>
+  <text x="1055" y="136" text-anchor="middle" class="small">peripheral</text>
+
+  <text x="600" y="112" text-anchor="middle" class="heading">Cartridge logic</text>
+
+  <!-- Host-to-Pico lane -->
+  <rect x="285" y="155" width="630" height="178" rx="8" class="lane"/>
+  <text x="305" y="181" class="label">Host to Pico</text>
+
+  <rect x="65" y="202" width="160" height="62" rx="5" class="block"/>
+  <text x="145" y="228" text-anchor="middle" class="label">HOST_TX</text>
+  <text x="145" y="250" text-anchor="middle" class="small">OUT 0x40</text>
+
+  <rect x="430" y="202" width="340" height="62" rx="5" class="block"/>
+  <text x="600" y="228" text-anchor="middle" class="label">8-bit input latch</text>
+  <text x="600" y="250" text-anchor="middle" class="small">one pending byte</text>
+
+  <rect x="975" y="202" width="160" height="62" rx="5" class="block"/>
+  <text x="1055" y="228" text-anchor="middle" class="label">GPIO0–7</text>
+  <text x="1055" y="250" text-anchor="middle" class="small">sample byte</text>
+
+  <path d="M225 233 H430" class="signal"/>
+  <polygon points="430,233 416,225 416,241" class="tip"/>
+  <path d="M770 233 H975" class="signal"/>
+  <polygon points="975,233 961,225 961,241" class="tip"/>
+  <text x="327" y="220" text-anchor="middle" class="tiny">write byte</text>
+  <text x="873" y="220" text-anchor="middle" class="tiny">8-bit data</text>
+
+  <path d="M770 286 H955" class="control"/>
+  <polygon points="955,286 943,279 943,293" class="tip"/>
+  <text x="862" y="280" text-anchor="middle" class="small">TX_FULL</text>
+  <path d="M955 312 H770" class="control"/>
+  <polygon points="770,312 782,305 782,319" class="tip"/>
+  <text x="862" y="307" text-anchor="middle" class="small">/TX_CLR</text>
+
+  <!-- Pico-to-host lane -->
+  <rect x="285" y="354" width="630" height="178" rx="8" class="lane"/>
+  <text x="895" y="380" text-anchor="end" class="label">Pico to Host</text>
+
+  <rect x="65" y="401" width="160" height="62" rx="5" class="block"/>
+  <text x="145" y="427" text-anchor="middle" class="label">HOST_RX</text>
+  <text x="145" y="449" text-anchor="middle" class="small">IN 0x41</text>
+
+  <rect x="430" y="401" width="340" height="62" rx="5" class="block"/>
+  <text x="600" y="427" text-anchor="middle" class="label">8-bit output latch</text>
+  <text x="600" y="449" text-anchor="middle" class="small">one pending byte</text>
+
+  <rect x="975" y="401" width="160" height="62" rx="5" class="block"/>
+  <text x="1055" y="427" text-anchor="middle" class="label">GPIO8–15</text>
+  <text x="1055" y="449" text-anchor="middle" class="small">drive byte</text>
+
+  <path d="M975 432 H770" class="signal"/>
+  <polygon points="770,432 784,424 784,440" class="tip"/>
+  <path d="M430 432 H225" class="signal"/>
+  <polygon points="225,432 239,424 239,440" class="tip"/>
+  <text x="873" y="419" text-anchor="middle" class="tiny">8-bit data</text>
+  <text x="327" y="419" text-anchor="middle" class="tiny">read byte</text>
+
+  <path d="M955 485 H770" class="control"/>
+  <polygon points="770,485 782,478 782,492" class="tip"/>
+  <text x="862" y="479" text-anchor="middle" class="small">RX_READY</text>
+  <path d="M770 511 H955" class="control"/>
+  <polygon points="955,511 943,504 943,518" class="tip"/>
+  <text x="862" y="506" text-anchor="middle" class="small">RX_ACK_PENDING</text>
+  <path d="M955 537 H770" class="control"/>
+  <polygon points="770,537 782,530 782,544" class="tip"/>
+  <text x="862" y="558" text-anchor="middle" class="small">/RX_ACK_CLR</text>
+
+  <!-- Status path -->
+  <rect x="65" y="520" width="160" height="62" rx="5" class="block"/>
+  <text x="145" y="546" text-anchor="middle" class="label">STATUS</text>
+  <text x="145" y="568" text-anchor="middle" class="small">IN 0x42</text>
+  <path d="M430 570 H225" class="signal"/>
+  <polygon points="225,570 239,562 239,578" class="tip"/>
+  <text x="328" y="590" text-anchor="middle" class="tiny">RX_READY · TX_READY · state bits</text>
+
+  <text x="600" y="629" text-anchor="middle" class="small">Solid arrows show signal direction; each data latch holds exactly one byte.</text>
+</svg>

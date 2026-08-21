@@ -18,7 +18,8 @@ Teletekst project:
 
 - `src/` is the 16 KiB slot-1 cartridge client.
 - `firmware/` is the Raspberry Pi Pico W firmware for the slot-2 interface.
-- `PROTOCOL.md` defines the P2WP/2 link protocol between them.
+- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2 link protocol
+  between them.
 - `pcb/` contains the KiCad hardware design and manufacturing files.
 - `enclosure/` contains the enclosure and label models.
 
@@ -43,6 +44,26 @@ Download the latest release artifacts:
     <img src="pcb/p2000t-pico-web-interface.svg" alt="P2000T Teletekst cartridge circuit schematic" width="100%">
   </a>
 </p>
+
+## Documentation
+
+[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2 interface
+specification. The Sphinx documentation adds implementation guides for
+[P2000T BASIC](docs/basic.rst) and
+[Z80 assembly](docs/assembly.rst).
+
+Pushes to `master` publish the rendered documentation to
+[GitHub Pages](https://ifilot.github.io/p2000t-teletekst-cartridge/). Manual
+deployment is also available from the GitHub Actions page. Before the first
+deployment, select **GitHub Actions** as the publishing source under
+**Settings → Pages**.
+
+Build the HTML documentation with:
+
+```sh
+python3 -m pip install -r docs/requirements.txt
+make -C docs html
+```
 
 ## Compilation
 

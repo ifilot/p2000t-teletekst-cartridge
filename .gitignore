@@ -12,6 +12,9 @@ compile_commands.json
 # Native protocol-test executable
 firmware/tests/p2wp-test
 
+# Sphinx documentation output
+docs/_build/
+
 # Python/Django server state
 __pycache__/
 *.py[cod]
