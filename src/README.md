@@ -9,7 +9,7 @@ The checked-in `p2wp-cartridge.bin` is the ROM image to program. Rebuild it with
 The build signs the image with the P2000T additive 16-bit cartridge checksum.
 Use `make -C src verify` to validate it. This is an integrity checksum, not a
 cryptographic signature.
-The cartridge release version is `v0.1.0`.
+The cartridge release version is `v0.2.0`.
 
 At runtime it negotiates P2WP/2 with `HELLO`, requests a wireless scan, and
 polls while the Pico W performs it asynchronously. Up to nine unique SSIDs are
@@ -25,7 +25,7 @@ Startup presents a native SAA5050 `P2000T TELETEKST` composition inspired by
 the blue, white, and black NOS page 100 masthead, and waits for any key before
 continuing to Wi-Fi setup. Its first row is blank, its title is a full
 white-on-blue bar without a page number, and its footer identifies cartridge
-version 1.0 and P2WP/2. The scan, network list, connection state, prompts,
+version 2.0 and P2WP/2. The scan, network list, connection state, prompts,
 and errors reserve the first screen row, use full white-on-blue menu headers,
 and retain blue separator/action bands and white content panels with blue text.
 Network numbers use explicit white-on-blue tiles.
@@ -69,6 +69,12 @@ with the blue-and-white P2000T masthead above a centered red panel containing
 the missing page number and a prompt to type a new three-digit page number.
 Other HTTP, network, and protocol failures retain their diagnostic error screen
 and code.
+
+The P2000T service may additionally return `binaryDisplay`, a base64 encoding
+of the exact 960 SAA5050 display-memory bytes. Firmware prefers this field so
+double height, flash, conceal, separated graphics and hold graphics are
+preserved byte-for-byte. NOS responses and ordinary custom pages continue to
+use the compatible `content` decoder as a fallback.
 
 Fetching does not replace the screen with a loading page. A six-phase SAA5050
 mosaic spinner rotates one block around a 2-by-3 graphics cell in the upper-left

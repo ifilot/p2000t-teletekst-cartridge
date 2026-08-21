@@ -4,6 +4,15 @@
 [![Build and release](https://github.com/ifilot/p2000t-teletekst-cartridge/actions/workflows/build-and-release.yml/badge.svg?branch=master)](https://github.com/ifilot/p2000t-teletekst-cartridge/actions/workflows/build-and-release.yml)
 [![License](https://img.shields.io/github/license/ifilot/p2000t-teletekst-cartridge)](LICENSE)
 
+## Introduction
+
+The P2000T Teletekst Cartridge brings internet-connected teletext to the Philips
+P2000T. A slot-1 ROM provides the native SAA5050 user interface, while a
+Raspberry Pi Pico W or Pico 2 W interface in slot 2 manages Wi-Fi and fetches
+pages from either the NOS service or the P2000T community service. Together,
+they provide wireless network setup, optional encrypted credential storage, and
+direct three-digit page selection on the original computer.
+
 This repository contains the public hardware and client side of the P2000T
 Teletekst project:
 
@@ -13,9 +22,6 @@ Teletekst project:
 - `pcb/` contains the KiCad hardware design and manufacturing files.
 - `enclosure/` contains the enclosure and label models.
 
-The current release version of both the cartridge and Pico W firmware is
-`v0.1.0`. The P2WP wire protocol remains version `2`.
-
 ## Downloads
 
 Download the latest release artifacts:
@@ -23,6 +29,20 @@ Download the latest release artifacts:
 - [P2000T cartridge ROM (`p2wp-cartridge.bin`)](https://github.com/ifilot/p2000t-teletekst-cartridge/releases/latest/download/p2wp-cartridge.bin)
 - [Raspberry Pi Pico W firmware (`p2wp-pico-w.uf2`)](https://github.com/ifilot/p2000t-teletekst-cartridge/releases/latest/download/p2wp-pico-w.uf2)
 - [Raspberry Pi Pico 2 W firmware (`p2wp-pico-2-w.uf2`)](https://github.com/ifilot/p2000t-teletekst-cartridge/releases/latest/download/p2wp-pico-2-w.uf2)
+
+## Hardware
+
+<p align="center">
+  <img src="docs/images/p2kpico.jpg" alt="P2000T Teletekst cartridge with Raspberry Pi Pico 2 W" width="450">
+</p>
+
+### Circuit schematic
+
+<p align="center">
+  <a href="pcb/p2000t-pico-web-interface.svg">
+    <img src="pcb/p2000t-pico-web-interface.svg" alt="P2000T Teletekst cartridge circuit schematic" width="100%">
+  </a>
+</p>
 
 ## Compilation
 

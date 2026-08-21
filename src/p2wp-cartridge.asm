@@ -28,7 +28,7 @@ STATUS_TX_READY:       equ 002h
 
 P2WP_VERSION:          equ 002h
 CARTRIDGE_VERSION_MAJOR: equ 0
-CARTRIDGE_VERSION_MINOR: equ 1
+CARTRIDGE_VERSION_MINOR: equ 2
 CARTRIDGE_VERSION_PATCH: equ 0
 P2WP_FLAG_RESPONSE:    equ 001h
 P2WP_FLAG_ERROR:       equ 002h
@@ -2511,7 +2511,7 @@ opening_service_detail_text:
 opening_start_text:
         defb 007h,"       PRESS ANY KEY TO START",0
 opening_footer_text:
-        defb 004h,01dh,007h," P2000T PICO W P2WP/2 v0.1.0"
+        defb 004h,01dh,007h," P2000T PICO W P2WP/2 v0.2.0"
         defs 40-($-opening_footer_text),020h
         defb 0
 opening_p2000t_row_1:

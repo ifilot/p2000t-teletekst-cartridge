@@ -39,6 +39,12 @@ typedef struct {
     const char *end;
 } json_string_reader_t;
 
+typedef enum {
+    BINARY_DISPLAY_ABSENT,
+    BINARY_DISPLAY_VALID,
+    BINARY_DISPLAY_INVALID,
+} binary_display_result_t;
+
 typedef struct {
     uint8_t previous_state;
     uint8_t output;
@@ -156,6 +162,65 @@ static int32_t json_string_next(json_string_reader_t *reader) {
         default:
             return -2;
     }
+}
+
+static int base64_value(int32_t character) {
+    if (character >= 'A' && character <= 'Z') {
+        return character - 'A';
+    }
+    if (character >= 'a' && character <= 'z') {
+        return character - 'a' + 26;
+    }
+    if (character >= '0' && character <= '9') {
+        return character - '0' + 52;
+    }
+    if (character == '+') {
+        return 62;
+    }
+    if (character == '/') {
+        return 63;
+    }
+    return -1;
+}
+
+static binary_display_result_t parse_binary_display(
+    const char *json,
+    const char *end,
+    uint8_t screen[TELETEKST_SCREEN_SIZE]
+) {
+    const char *value = find_json_string(json, end, "binaryDisplay");
+    if (value == NULL) {
+        return BINARY_DISPLAY_ABSENT;
+    }
+
+    json_string_reader_t reader = {.position = value, .end = end};
+    uint32_t group = 0u;
+    size_t sextets = 0u;
+    size_t output = 0u;
+    while (true) {
+        const int32_t character = json_string_next(&reader);
+        if (character == -1) {
+            break;
+        }
+        const int decoded = base64_value(character);
+        if (character < 0 || decoded < 0) {
+            return BINARY_DISPLAY_INVALID;
+        }
+        group = (group << 6u) | (uint32_t)decoded;
+        if (++sextets == 4u) {
+            if (output > TELETEKST_SCREEN_SIZE - 3u) {
+                return BINARY_DISPLAY_INVALID;
+            }
+            screen[output++] = (uint8_t)(group >> 16u);
+            screen[output++] = (uint8_t)(group >> 8u);
+            screen[output++] = (uint8_t)group;
+            group = 0u;
+            sextets = 0u;
+        }
+    }
+    return sextets == 0u && output == TELETEKST_SCREEN_SIZE
+        ? BINARY_DISPLAY_VALID
+        : BINARY_DISPLAY_INVALID;
 }
 
 static bool parse_next_subpage(
@@ -743,7 +808,22 @@ bool teletekst_decode_nos_json(
             end,
             requested_page,
             &parsed_next_subpage
-        ) || !parse_content(json, end, decode_cells)) {
+        )) {
+        return false;
+    }
+    const binary_display_result_t binary_display = parse_binary_display(
+        json,
+        end,
+        screen
+    );
+    if (binary_display == BINARY_DISPLAY_INVALID) {
+        return false;
+    }
+    if (binary_display == BINARY_DISPLAY_VALID) {
+        *next_subpage = parsed_next_subpage;
+        return true;
+    }
+    if (!parse_content(json, end, decode_cells)) {
         return false;
     }
     for (size_t row = 0u; row < TELETEKST_DISPLAY_ROWS; ++row) {

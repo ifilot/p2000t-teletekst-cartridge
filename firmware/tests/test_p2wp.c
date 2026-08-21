@@ -110,6 +110,32 @@ static void append_text(
     buffer[*length] = '\0';
 }
 
+static void append_base64(
+    char *buffer,
+    size_t capacity,
+    size_t *length,
+    const uint8_t *data,
+    size_t data_length
+) {
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    assert(data_length % 3u == 0u);
+    for (size_t offset = 0u; offset < data_length; offset += 3u) {
+        const uint32_t group =
+            ((uint32_t)data[offset] << 16u) |
+            ((uint32_t)data[offset + 1u] << 8u) |
+            data[offset + 2u];
+        char encoded[5] = {
+            alphabet[(group >> 18u) & 0x3fu],
+            alphabet[(group >> 12u) & 0x3fu],
+            alphabet[(group >> 6u) & 0x3fu],
+            alphabet[group & 0x3fu],
+            '\0',
+        };
+        append_text(buffer, capacity, length, encoded);
+    }
+}
+
 static size_t build_teletekst_json(char *json, size_t capacity) {
     size_t length = 0u;
     append_text(
@@ -270,12 +296,56 @@ static void test_teletekst_conversion(void) {
     assert(row[5].glyph == 0x5du); // right arrow
 }
 
+static void test_exact_binary_display(void) {
+    FILE *file = fopen("data/engineering.bin", "rb");
+    assert(file != NULL);
+    uint8_t expected[TELETEKST_SCREEN_SIZE];
+    assert(fread(expected, 1u, sizeof(expected), file) == sizeof(expected));
+    assert(fgetc(file) == EOF);
+    assert(fclose(file) == 0);
+
+    char json[2048];
+    size_t length = 0u;
+    append_text(
+        json,
+        sizeof(json),
+        &length,
+        "{\"nextSubPage\":\"\",\"binaryDisplay\":\""
+    );
+    append_base64(json, sizeof(json), &length, expected, sizeof(expected));
+    append_text(json, sizeof(json), &length, "\",\"content\":\"ignored\"}");
+
+    uint8_t screen[TELETEKST_SCREEN_SIZE];
+    memset(screen, 0, sizeof(screen));
+    uint8_t next_subpage = 99u;
+    assert(teletekst_decode_nos_json(
+        json,
+        length,
+        888u,
+        screen,
+        &next_subpage
+    ));
+    assert(next_subpage == 0u);
+    assert(memcmp(screen, expected, sizeof(screen)) == 0);
+
+    static const char malformed[] =
+        "{\"nextSubPage\":\"\",\"binaryDisplay\":\"invalid\"}";
+    assert(!teletekst_decode_nos_json(
+        malformed,
+        sizeof(malformed) - 1u,
+        888u,
+        screen,
+        &next_subpage
+    ));
+}
+
 int main(void) {
     test_crc();
     test_round_trip();
     test_corruption();
     test_profile_save_round_trip();
     test_teletekst_conversion();
+    test_exact_binary_display();
     puts("p2wp tests passed");
     return 0;
 }
