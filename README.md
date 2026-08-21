@@ -4,6 +4,10 @@
 [![Build and release](https://github.com/ifilot/p2000t-teletekst-cartridge/actions/workflows/build-and-release.yml/badge.svg?branch=master)](https://github.com/ifilot/p2000t-teletekst-cartridge/actions/workflows/build-and-release.yml)
 [![License](https://img.shields.io/github/license/ifilot/p2000t-teletekst-cartridge)](LICENSE)
 
+<p align="center">
+  <img src="docs/images/p2000t-teletekst.jpg" alt="Philips P2000T displaying NOS Teletekst through the cartridge" width="700">
+</p>
+
 ## Introduction
 
 The P2000T Teletekst Cartridge brings internet-connected teletext to the Philips
