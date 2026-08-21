@@ -35,6 +35,68 @@ Download the latest release artifacts:
 - [Raspberry Pi Pico W firmware (`p2wp-pico-w.uf2`)](https://github.com/ifilot/p2000t-teletekst-cartridge/releases/latest/download/p2wp-pico-w.uf2)
 - [Raspberry Pi Pico 2 W firmware (`p2wp-pico-2-w.uf2`)](https://github.com/ifilot/p2000t-teletekst-cartridge/releases/latest/download/p2wp-pico-2-w.uf2)
 
+## Installing the firmware
+
+Download all required binaries from the [Downloads](#downloads) section. Turn
+the P2000T off before inserting or removing either cartridge.
+
+### Slot-1 cartridge ROM
+
+`p2wp-cartridge.bin` is a raw, signed 16 KiB ROM image for the slot-1
+Teletekst cartridge. The programming procedure depends on the ROM, EEPROM, or
+flash cartridge being used:
+
+1. Select the exact memory device fitted to the cartridge in its programmer or
+   flashing software.
+2. Load `p2wp-cartridge.bin` as a raw binary. Do not byte-swap or add a file
+   header.
+3. Erase the device first if its technology requires it, then program and
+   verify all 16,384 bytes.
+4. Disconnect the programmer and insert the cartridge into slot 1 while the
+   P2000T is powered off.
+
+If the cartridge has an integrated loader rather than a removable memory chip,
+follow that cartridge's instructions and use `p2wp-cartridge.bin` as its ROM
+image. Do not guess a memory-device setting: an incorrect programming voltage
+or pin configuration can damage the device.
+
+### Pico W or Pico 2 W
+
+> [!IMPORTANT]
+> The Pico W and Pico 2 W use different firmware images, and the module marking
+> may be hidden inside the cartridge. When the BOOTSEL drive opens in File
+> Explorer, identify the Pico by its drive name: `RPI-RP2` means Pico W and
+> `RP2350` means Pico 2 W. Do not copy a firmware file until the drive name has
+> been checked.
+
+| Installed module | BOOTSEL drive | Firmware file |
+| --- | --- | --- |
+| Raspberry Pi **Pico W** (RP2040) | `RPI-RP2` | `p2wp-pico-w.uf2` |
+| Raspberry Pi **Pico 2 W** (RP2350) | `RP2350` | `p2wp-pico-2-w.uf2` |
+
+1. Turn off the P2000T. Leave it off throughout the update.
+2. Connect a data-capable USB cable to the Pico while holding its **BOOTSEL**
+   button, then release the button when the USB drive appears.
+3. In File Explorer (or the equivalent file manager), check the BOOTSEL drive
+   name against the table above to determine which Pico variant is installed.
+4. Copy the matching `.uf2` file to that drive. The drive automatically ejects
+   and the Pico reboots when programming is complete.
+5. Unplug the USB cable, install the slot-2 cartridge if it was removed, and
+   then power on the P2000T.
+
+BOOTSEL is stored in the Pico's read-only boot ROM, so this update method
+remains available even if an earlier firmware image does not start. See the
+official [Raspberry Pi drag-and-drop instructions](https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html#your-first-binaries)
+for more detail.
+
+#### Pico W versus Pico 2 W performance
+
+Both modules provide the same cartridge features and should feel the same in
+normal use. Page loading is dominated by the shared CYW43439 wireless subsystem,
+Internet and server latency, and the same P2WP/2 cartridge transport, so the
+Pico 2 W's faster processor is not expected to provide a noticeable benefit
+here.
+
 ## Hardware
 
 <p align="center">
