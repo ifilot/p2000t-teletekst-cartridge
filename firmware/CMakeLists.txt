@@ -7,7 +7,7 @@ endif()
 set(PICO_BOARD pico_w CACHE STRING "Target board")
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
-project(p2wp_pico VERSION 0.2.0 LANGUAGES C CXX ASM)
+project(p2wp_pico VERSION 0.2.1 LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
