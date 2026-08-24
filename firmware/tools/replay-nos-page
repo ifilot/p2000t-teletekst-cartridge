@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 || ! $1 =~ ^[1-8][0-9][0-9](-[1-9][0-9]{0,2})?$ ]]; then
+    echo "usage: $0 PAGE[-SUBPAGE]" >&2
+    exit 2
+fi
+
+tool_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+page_spec=$1
+page=${page_spec%%-*}
+
+make -s -C "$tool_dir" teletekst-replay
+curl --fail --silent --show-error \
+    "https://teletekst-data.nos.nl/json/$page_spec" |
+    "$tool_dir/teletekst-replay" "$page" -

@@ -46,7 +46,6 @@ enum {
 #define WIFI_FAILURE_CONFIRM_MS 2000u
 #define WIFI_MAX_RESULTS 9u
 #define WIFI_MAX_PASSWORD 63u
-#define TELETEKST_HTTP_BODY_MAX 16384u
 #define TELETEKST_NOS_HOST "teletekst-data.nos.nl"
 #define TELETEKST_P2000T_HOST "teletekst.philips-p2000t.nl"
 #define TELETEKST_NOS_PORT 443u

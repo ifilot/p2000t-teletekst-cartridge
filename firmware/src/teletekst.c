@@ -602,25 +602,36 @@ static bool parse_content(
         }
         uint32_t codepoint = (uint32_t)character;
         if (character == '&') {
+            const json_string_reader_t after_ampersand = reader;
             char entity[TT_ENTITY_MAX + 1u];
             size_t entity_length = 0u;
+            bool terminated = false;
             while (true) {
                 character = json_string_next(&reader);
                 if (character < 0 || entity_length >= TT_ENTITY_MAX) {
-                    return false;
+                    break;
                 }
                 if (character == ';') {
+                    terminated = true;
                     break;
                 }
                 if (character > 0x7f) {
-                    return false;
+                    break;
                 }
                 entity[entity_length++] = (char)character;
             }
             entity[entity_length] = '\0';
-            codepoint = entity_codepoint(entity, entity_length);
-            if (codepoint == UINT32_MAX) {
-                return false;
+            const uint32_t entity_value = terminated
+                ? entity_codepoint(entity, entity_length)
+                : UINT32_MAX;
+            if (entity_value == UINT32_MAX) {
+                // NOS content is HTML-like and occasionally contains a bare
+                // ampersand. Browsers render it literally; do the same and
+                // leave the following input untouched.
+                reader = after_ampersand;
+                codepoint = '&';
+            } else {
+                codepoint = entity_value;
             }
         }
         if (!append_cell(cells, &row, &column, style, codepoint)) {
@@ -669,6 +680,9 @@ static bool compile_row(
         }
         const visual_cell_t *cell = &cells[column];
         const bool blank = cell->glyph == 0x20u;
+        const uint16_t control_cost = blank
+            ? 1u
+            : (cell->mode == TT_GRAPHICS ? 100u : 200u);
         for (uint8_t index = 0u; index < TT_STATE_COUNT; ++index) {
             if (costs[index] == TT_INFINITE_COST) {
                 continue;
@@ -708,12 +722,10 @@ static bool compile_row(
                     costs[index]
                 );
             }
-            if (!blank) {
-                continue;
-            }
             // Foreground/mode controls are set-after. Their own cell is a
-            // space rendered with the old background, so only place one
-            // where that background matches the source page.
+            // space rendered with the old background. Prefer source spaces,
+            // but permit sacrificing a glyph when the source changes mode
+            // without leaving a cell for an SAA5050 control code.
             if (cell->background == state.background) {
                 for (uint8_t colour = TT_RED; colour <= TT_WHITE; ++colour) {
                     display_state_t changed = state;
@@ -725,7 +737,7 @@ static bool compile_row(
                         index,
                         state_index(changed),
                         colour,
-                        (uint16_t)(costs[index] + 1u)
+                        (uint16_t)(costs[index] + control_cost)
                     );
                     changed.mode = TT_GRAPHICS;
                     relax(
@@ -734,7 +746,7 @@ static bool compile_row(
                         index,
                         state_index(changed),
                         (uint8_t)(0x10u + colour),
-                        (uint16_t)(costs[index] + 1u)
+                        (uint16_t)(costs[index] + control_cost)
                     );
                 }
             }
@@ -749,7 +761,7 @@ static bool compile_row(
                     index,
                     state_index(changed),
                     0x1cu,
-                    (uint16_t)(costs[index] + 1u)
+                    (uint16_t)(costs[index] + control_cost)
                 );
             }
             if (cell->background == state.foreground) {
@@ -761,7 +773,7 @@ static bool compile_row(
                     index,
                     state_index(changed),
                     0x1du,
-                    (uint16_t)(costs[index] + 1u)
+                    (uint16_t)(costs[index] + control_cost)
                 );
             }
         }
@@ -790,16 +802,20 @@ static bool compile_row(
     return true;
 }
 
-bool teletekst_decode_nos_json(
+teletekst_decode_result_t teletekst_decode_nos_json_diagnostic(
     const char *json,
     size_t json_length,
     uint16_t requested_page,
     uint8_t screen[TELETEKST_SCREEN_SIZE],
-    uint8_t *next_subpage
+    uint8_t *next_subpage,
+    uint8_t *failed_row
 ) {
+    if (failed_row != NULL) {
+        *failed_row = 0u;
+    }
     if (json == NULL || json_length == 0u || screen == NULL ||
         next_subpage == NULL || requested_page < 100u || requested_page > 899u) {
-        return false;
+        return TELETEKST_DECODE_INVALID_ARGUMENT;
     }
     const char *end = json + json_length;
     uint8_t parsed_next_subpage;
@@ -809,7 +825,7 @@ bool teletekst_decode_nos_json(
             requested_page,
             &parsed_next_subpage
         )) {
-        return false;
+        return TELETEKST_DECODE_INVALID_NEXT_SUBPAGE;
     }
     const binary_display_result_t binary_display = parse_binary_display(
         json,
@@ -817,23 +833,43 @@ bool teletekst_decode_nos_json(
         screen
     );
     if (binary_display == BINARY_DISPLAY_INVALID) {
-        return false;
+        return TELETEKST_DECODE_INVALID_BINARY_DISPLAY;
     }
     if (binary_display == BINARY_DISPLAY_VALID) {
         *next_subpage = parsed_next_subpage;
-        return true;
+        return TELETEKST_DECODE_OK;
     }
     if (!parse_content(json, end, decode_cells)) {
-        return false;
+        return TELETEKST_DECODE_INVALID_CONTENT;
     }
     for (size_t row = 0u; row < TELETEKST_DISPLAY_ROWS; ++row) {
         if (!compile_row(
                 decode_cells[row],
                 screen + row * TELETEKST_COLUMNS
             )) {
-            return false;
+            if (failed_row != NULL) {
+                *failed_row = (uint8_t)(row + 1u);
+            }
+            return TELETEKST_DECODE_UNREPRESENTABLE_ROW;
         }
     }
     *next_subpage = parsed_next_subpage;
-    return true;
+    return TELETEKST_DECODE_OK;
+}
+
+bool teletekst_decode_nos_json(
+    const char *json,
+    size_t json_length,
+    uint16_t requested_page,
+    uint8_t screen[TELETEKST_SCREEN_SIZE],
+    uint8_t *next_subpage
+) {
+    return teletekst_decode_nos_json_diagnostic(
+        json,
+        json_length,
+        requested_page,
+        screen,
+        next_subpage,
+        NULL
+    ) == TELETEKST_DECODE_OK;
 }

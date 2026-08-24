@@ -163,13 +163,14 @@ static size_t build_teletekst_json(char *json, size_t capacity) {
         "&#xF020;<span class=\\\"blue bg-blue \\\">&#xF020;</span>"
         "<span class=\\\"bg-blue \\\">&#xF020;&#xF03c;"
     );
-    for (unsigned column = 0u; column < 36u; ++column) {
+    for (unsigned column = 0u; column < 34u; ++column) {
         append_text(json, capacity, &length, "&#xF020;");
     }
-    append_text(json, capacity, &length, "</span>\\n");
+    // A mode switch with no blank control cell, as seen on NOS page 200.
+    append_text(json, capacity, &length, "&#xF035;X</span>\\n");
 
-    append_text(json, capacity, &length, " Belgi&euml;");
-    for (unsigned column = 0u; column < 33u; ++column) {
+    append_text(json, capacity, &length, " Belgi&euml; &");
+    for (unsigned column = 0u; column < 31u; ++column) {
         append_text(json, capacity, &length, " ");
     }
     append_text(json, capacity, &length, "\\n");
@@ -278,10 +279,13 @@ static void test_teletekst_conversion(void) {
     assert(row[3].foreground == 7u);
     assert(row[3].background == 4u);
     assert(row[3].graphics == 1u);
+    assert(row[39].glyph == 'X');
+    assert(row[39].graphics == 0u);
 
     render_saa5050_row(screen + 2u * TELETEKST_COLUMNS, row);
     assert(row[1].glyph == 'B');
     assert(row[6].glyph == 'e');
+    assert(row[8].glyph == '&');
 
     render_saa5050_row(screen + 3u * TELETEKST_COLUMNS, row);
     assert(row[1].glyph == 'X');
