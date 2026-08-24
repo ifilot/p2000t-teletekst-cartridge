@@ -8,14 +8,20 @@ and release diffs.
 
 ## [Unreleased]
 
+### Changed
+
+- Added consistent Doxygen-style contracts for all maintained C functions and
+  Doxygen-compatible docstrings for the cartridge signing helper.
+
 ## [0.2.1] - 2026-08-24
 
 ### Added
 
 - Added a native C replay utility that runs captured or live NOS responses
   through the same Teletekst decoder used by the Pico firmware.
-- Added decoder diagnostics that distinguish invalid arguments,
-  `nextSubPage`, `binaryDisplay`, content, and unrepresentable SAA5050 rows.
+- Added decoder diagnostics that distinguish invalid function arguments,
+  malformed external JSON fields (`nextSubPage` and `binaryDisplay`), malformed
+  page content, and unrepresentable SAA5050 rows.
 - Added regression coverage for bare ampersands and source rows that change
   directly between graphics and alphabetic modes.
 - Added Sphinx documentation for the hardware interface, P2WP/2 assembly use,

@@ -59,18 +59,29 @@ _Static_assert(
     "Wi-Fi profile flash offset must be sector aligned"
 );
 
+/**
+ * @brief Return the memory-mapped address of the reserved profile record.
+ *
+ * @return Read-only XIP pointer to the final flash sector.
+ */
 static const wifi_profile_record_t *wifi_profile_flash_record(void) {
     return (const wifi_profile_record_t *)(
         XIP_BASE + WIFI_PROFILE_FLASH_OFFSET
     );
 }
 
+/**
+ * @brief Check that the linked firmware does not overlap the reserved sector.
+ *
+ * @return true when the complete final sector is available for profile data.
+ */
 static bool wifi_profile_flash_region_available(void) {
     extern char __flash_binary_end;
     return (uintptr_t)&__flash_binary_end - XIP_BASE <=
         WIFI_PROFILE_FLASH_OFFSET;
 }
 
+/** @copydoc wifi_profile_present */
 bool wifi_profile_present(void) {
     return wifi_profile_flash_region_available() &&
         memcmp(
@@ -80,6 +91,12 @@ bool wifi_profile_present(void) {
         ) == 0;
 }
 
+/**
+ * @brief Fill a buffer using the Pico SDK hardware random-number generator.
+ *
+ * @param[out] destination Buffer to fill.
+ * @param length Number of random bytes required.
+ */
 static void wifi_profile_random_bytes(uint8_t *destination, size_t length) {
     while (length != 0u) {
         const uint64_t random = get_rand_64();
@@ -90,9 +107,16 @@ static void wifi_profile_random_bytes(uint8_t *destination, size_t length) {
     }
 }
 
-// RP2040 has no protected secret storage. This device-bound key therefore
-// prevents plaintext strings and casual cross-device copying, but it cannot
-// defend against an attacker who can read and analyse the complete flash.
+/**
+ * @brief Derive a device-bound AES key from context and the unique board ID.
+ *
+ * RP2040 has no protected secret storage. This key prevents plaintext strings
+ * and casual cross-device copying, but cannot defend against an attacker who
+ * can read and analyse the complete flash.
+ *
+ * @param[out] key Destination for WIFI_PROFILE_KEY_SIZE derived bytes.
+ * @return Zero on success, otherwise an mbedTLS error code.
+ */
 static int wifi_profile_derive_device_key(
     uint8_t key[WIFI_PROFILE_KEY_SIZE]
 ) {
@@ -123,6 +147,16 @@ static int wifi_profile_derive_device_key(
     return result;
 }
 
+/**
+ * @brief Build AES-GCM additional authenticated data for a profile record.
+ *
+ * The unencrypted record header and unique board ID bind metadata and device
+ * identity to the ciphertext authentication tag.
+ *
+ * @param record Record whose header should be authenticated.
+ * @param[out] aad Destination sized for the header and unique ID.
+ * @return Number of bytes written to @p aad.
+ */
 static size_t wifi_profile_build_aad(
     const wifi_profile_record_t *record,
     uint8_t *aad
@@ -140,6 +174,11 @@ typedef struct {
     bool program;
 } wifi_profile_flash_operation_t;
 
+/**
+ * @brief Execute the erase/program operation while the other core is quiesced.
+ *
+ * @param argument Pointer to a wifi_profile_flash_operation_t descriptor.
+ */
 static void wifi_profile_flash_update(void *argument) {
     const wifi_profile_flash_operation_t *operation = argument;
     flash_range_erase(WIFI_PROFILE_FLASH_OFFSET, FLASH_SECTOR_SIZE);
@@ -152,6 +191,12 @@ static void wifi_profile_flash_update(void *argument) {
     }
 }
 
+/**
+ * @brief Commit an already prepared page or erase the profile sector.
+ *
+ * @param program true to program wifi_profile_flash_page after erasing.
+ * @return WIFI_PROFILE_OK or WIFI_PROFILE_STORAGE_FAILED.
+ */
 static wifi_profile_result_t wifi_profile_commit(bool program) {
     if (!wifi_profile_flash_region_available()) {
         return WIFI_PROFILE_STORAGE_FAILED;
@@ -166,6 +211,7 @@ static wifi_profile_result_t wifi_profile_commit(bool program) {
         : WIFI_PROFILE_STORAGE_FAILED;
 }
 
+/** @copydoc wifi_profile_store */
 wifi_profile_result_t wifi_profile_store(
     const uint8_t *ssid,
     size_t ssid_length,
@@ -246,6 +292,7 @@ wifi_profile_result_t wifi_profile_store(
     return commit_result;
 }
 
+/** @copydoc wifi_profile_load */
 wifi_profile_result_t wifi_profile_load(
     wifi_profile_credentials_t *credentials
 ) {
@@ -327,6 +374,7 @@ wifi_profile_result_t wifi_profile_load(
     return WIFI_PROFILE_OK;
 }
 
+/** @copydoc wifi_profile_erase */
 wifi_profile_result_t wifi_profile_erase(void) {
     return wifi_profile_commit(false);
 }

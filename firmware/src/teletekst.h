@@ -21,10 +21,20 @@ typedef enum {
     TELETEKST_DECODE_UNREPRESENTABLE_ROW,
 } teletekst_decode_result_t;
 
-// Convert a Teletekst JSON response into bytes that can be copied directly to
-// the P2000T's SAA5050-backed video RAM. Prefer the custom server's exact
-// 960-byte base64 binaryDisplay when present; otherwise compile NOS content.
-// The 25th NOS row is the Fastext prompt row and is intentionally omitted.
+/**
+ * @brief Convert a Teletekst JSON response into SAA5050 display bytes.
+ *
+ * A valid 960-byte base64 `binaryDisplay` field is preferred. Otherwise the
+ * NOS HTML-like `content` field is parsed and compiled. Source row 25 contains
+ * Fastext prompts and is intentionally omitted from the 24-row display.
+ *
+ * @param json JSON response bytes; no terminating NUL is required.
+ * @param json_length Number of response bytes in @p json.
+ * @param requested_page Page number used to validate subpage metadata.
+ * @param[out] screen Destination for exactly TELETEKST_SCREEN_SIZE bytes.
+ * @param[out] next_subpage Next subpage number, or zero when none is advertised.
+ * @return true when the response is valid and a screen was produced.
+ */
 bool teletekst_decode_nos_json(
     const char *json,
     size_t json_length,
@@ -33,8 +43,20 @@ bool teletekst_decode_nos_json(
     uint8_t *next_subpage
 );
 
-// Detailed host-side diagnostics for replay and regression tools. failed_row
-// is one-based for TELETEKST_DECODE_UNREPRESENTABLE_ROW and zero otherwise.
+/**
+ * @brief Decode a response and report the stage responsible for a failure.
+ *
+ * This is the diagnostic form used by host replay tools. It executes the same
+ * decoding path as teletekst_decode_nos_json().
+ *
+ * @param json JSON response bytes; no terminating NUL is required.
+ * @param json_length Number of response bytes in @p json.
+ * @param requested_page Page number used to validate subpage metadata.
+ * @param[out] screen Destination for exactly TELETEKST_SCREEN_SIZE bytes.
+ * @param[out] next_subpage Next subpage number when decoding succeeds.
+ * @param[out] failed_row One-based unrepresentable row, or zero for other results.
+ * @return Detailed decoder result.
+ */
 teletekst_decode_result_t teletekst_decode_nos_json_diagnostic(
     const char *json,
     size_t json_length,

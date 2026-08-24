@@ -103,6 +103,14 @@ here.
   <img src="docs/images/p2kpico.jpg" alt="P2000T Teletekst cartridge with Raspberry Pi Pico 2 W" width="450">
 </p>
 
+### Enclosure
+
+<p align="center">
+  <img src="docs/images/p2000t-teletekst-enclosure.jpg" alt="Completed P2000T Teletekst cartridge enclosure" width="640">
+</p>
+
+The printable enclosure and label models are available in [`enclosure/`](enclosure/).
+
 ### Circuit schematic
 
 <p align="center">

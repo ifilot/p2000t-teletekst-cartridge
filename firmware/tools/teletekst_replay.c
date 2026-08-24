@@ -5,6 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * @brief Convert a detailed decoder result into user-facing text.
+ *
+ * @param result Decoder result to describe.
+ * @return Static, NUL-terminated result name.
+ */
 static const char *result_name(teletekst_decode_result_t result) {
     switch (result) {
         case TELETEKST_DECODE_OK: return "ok";
@@ -20,6 +26,11 @@ static const char *result_name(teletekst_decode_result_t result) {
     return "unknown";
 }
 
+/**
+ * @brief Print command-line syntax to standard error.
+ *
+ * @param program Executable name from argv[0].
+ */
 static void usage(const char *program) {
     fprintf(
         stderr,
@@ -28,6 +39,14 @@ static void usage(const char *program) {
     );
 }
 
+/**
+ * @brief Replay a captured JSON response through the production decoder.
+ *
+ * @param argc Number of command-line arguments.
+ * @param argv Page number, optional input path, and optional screen output path.
+ * @return Zero on successful decoding, one on Pico-equivalent response errors,
+ *         or two for command-line and local I/O errors.
+ */
 int main(int argc, char **argv) {
     if (argc < 2 || argc > 4) {
         usage(argv[0]);
