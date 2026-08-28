@@ -4,12 +4,12 @@
 `0x1010`, communicates with the slot-2 Pico interface at ports `0x40` through
 `0x42`, and writes progress directly to the P2000T video RAM at `0x5000`.
 
-The checked-in `p2wp-cartridge.bin` is the ROM image to program. Rebuild it with
-`make -C src`; this requires `z80asm` 1.8 or a compatible assembler.
+`p2wp-cartridge.bin` is a generated ROM image and is not stored in Git. Build it
+with `make -C src`; this requires `z80asm` 1.8 or a compatible assembler.
 The build signs the image with the P2000T additive 16-bit cartridge checksum.
 Use `make -C src verify` to validate it. This is an integrity checksum, not a
 cryptographic signature.
-The cartridge release version is `v0.2.0`.
+The cartridge release version is `v0.3.0`.
 
 At runtime it negotiates P2WP/2 with `HELLO`, requests a wireless scan, and
 polls while the Pico W performs it asynchronously. Up to nine unique SSIDs are
@@ -25,16 +25,17 @@ Startup presents a native SAA5050 `P2000T TELETEKST` composition inspired by
 the blue, white, and black NOS page 100 masthead, and waits for any key before
 continuing to Wi-Fi setup. Its first row is blank, its title is a full
 white-on-blue bar without a page number, and its footer identifies cartridge
-version 2.0 and P2WP/2. The scan, network list, connection state, prompts,
+version 0.3.0 and P2WP/2. All cartridge UI text is Dutch. The scan, network
+list, connection state, prompts,
 and errors reserve the first screen row, use full white-on-blue menu headers,
 and retain blue separator/action bands and white content panels with blue text.
 Network numbers use explicit white-on-blue tiles.
 Authentication or association is attempted automatically up to three times.
-If all three fail, `R` starts another three-attempt batch with the same session
-password and `P` wipes it and returns to password entry.
+If all three fail, `O` (opnieuw) starts another three-attempt batch with the
+same session password and `W` wipes it and returns to password entry.
 
 After a manual connection succeeds, the cartridge offers to remember or
-replace one Wi-Fi profile with a single `Y` confirmation. On later startups the
+replace one Wi-Fi profile with a single `J` (ja) confirmation. On later startups the
 saved profile connects automatically without another password. If it is damaged
 or cannot connect, the cartridge offers retry, new network, and delete choices.
 
@@ -45,10 +46,10 @@ reported so far, and a third distinguishes radio initialization from an active
 scan or initialization failure. This separates a live P2000T-to-Pico link from
 actual CYW43 progress.
 
-Initial `HELLO` negotiation waits continuously so the P2000T and Pico W may be
-reset or reflashed independently. The Pico firmware services this local
-mailbox on core 1 while core 0 initializes the radio. Once the session is
-established, ordinary commands retain finite three-attempt failure handling.
+Initial `HELLO` negotiation and every later local-link transaction have a
+two-second overall timeout. A missing or unresponsive Pico W therefore shows a
+clear error instead of leaving the cartridge waiting indefinitely. Each
+transaction still makes up to three attempts within that deadline.
 
 The cartridge then starts an asynchronous connection and polls until the Pico
 has either acquired an IP address or reported a specific failure. Open networks
@@ -64,17 +65,32 @@ A newly entered page always starts at its default first subpage.
 Pressing the dedicated P2000T `STOP` key returns to the source-selection
 screen without reconnecting Wi-Fi. After choosing a new source, the cartridge
 requests the current page from its default subpage on that server.
+The source-selection screen also lists the controls available while viewing a
+page: `W` returns to Wi-Fi scanning and network selection, `P` pauses or resumes
+automatic subpage cycling, and `S` selects a subpage. Enter either two digits,
+or one digit followed by Enter. Subpage `0`/`00` asks the API for its default
+first subpage. A manual subpage choice pauses cycling so it remains visible
+until `P` is pressed. While cycling is paused, a `P` appears in the top-right
+corner; resuming restores the header cell that it covered.
+Pressing `H` opens a cartridge-resident Teletekst-style Dutch help page. It
+explains page entry, source and Wi-Fi selection, manual and automatic subpages,
+the pause marker, and error recovery. Any key restores the exact prior display
+without fetching it again.
 If either API returns HTTP 404, the cartridge replaces the generic error view
 with the blue-and-white P2000T masthead above a centered red panel containing
 the missing page number and a prompt to type a new three-digit page number.
 Other HTTP, network, and protocol failures retain their diagnostic error screen
-and code.
+and code. Error-screen headers leave the top-right navigation cells blank.
 
 The P2000T service may additionally return `binaryDisplay`, a base64 encoding
 of the exact 960 SAA5050 display-memory bytes. Firmware prefers this field so
 double height, flash, conceal, separated graphics and hold graphics are
 preserved byte-for-byte. NOS responses and ordinary custom pages continue to
 use the compatible `content` decoder as a fallback.
+
+When page entry starts, the cartridge clears all four top-right navigation
+cells before displaying the three new digits. This removes the previous page
+number even when a provider aligns its header differently.
 
 Fetching does not replace the screen with a loading page. A six-phase SAA5050
 mosaic spinner rotates one block around a 2-by-3 graphics cell in the upper-left

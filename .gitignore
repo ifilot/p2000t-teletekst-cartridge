@@ -4,10 +4,11 @@ cmake-build-*/
 CMakeUserPresets.json
 compile_commands.json
 
-# Z80 assembler intermediates. The generated cartridge ROM is intentionally
-# kept eligible for version control as documented in src/README.md.
+# Z80 assembler intermediates and generated cartridge ROMs. Release workflows
+# build the ROM from source and publish it as an artifact instead.
 *.lst
 *.lab
+/src/*.bin
 
 # Native protocol-test executable
 firmware/tests/p2wp-test

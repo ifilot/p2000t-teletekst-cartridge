@@ -17,7 +17,8 @@ Raw byte transport
 
 The transmitter waits for status bit 1 before writing exactly once to
 ``HOST_TX``. The receiver waits for status bit 0 before reading exactly once
-from ``HOST_RX``. Both routines return with carry set after a finite timeout.
+from ``HOST_RX``. Both routines share the transaction's absolute two-second
+deadline and return with carry set when it expires.
 
 .. literalinclude:: ../src/p2wp-cartridge.asm
    :language: asm
@@ -61,7 +62,8 @@ Transactions
 Application code constructs an unescaped six-byte header followed by its
 payload in ``FRAME_BUFFER``. It records the expected type and sequence, calls
 ``transact``, validates the response-specific payload, and advances the
-sequence only on success.
+sequence only on success. ``transact`` makes up to three attempts within one
+two-second deadline, including the initial ``HELLO`` exchange.
 
 The production Teletekst request demonstrates the complete asynchronous
 pattern: start the request, poll status, then retrieve four independently

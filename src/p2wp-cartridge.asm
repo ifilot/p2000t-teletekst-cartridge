@@ -28,7 +28,7 @@ STATUS_TX_READY:       equ 002h
 
 P2WP_VERSION:          equ 002h
 CARTRIDGE_VERSION_MAJOR: equ 0
-CARTRIDGE_VERSION_MINOR: equ 2
+CARTRIDGE_VERSION_MINOR: equ 3
 CARTRIDGE_VERSION_PATCH: equ 0
 P2WP_FLAG_RESPONSE:    equ 001h
 P2WP_FLAG_ERROR:       equ 002h
@@ -85,6 +85,7 @@ TELETEKST_ERROR_PAGE_NOT_FOUND: equ 8
 TELETEKST_CHUNK_COUNT: equ 4
 TELETEKST_CHUNK_SIZE:  equ 240
 TELETEKST_ROTATE_TICKS: equ 500
+LINK_TIMEOUT_TICKS:    equ 100 ; 100 monitor ticks at 20 ms = 2 seconds
 TELETEKST_SOURCE_NOS:   equ 0
 TELETEKST_SOURCE_P2000T: equ 1
 WIFI_SECURITY_OPEN:    equ 0
@@ -118,10 +119,10 @@ start:
         ld (expected_sequence),a
 hello_retry:
         call transact
-        ; Pico W radio initialization loads CYW43 firmware before the request
-        ; loop starts and can outlast three local-link attempts. Session setup
-        ; therefore waits for the Pico instead of treating startup as fatal.
-        jr c,hello_retry
+        ; A missing or unresponsive Pico must not leave the cartridge waiting
+        ; forever. transact bounds the complete three-attempt exchange to two
+        ; seconds using the monitor's interrupt-driven 20 ms clock.
+        jr c,hello_failed
         call validate_hello
         jr c,hello_failed
 
@@ -235,6 +236,10 @@ echo_header_end:
 ; request. Returns carry after three failed attempts.
 
 transact:
+        ld hl,(MONITOR_CLOCK)
+        ld de,LINK_TIMEOUT_TICKS
+        add hl,de
+        ld (link_timeout_deadline),hl
         ld a,3
         ld (attempts_left),a
 transact_attempt:
@@ -333,13 +338,13 @@ send_byte:
         push af
         ld bc,0
 send_byte_wait:
+        call link_timeout_expired
+        jr z,send_byte_timeout
         in a,(STATUS_PORT)
         and STATUS_TX_READY
         jr nz,send_byte_ready
-        dec bc
-        ld a,b
-        or c
-        jr nz,send_byte_wait
+        jr send_byte_wait
+send_byte_timeout:
         pop af
         pop hl
         pop de
@@ -435,13 +440,13 @@ receive_byte:
         push hl
         ld bc,0
 receive_byte_wait:
+        call link_timeout_expired
+        jr z,receive_byte_timeout
         in a,(STATUS_PORT)
         and STATUS_RX_READY
         jr nz,receive_byte_ready
-        dec bc
-        ld a,b
-        or c
-        jr nz,receive_byte_wait
+        jr receive_byte_wait
+receive_byte_timeout:
         pop hl
         pop de
         pop bc
@@ -453,6 +458,21 @@ receive_byte_ready:
         pop de
         pop bc
         or a                    ; clear carry
+        ret
+
+; Return Z once the transaction's absolute deadline has been reached. The
+; signed subtraction remains wrap-safe because the deadline is only 100 ticks
+; ahead (well below half of the monitor clock's 16-bit range).
+link_timeout_expired:
+        push de
+        push hl
+        ld hl,(MONITOR_CLOCK)
+        ld de,(link_timeout_deadline)
+        or a
+        sbc hl,de
+        bit 7,h
+        pop hl
+        pop de
         ret
 
 validate_received_frame:
@@ -695,18 +715,19 @@ wifi_profile_show_failure:
         call write_string
 wifi_profile_failure_key:
         call read_key
-        cp 'R'
+        cp 'O'
         jp z,wifi_profile_connect
-        cp 'r'
+        cp 'o'
         jp z,wifi_profile_connect
         cp 'N'
         jp z,wifi_setup
         cp 'n'
         jp z,wifi_setup
-        cp 'D'
+        cp 'V'
         jp z,wifi_profile_delete
-        cp 'd'
-        jr nz,wifi_profile_failure_key
+        cp 'v'
+        jp z,wifi_profile_delete
+        jr wifi_profile_failure_key
 
 wifi_profile_connect_poll:
         call poll_delay
@@ -818,7 +839,7 @@ wifi_scan_poll:
         call show_wifi_poll
         ld a,(RX_BUFFER+7)
         add a,'0'
-        ld (VIDEO_RAM+320+20),a
+        ld (VIDEO_RAM+320+24),a
         call show_wifi_phase
         call next_sequence
         ld a,(RX_BUFFER+6)
@@ -1009,7 +1030,7 @@ wifi_connect_length:
         ld a,b
         sub c
         add a,'0'
-        ld (VIDEO_RAM+1280+24),a
+        ld (VIDEO_RAM+1280+22),a
 
 wifi_connect_poll:
         call poll_delay
@@ -1049,6 +1070,7 @@ wifi_connected:
         xor a
         ld (teletekst_subpage),a
         ld (teletekst_input_count),a
+        ld (teletekst_rotation_paused),a
         call teletekst_fetch_page
         jp nc,teletekst_main_loop
         call show_teletekst_error
@@ -1077,9 +1099,9 @@ wifi_profile_save_choice:
         ret z
         cp 'n'
         ret z
-        cp 'Y'
+        cp 'J'
         jr z,wifi_profile_send_save
-        cp 'y'
+        cp 'j'
         jr nz,wifi_profile_save_choice
 
 wifi_profile_send_save:
@@ -1184,8 +1206,22 @@ teletekst_choose_source:
         ld hl,source_prompt_text
         ld de,VIDEO_RAM+720
         call write_string
+        ld hl,source_controls_text
+        ld de,VIDEO_RAM+880
+        call write_string
+        ld hl,source_controls_more_text
+        ld de,VIDEO_RAM+960
+        call write_string
 teletekst_choose_source_key:
         call read_key
+        cp 'H'
+        jp z,teletekst_show_help_from_source
+        cp 'h'
+        jp z,teletekst_show_help_from_source
+        cp 'W'
+        jp z,teletekst_change_wifi
+        cp 'w'
+        jp z,teletekst_change_wifi
         cp '1'
         jr z,teletekst_choose_source_nos
         cp '2'
@@ -1213,6 +1249,16 @@ teletekst_change_source:
         call show_teletekst_error
         jp teletekst_main_loop
 
+; W returns to network discovery without resetting the cartridge or requiring
+; the user to power-cycle the Pico. A successful connection starts again on
+; page 100 and offers to replace the saved profile when appropriate.
+teletekst_change_wifi:
+        xor a
+        ld (teletekst_rotation_enabled),a
+        ld (teletekst_input_count),a
+        call MONITOR_CLEAR_KEY
+        jp wifi_setup
+
 ; A displayed page remains interactive. Three digits select a new page without
 ; Enter, just like a television Teletekst receiver. The monitor's 20 ms clock
 ; drives subpage rotation while its interrupt-owned FIFO supplies debounced
@@ -1222,6 +1268,22 @@ teletekst_main_loop:
         jp z,teletekst_check_rotation
         cp KEY_STOP_EVENT
         jp z,teletekst_change_source
+        cp 'W'
+        jp z,teletekst_change_wifi
+        cp 'w'
+        jp z,teletekst_change_wifi
+        cp 'P'
+        jp z,teletekst_toggle_rotation
+        cp 'p'
+        jp z,teletekst_toggle_rotation
+        cp 'S'
+        jp z,teletekst_select_subpage
+        cp 's'
+        jp z,teletekst_select_subpage
+        cp 'H'
+        jp z,teletekst_show_help
+        cp 'h'
+        jp z,teletekst_show_help
         cp '0'
         jp c,teletekst_main_loop
         cp '9'+1
@@ -1230,6 +1292,10 @@ teletekst_main_loop:
         ld a,(teletekst_input_count)
         or a
         jr nz,teletekst_store_digit
+        ; Remove all four cells in the top-right navigation area before the
+        ; first new digit. This clears both the old three-digit page and any
+        ; adjacent digit left by a differently aligned provider header.
+        call teletekst_clear_header_input
         ld a,c
         cp '1'
         jr c,teletekst_main_loop
@@ -1261,6 +1327,218 @@ teletekst_store_digit:
         call show_teletekst_error
         jp teletekst_main_loop
 
+; P toggles automatic subpage cycling. Resuming starts a fresh ten-second
+; interval; pages without a reported successor remain stationary.
+teletekst_toggle_rotation:
+        ld a,(teletekst_rotation_paused)
+        xor 1
+        ld (teletekst_rotation_paused),a
+        or a
+        jr nz,teletekst_pause_rotation
+        ld a,(teletekst_pause_saved_cell)
+        ld (VIDEO_RAM+39),a
+        ld a,(teletekst_next_subpage)
+        or a
+        jp z,teletekst_main_loop
+        ld hl,(MONITOR_CLOCK)
+        ld de,TELETEKST_ROTATE_TICKS
+        add hl,de
+        ld (teletekst_rotation_deadline),hl
+        ld a,1
+        ld (teletekst_rotation_enabled),a
+        jp teletekst_main_loop
+teletekst_pause_rotation:
+        xor a
+        ld (teletekst_rotation_enabled),a
+        call teletekst_draw_pause_indicator
+        jp teletekst_main_loop
+
+; S followed by two digits selects subpage 00-99. One digit followed by Enter
+; selects subpage 0-9. Zero asks the API for its default first subpage. An
+; explicit choice also pauses automatic cycling so the selected subpage stays
+; on screen until the user presses P.
+teletekst_select_subpage:
+        xor a
+        ld (teletekst_rotation_enabled),a
+        call teletekst_clear_header_input
+        ld a,'S'
+        ld (VIDEO_RAM+36),a
+        ld a,':'
+        ld (VIDEO_RAM+37),a
+teletekst_subpage_first_digit:
+        call read_key
+        cp '0'
+        jr c,teletekst_subpage_first_digit
+        cp '9'+1
+        jr nc,teletekst_subpage_first_digit
+        ld (TELETEXT_SUBPAGE_INPUT),a
+        ld (VIDEO_RAM+38),a
+teletekst_subpage_second_digit:
+        call read_key
+        cp 00dh
+        jr z,teletekst_subpage_single_digit
+        cp '0'
+        jr c,teletekst_subpage_second_digit
+        cp '9'+1
+        jr nc,teletekst_subpage_second_digit
+        ld (TELETEXT_SUBPAGE_INPUT+1),a
+        ld (VIDEO_RAM+39),a
+
+        ; Convert the two entered digits to 0-99.
+        ld a,(TELETEXT_SUBPAGE_INPUT)
+        sub '0'
+        ld b,a
+        or a
+        jr z,teletekst_subpage_add_ones
+        xor a
+teletekst_subpage_tens_loop:
+        add a,10
+        djnz teletekst_subpage_tens_loop
+teletekst_subpage_add_ones:
+        ld b,a
+        ld a,(TELETEXT_SUBPAGE_INPUT+1)
+        sub '0'
+        add a,b
+        jr teletekst_subpage_selected
+teletekst_subpage_single_digit:
+        ld a,(TELETEXT_SUBPAGE_INPUT)
+        sub '0'
+teletekst_subpage_selected:
+        ld (teletekst_subpage),a
+        ld a,1
+        ld (teletekst_rotation_paused),a
+        call teletekst_fetch_page
+        jp nc,teletekst_main_loop
+        call show_teletekst_error
+        jp teletekst_main_loop
+
+teletekst_clear_header_input:
+        ld hl,VIDEO_RAM+36
+        ld b,4
+        ld a,020h
+teletekst_clear_header_input_loop:
+        ld (hl),a
+        inc hl
+        djnz teletekst_clear_header_input_loop
+        ret
+
+; H opens an entirely cartridge-resident help page. Preserve the exact current
+; display (without the transient pause marker), then restore it without another
+; Internet request after any key is pressed.
+teletekst_show_help:
+        xor a
+        ld (teletekst_help_return_source),a
+        ld (teletekst_rotation_enabled),a
+        ld a,(teletekst_rotation_paused)
+        or a
+        jr z,teletekst_help_save_screen
+        ld a,(teletekst_pause_saved_cell)
+        ld (VIDEO_RAM+39),a
+        jr teletekst_help_save_screen
+teletekst_show_help_from_source:
+        ld a,1
+        ld (teletekst_help_return_source),a
+teletekst_help_save_screen:
+        call teletekst_save_current_screen
+        call clear_screen
+        ld hl,help_header_text
+        ld de,VIDEO_RAM
+        call write_string
+        ld hl,opening_blue_rule_text
+        ld de,VIDEO_RAM+80
+        call write_string
+        ld hl,help_intro_text
+        ld de,VIDEO_RAM+160
+        call write_string
+        ld hl,help_page_title_text
+        ld de,VIDEO_RAM+320
+        call write_string
+        ld hl,help_page_entry_text
+        ld de,VIDEO_RAM+400
+        call write_string
+        ld hl,help_source_text
+        ld de,VIDEO_RAM+480
+        call write_string
+        ld hl,help_wifi_text
+        ld de,VIDEO_RAM+560
+        call write_string
+        ld hl,help_subpage_title_text
+        ld de,VIDEO_RAM+720
+        call write_string
+        ld hl,help_subpage_select_text
+        ld de,VIDEO_RAM+800
+        call write_string
+        ld hl,help_subpage_input_text
+        ld de,VIDEO_RAM+880
+        call write_string
+        ld hl,help_pause_text
+        ld de,VIDEO_RAM+960
+        call write_string
+        ld hl,help_pause_mark_text
+        ld de,VIDEO_RAM+1040
+        call write_string
+        ld hl,help_default_subpage_text
+        ld de,VIDEO_RAM+1120
+        call write_string
+        ld hl,help_behavior_title_text
+        ld de,VIDEO_RAM+1200
+        call write_string
+        ld hl,help_behavior_text
+        ld de,VIDEO_RAM+1280
+        call write_string
+        ld hl,help_error_text
+        ld de,VIDEO_RAM+1360
+        call write_string
+        ld hl,help_cycle_text
+        ld de,VIDEO_RAM+1440
+        call write_string
+        ld hl,opening_blue_rule_text
+        ld de,VIDEO_RAM+1600
+        call write_string
+        ld hl,help_return_text
+        ld de,VIDEO_RAM+1760
+        call write_string
+        call MONITOR_CLEAR_KEY
+        call read_key
+        call teletekst_commit_screen
+
+        ld a,(teletekst_help_return_source)
+        or a
+        jp nz,teletekst_choose_source_key
+        ld a,(teletekst_rotation_paused)
+        or a
+        jr z,teletekst_help_resume_rotation
+        call teletekst_draw_pause_indicator
+        jp teletekst_main_loop
+teletekst_help_resume_rotation:
+        ld a,(teletekst_next_subpage)
+        or a
+        jp z,teletekst_main_loop
+        ld hl,(MONITOR_CLOCK)
+        ld de,TELETEKST_ROTATE_TICKS
+        add hl,de
+        ld (teletekst_rotation_deadline),hl
+        ld a,1
+        ld (teletekst_rotation_enabled),a
+        jp teletekst_main_loop
+
+; Pack the 40 visible cells from each 80-byte P2000T row into the same buffer
+; used by the fetch staging path.
+teletekst_save_current_screen:
+        ld hl,VIDEO_RAM
+        ld de,TELETEXT_SCREEN_BUFFER
+        ld a,24
+teletekst_save_current_row:
+        push af
+        ld bc,40
+        ldir
+        ld bc,40
+        add hl,bc
+        pop af
+        dec a
+        jr nz,teletekst_save_current_row
+        ret
+
 teletekst_check_rotation:
         ld a,(teletekst_input_count)
         or a
@@ -1272,6 +1550,7 @@ teletekst_check_rotation:
         ld de,(teletekst_rotation_deadline)
         or a
         sbc hl,de
+        bit 7,h
         jp nz,teletekst_main_loop
 
         ld a,(teletekst_next_subpage)
@@ -1397,6 +1676,12 @@ teletekst_chunk_loop:
         jr nz,teletekst_chunk_loop
 
         call teletekst_commit_screen
+        ld a,(teletekst_rotation_paused)
+        or a
+        jr nz,teletekst_fetch_rotation_disabled
+        ld a,(teletekst_next_subpage)
+        or a
+        jr z,teletekst_fetch_rotation_disabled
         ld hl,(MONITOR_CLOCK)
         ld de,TELETEKST_ROTATE_TICKS
         add hl,de
@@ -1404,6 +1689,24 @@ teletekst_chunk_loop:
         ld a,1
         ld (teletekst_rotation_enabled),a
         or a
+        ret
+teletekst_fetch_rotation_disabled:
+        xor a
+        ld (teletekst_rotation_enabled),a
+        ld a,(teletekst_rotation_paused)
+        or a
+        ret z
+        call teletekst_draw_pause_indicator
+        or a
+        ret
+
+; Save the cell hidden by the pause marker so resuming can restore the exact
+; provider/error header byte rather than assuming it was a space or digit.
+teletekst_draw_pause_indicator:
+        ld a,(VIDEO_RAM+39)
+        ld (teletekst_pause_saved_cell),a
+        ld a,'P'
+        ld (VIDEO_RAM+39),a
         ret
 
 teletekst_fetch_failed:
@@ -1518,11 +1821,14 @@ show_teletekst_error:
         ld hl,teletekst_error_text
         ld de,VIDEO_RAM+320
         call write_string
-        ld de,VIDEO_RAM+320+12
+        ld de,VIDEO_RAM+320+10
         ld a,(teletekst_error_code)
         call write_hex_byte
         xor a
         ld (teletekst_rotation_enabled),a
+        ld a,(teletekst_rotation_paused)
+        or a
+        call nz,teletekst_draw_pause_indicator
         ret
 
 ; A missing page is an ordinary navigation result, not a protocol failure.
@@ -1570,7 +1876,7 @@ show_teletekst_not_found:
         ld hl,page_not_found_page_text
         ld de,VIDEO_RAM+960+2
         call write_string
-        ld de,VIDEO_RAM+960+22
+        ld de,VIDEO_RAM+960+23
         ld hl,(teletekst_page)
         call write_page_number
         ld hl,page_not_found_message_text
@@ -1593,13 +1899,16 @@ show_teletekst_not_found:
         xor a
         out (VIDEO_CONTROL_PORT),a
         ld (teletekst_rotation_enabled),a
+        ld a,(teletekst_rotation_paused)
+        or a
+        call nz,teletekst_draw_pause_indicator
         ret
 
 show_selected_page:
         ld hl,teletekst_page_text
         ld de,VIDEO_RAM+240
         call write_string
-        ld de,VIDEO_RAM+240+6
+        ld de,VIDEO_RAM+240+8
         ld hl,(teletekst_page)
         call write_page_number
         ret
@@ -1688,13 +1997,13 @@ wifi_connection_recovery:
         call write_string
 wifi_connection_recovery_key:
         call read_key
-        cp 'R'
+        cp 'O'
         jp z,wifi_begin_connect
-        cp 'r'
+        cp 'o'
         jp z,wifi_begin_connect
-        cp 'P'
+        cp 'W'
         jr z,wifi_connection_reenter
-        cp 'p'
+        cp 'w'
         jr nz,wifi_connection_recovery_key
 wifi_connection_reenter:
         ld a,(wifi_selected_index)
@@ -1900,9 +2209,9 @@ poll_delay_loop:
 ; keys from the monitor's FIFO through read_key; it does not scan the keyboard.
 read_password_visibility:
         call read_key
-        cp 'Y'
+        cp 'J'
         jr z,read_password_visible
-        cp 'y'
+        cp 'j'
         jr z,read_password_visible
         cp 'N'
         jr z,read_password_masked
@@ -1917,12 +2226,12 @@ read_password_visible:
         ld (password_visible),a
         ret
 
-; Read a WPA password. Three page-style attribute cells plus the ten-character
-; prompt leave 27 cells on the first row; characters 28-63 continue after the
+; Read a WPA password. Three page-style attribute cells plus the eleven-cell
+; prompt leave 26 cells on the first row; characters 27-63 continue after the
 ; three attributes on the next row. Display either the entered byte or a mask.
 read_password:
         ld hl,LINE_BUFFER
-        ld de,VIDEO_RAM+1120+13
+        ld de,VIDEO_RAM+1120+14
         xor a
         ld (password_length),a
 read_password_key:
@@ -1939,7 +2248,7 @@ read_password_key:
         ld a,(password_length)
         cp MAX_PASSWORD_LENGTH
         jr nc,read_password_key
-        cp 27
+        cp 26
         jr nz,read_password_store
         ld de,VIDEO_RAM+1200+3
 read_password_store:
@@ -1963,9 +2272,9 @@ read_password_backspace:
         ld a,(password_length)
         or a
         jr z,read_password_key
-        cp 27
+        cp 26
         jr nz,read_password_backspace_positioned
-        ld de,VIDEO_RAM+1120+13+27
+        ld de,VIDEO_RAM+1120+14+26
 read_password_backspace_positioned:
         dec a
         ld (password_length),a
@@ -2282,7 +2591,7 @@ show_exchange_count:
         ld hl,count_text
         ld de,VIDEO_RAM+320
         call write_string
-        ld de,VIDEO_RAM+320+11
+        ld de,VIDEO_RAM+320+14
         ld hl,(exchange_count)
         ld a,h
         call write_hex_byte
@@ -2355,135 +2664,139 @@ write_hex_digit:
         ret
 
 hello_wait_text:
-        defb 007h,"       WAITING FOR PICO W...",0
+        defb 007h,"       WACHTEN OP PICO W...",0
 hello_ok_text:
-        defb "PICO HELLO OK - TYPE A LINE",0
+        defb "PICO VERBONDEN - TYP EEN REGEL",0
 hello_fail_text:
-        defb "HELLO FAILED AFTER 3 ATTEMPTS",0
+        defb "PICO W NIET GEVONDEN OF REAGEERT NIET",0
 echo_fail_text:
-        defb "ECHO FAILED AFTER 3 ATTEMPTS",0
+        defb "ECHO MISLUKT NA 3 POGINGEN",0
 prompt_text:
-        defb "SEND> ",0
+        defb "VERSTUUR> ",0
 response_text:
         defb "PICO> ",0
 count_text:
-        defb "EXCHANGES:  ",0
+        defb "WISSELINGEN:  ",0
 wifi_title_text:
-        defb 004h,01dh,007h," P2000T  WIFI SETUP"
+        defb 004h,01dh,007h," P2000T  WIFI-INSTELLING"
         defs 40-($-wifi_title_text),020h
         defb 0
 wifi_scanning_text:
-        defb 004h,01dh,007h,"   SEARCHING FOR WIFI NETWORKS...",0
+        defb 004h,01dh,007h,"   WIFI-NETWERKEN ZOEKEN...",0
 wifi_poll_text:
-        defb 007h,01dh,004h," LINK ACTIVE - POLL 0000 |",0
+        defb 007h,01dh,004h," LINK ACTIEF - POLL 0000 |",0
 wifi_spinner_chars:
         defb '|','/','-',05dh
 wifi_seen_text:
-        defb 007h,01dh,004h," NETWORKS FOUND: 0",0
+        defb 007h,01dh,004h," NETWERKEN GEVONDEN: 0",0
 wifi_radio_starting_text:
-        defb 004h,01dh,007h,"   RADIO: INITIALIZING",0
+        defb 004h,01dh,007h,"   RADIO: STARTEN",0
 wifi_radio_ready_text:
-        defb 004h,01dh,007h,"   RADIO: READY / SCAN ACTIVE",0
+        defb 004h,01dh,007h,"   RADIO: GEREED / SCAN ACTIEF",0
 wifi_radio_failed_text:
-        defb 004h,01dh,007h,"   RADIO: INITIALIZATION FAILED",0
+        defb 004h,01dh,007h,"   RADIO: STARTEN MISLUKT",0
 wifi_list_heading:
-        defb 004h,01dh,007h,"N  SIGNAL S  NETWORK",0
+        defb 004h,01dh,007h,"N  SIGNAAL B  NETWERK",0
 wifi_select_text:
-        defb 004h,01dh,007h," SELECT NETWORK (1-9): ",0
+        defb 004h,01dh,007h," KIES NETWERK (1-9): ",0
 wifi_password_visibility_text:
-        defb 004h,01dh,007h," SHOW PASSWORD WHILE TYPING? (Y/N)",0
+        defb 004h,01dh,007h," WACHTWOORD TONEN BIJ INVOER? (J/N)",0
 wifi_password_text:
-        defb 007h,01dh,004h,"PASSWORD> ",0
+        defb 007h,01dh,004h,"WACHTWOORD>",0
 wifi_white_blank_text:
         defb 007h,01dh,004h,0
 wifi_blue_blank_text:
         defb 004h,01dh,007h,0
 wifi_password_short_text:
-        defb 004h,01dh,007h," PASSWORD MUST CONTAIN 8+ CHARACTERS",0
+        defb 004h,01dh,007h," WACHTWOORD: MINSTENS 8 TEKENS",0
 wifi_connecting_text:
-        defb 004h,01dh,007h,"CONNECTING - ATTEMPT 0/3...",0
+        defb 004h,01dh,007h,"VERBINDEN - POGING 0/3...",0
 wifi_connected_text:
-        defb 007h,01dh,004h," WIFI CONNECTED / IP ADDRESS ACQUIRED",0
+        defb 007h,01dh,004h," WIFI VERBONDEN / IP-ADRES ONTVANGEN",0
 wifi_bad_password_text:
-        defb 007h,01dh,004h," AUTH FAILED / CHECK PASSWORD",0
+        defb 007h,01dh,004h," AANMELDEN MISLUKT / FOUT WACHTWOORD",0
 wifi_retry_text:
-        defb 004h,01dh,007h," (R) RETRY  (P) RE-ENTER PASSWORD",0
+        defb 004h,01dh,007h," (O) OPNIEUW  (W) NIEUW WACHTWOORD",0
 wifi_unsupported_text:
-        defb 007h,01dh,004h," NETWORK SECURITY IS NOT SUPPORTED",0
+        defb 007h,01dh,004h," NETWERKBEVEILIGING NIET ONDERSTEUND",0
 wifi_scan_failed_text:
-        defb 007h,01dh,004h," WIRELESS SCAN FAILED",0
+        defb 007h,01dh,004h," ZOEKEN NAAR WIFI MISLUKT",0
 wifi_no_networks_text:
-        defb 007h,01dh,004h," NO WIRELESS NETWORKS FOUND",0
+        defb 007h,01dh,004h," GEEN WIFI-NETWERKEN GEVONDEN",0
 wifi_connect_failed_text:
-        defb 007h,01dh,004h," WIRELESS CONNECTION FAILED",0
+        defb 007h,01dh,004h," WIFI-VERBINDING MISLUKT",0
 wifi_protocol_failed_text:
-        defb 007h,01dh,004h," PICO WIFI PROTOCOL ERROR",0
+        defb 007h,01dh,004h," PICO WIFI-PROTOCOLFOUT",0
 wifi_profile_title_text:
-        defb 004h,01dh,007h," P2000T  SAVED WIFI PROFILE"
+        defb 004h,01dh,007h," P2000T  BEWAARD WIFI-PROFIEL"
         defs 40-($-wifi_profile_title_text),020h
         defb 0
 wifi_profile_connecting_text:
-        defb 004h,01dh,007h," CONNECTING TO SAVED NETWORK...",0
+        defb 004h,01dh,007h," VERBINDEN MET BEWAARD NETWERK...",0
 wifi_profile_automatic_text:
-        defb 007h,01dh,004h," AUTOMATIC LOGIN / NO PASSWORD NEEDED",0
+        defb 007h,01dh,004h," AUTOMATISCH / GEEN WACHTWOORD NODIG",0
 wifi_profile_corrupt_text:
-        defb 007h,01dh,004h," SAVED PROFILE IS DAMAGED",0
+        defb 007h,01dh,004h," BEWAARD PROFIEL IS BESCHADIGD",0
 wifi_profile_retry_text:
-        defb 004h,01dh,007h," (R) RETRY  (N) NEW  (D) DELETE",0
+        defb 004h,01dh,007h," (O) OPNIEUW (N) NIEUW (V) VERWIJDER",0
 wifi_profile_connect_failed_text:
-        defb 007h,01dh,004h," SAVED NETWORK CONNECTION FAILED",0
+        defb 007h,01dh,004h," BEWAARD NETWERK VERBINDEN MISLUKT",0
 wifi_profile_save_offer_text:
-        defb 007h,01dh,004h," SAVE OR REPLACE THE WIFI PROFILE?",0
+        defb 007h,01dh,004h," WIFI-PROFIEL BEWAREN OF VERVANGEN?",0
 wifi_profile_save_choice_text:
-        defb 004h,01dh,007h," (Y) REMEMBER  (N) SESSION ONLY",0
+        defb 004h,01dh,007h," (J) BEWAREN  (N) ALLEEN DEZE KEER",0
 wifi_profile_encrypting_text:
-        defb 004h,01dh,007h," SAVING WIFI PROFILE...",0
+        defb 004h,01dh,007h," WIFI-PROFIEL BEWAREN...",0
 wifi_profile_saved_text:
-        defb 007h,01dh,004h," ENCRYPTED WIFI PROFILE SAVED",0
+        defb 007h,01dh,004h," VERSLEUTELD WIFI-PROFIEL BEWAARD",0
 wifi_profile_save_failed_text:
-        defb 007h,01dh,004h," PROFILE COULD NOT BE SAVED",0
+        defb 007h,01dh,004h," PROFIEL KON NIET WORDEN BEWAARD",0
 wifi_profile_continue_text:
-        defb 004h,01dh,007h," PRESS ANY KEY TO CONTINUE",0
+        defb 004h,01dh,007h," DRUK OP EEN TOETS OM DOOR TE GAAN",0
 source_title_text:
-        defb 004h,01dh,007h," P2000T  TELETEKST PROVIDER"
+        defb 004h,01dh,007h," P2000T  TELETEKSTBRON"
         defs 40-($-source_title_text),020h
         defb 0
 source_intro_text:
-        defb 004h,01dh,007h,"        SELECT ONLINE SERVICE",0
+        defb 004h,01dh,007h,"        KIES ONLINE DIENST",0
 source_nos_text:
         defb 007h,01dh,004h," (1) NOS TELETEKST",0
 source_p2000t_text:
         defb 007h,01dh,004h," (2) P2000T TELETEKST",0
 source_prompt_text:
-        defb 004h,01dh,007h," SELECT SOURCE (1-2): ",0
+        defb 004h,01dh,007h," KIES BRON (1-2): ",0
+source_controls_text:
+        defb 007h,01dh,004h," OP PAGINA: P=PAUZE S=SUBPAGINA",0
+source_controls_more_text:
+        defb 007h,01dh,004h," W=WIFI H=HULP STOP=BRON",0
 teletekst_title_text:
         defb 004h,01dh,007h," P2000T  TELETEKST VIA PICO W"
         defs 40-($-teletekst_title_text),020h
         defb 0
 teletekst_page_text:
-        defb "PAGE: ",0
+        defb "PAGINA: ",0
 teletekst_unavailable_text:
-        defb "TELETEKST PAGE UNAVAILABLE",0
+        defb "TELETEKSTPAGINA NIET BESCHIKBAAR",0
 teletekst_error_text:
-        defb "ERROR CODE: 00",0
+        defb "FOUTCODE: 00",0
 page_not_found_header_text:
         defb 004h,01dh,007h," P2000T  TELETEKST"
-        defs 37-($-page_not_found_header_text),020h
-        defb "404",0
+        defs 40-($-page_not_found_header_text),020h
+        defb 0
 page_not_found_masthead_text:
-        defb 004h,01dh,007h,"       P2000T TELETEKST SERVICE",0
+        defb 004h,01dh,007h,"       P2000T TELETEKSTDIENST",0
 page_not_found_blank_text:
         defb 001h,01dh,007h,"                                 ",0
 page_not_found_title_text:
-        defb 001h,01dh,007h,"         PAGE NOT FOUND          ",0
+        defb 001h,01dh,007h,"       PAGINA NIET GEVONDEN     ",0
 page_not_found_page_text:
-        defb 001h,01dh,007h,"            PAGE 000             ",0
+        defb 001h,01dh,007h,"           PAGINA 000           ",0
 page_not_found_message_text:
-        defb 001h,01dh,007h,"      THIS PAGE DOES NOT EXIST   ",0
+        defb 001h,01dh,007h,"    DEZE PAGINA BESTAAT NIET    ",0
 page_not_found_prompt_text:
-        defb 001h,01dh,007h,"     TYPE A NEW PAGE NUMBER      ",0
+        defb 001h,01dh,007h,"    TYP EEN NIEUW PAGINANUMMER  ",0
 page_not_found_continue_text:
-        defb 001h,01dh,007h,"         TO CONTINUE             ",0
+        defb 001h,01dh,007h,"          OM DOOR TE GAAN       ",0
 teletekst_indicator_frames:
         defb SAA5050_GRAPHICS_WHITE,021h,SAA5050_CONTIGUOUS_GRAPHICS,SAA5050_ALPHA_WHITE ; top left
         defb SAA5050_GRAPHICS_WHITE,022h,SAA5050_CONTIGUOUS_GRAPHICS,SAA5050_ALPHA_WHITE ; top right
@@ -2503,17 +2816,57 @@ opening_blue_rule_text:
 opening_live_text:
         defb 007h,01dh,004h,"       LIVE TELETEKST VIA PICO W",0
 opening_hardware_text:
-        defb 007h,01dh,004h,"     ORIGINAL SAA5050 MOSAIC VIDEO",0
+        defb 007h,01dh,004h,"     ORIGINEEL SAA5050-MOZAIEKBEELD",0
 opening_service_text:
-        defb 004h,01dh,007h,"       P2000T INTERNET SERVICE",0
+        defb 004h,01dh,007h,"       P2000T INTERNETDIENST",0
 opening_service_detail_text:
-        defb 004h,01dh,007h,"      CLASSIC SCREEN / LIVE DATA",0
+        defb 004h,01dh,007h,"     KLASSIEK BEELD / LIVE GEGEVENS",0
 opening_start_text:
-        defb 007h,"       PRESS ANY KEY TO START",0
+        defb 007h,"       DRUK OP EEN TOETS",0
 opening_footer_text:
-        defb 004h,01dh,007h," P2000T PICO W P2WP/2 v0.2.0"
+        defb 004h,01dh,007h," P2000T PICO W P2WP/2 v0.3.0"
         defs 40-($-opening_footer_text),020h
         defb 0
+
+; Cartridge-resident Dutch help page. Each text row includes its SAA5050
+; foreground/background controls and remains within the 40-cell display width.
+help_header_text:
+        defb 004h,01dh,007h," P2000T  HULP"
+        defs 40-($-help_header_text),020h
+        defb 0
+help_intro_text:
+        defb 007h,01dh,004h,"       BEDIENING VAN DE CARTRIDGE",0
+help_page_title_text:
+        defb 004h,01dh,007h," PAGINA EN VERBINDING",0
+help_page_entry_text:
+        defb 007h,01dh,004h," 100-899  TYP DRIE CIJFERS",0
+help_source_text:
+        defb 007h,01dh,004h," STOP     KIES EEN ANDERE BRON",0
+help_wifi_text:
+        defb 007h,01dh,004h," W        KIES EEN ANDER WIFI-NETWERK",0
+help_subpage_title_text:
+        defb 004h,01dh,007h," SUBPAGINA'S",0
+help_subpage_select_text:
+        defb 007h,01dh,004h," S        KIES EEN SUBPAGINA",0
+help_subpage_input_text:
+        defb 007h,01dh,004h," 1 CIJFER + ENTER, OF TWEE CIJFERS",0
+help_pause_text:
+        defb 007h,01dh,004h," P        PAUZE / DOORGAAN",0
+help_pause_mark_text:
+        defb 007h,01dh,004h," BIJ PAUZE STAAT RECHTSBOVEN EEN P",0
+help_default_subpage_text:
+        defb 007h,01dh,004h," 0/00     KIEST DE EERSTE SUBPAGINA",0
+help_behavior_title_text:
+        defb 004h,01dh,007h," WERKING",0
+help_behavior_text:
+        defb 007h,01dh,004h," PAGINA'S WORDEN VIA PICO W GELADEN",0
+help_error_text:
+        defb 007h,01dh,004h," BIJ EEN FOUT KUN JE DIRECT DOORTYPEN",0
+help_cycle_text:
+        defb 007h,01dh,004h," ELKE 10 SECONDEN VOLGT EEN SUBPAGINA",0
+help_return_text:
+        defb 004h,01dh,007h,"     DRUK EEN TOETS OM TERUG TE GAAN",0
+
 opening_p2000t_row_1:
         defb "     ","###"," ","###"," ","###"," ","###"," ","###"," ","###",0
 opening_p2000t_row_2:
@@ -2577,6 +2930,11 @@ TELETEXT_INDICATOR_SAVED: equ 07470h
 wifi_profile_state:      equ 07474h
 wifi_profile_error:      equ 07475h
 wifi_profile_mode:       equ 07476h
+link_timeout_deadline:    equ 07477h
+teletekst_rotation_paused: equ 07479h
+TELETEXT_SUBPAGE_INPUT:   equ 0747ah
+teletekst_pause_saved_cell: equ 0747ch
+teletekst_help_return_source: equ 0747dh
 TELETEXT_SCREEN_BUFFER: equ 07500h
 
         defs 05000h-$,0ffh
