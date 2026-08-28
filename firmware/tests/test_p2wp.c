@@ -5,11 +5,17 @@
 #include <stdio.h>
 #include <string.h>
 
+/**
+ * @brief Verify CRC-16/CCITT-FALSE against its standard check vector.
+ */
 static void test_crc(void) {
     static const uint8_t input[] = "123456789";
     assert(p2wp_crc16(input, sizeof(input) - 1u) == 0x29b1u);
 }
 
+/**
+ * @brief Verify frame encoding, escaping, streaming decode, and field recovery.
+ */
 static void test_round_trip(void) {
     p2wp_frame_t source = {
         .version = P2WP_VERSION,
@@ -40,6 +46,9 @@ static void test_round_trip(void) {
     assert(memcmp(decoded.payload, source.payload, source.payload_length) == 0);
 }
 
+/**
+ * @brief Confirm that a single-byte mutation is rejected by CRC validation.
+ */
 static void test_corruption(void) {
     p2wp_frame_t source = {
         .version = P2WP_VERSION,
@@ -62,6 +71,9 @@ static void test_corruption(void) {
     assert(result == P2WP_PARSE_ERROR);
 }
 
+/**
+ * @brief Verify maximum password payloads containing both escaped byte values.
+ */
 static void test_profile_save_round_trip(void) {
     p2wp_frame_t source = {
         .version = P2WP_VERSION,
@@ -97,6 +109,14 @@ static void test_profile_save_round_trip(void) {
     assert(memcmp(decoded.payload, source.payload, source.payload_length) == 0);
 }
 
+/**
+ * @brief Append a NUL-terminated fragment to a bounded test JSON buffer.
+ *
+ * @param[in,out] buffer Destination JSON buffer.
+ * @param capacity Total capacity of @p buffer.
+ * @param[in,out] length Current and resulting text length.
+ * @param text NUL-terminated fragment to append.
+ */
 static void append_text(
     char *buffer,
     size_t capacity,
@@ -110,6 +130,15 @@ static void append_text(
     buffer[*length] = '\0';
 }
 
+/**
+ * @brief Base64-encode a multiple-of-three byte fixture into a JSON buffer.
+ *
+ * @param[in,out] buffer Destination JSON buffer.
+ * @param capacity Total capacity of @p buffer.
+ * @param[in,out] length Current and resulting text length.
+ * @param data Binary fixture bytes.
+ * @param data_length Number of bytes in @p data.
+ */
 static void append_base64(
     char *buffer,
     size_t capacity,
@@ -136,6 +165,16 @@ static void append_base64(
     }
 }
 
+/**
+ * @brief Construct a complete 25-row NOS-style response fixture.
+ *
+ * The fixture covers nested styles, entities, bare ampersands, mosaic graphics,
+ * background colours, and a mode transition without a free control-code cell.
+ *
+ * @param[out] json Destination buffer.
+ * @param capacity Capacity of @p json.
+ * @return Number of JSON bytes produced.
+ */
 static size_t build_teletekst_json(char *json, size_t capacity) {
     size_t length = 0u;
     append_text(
@@ -163,13 +202,14 @@ static size_t build_teletekst_json(char *json, size_t capacity) {
         "&#xF020;<span class=\\\"blue bg-blue \\\">&#xF020;</span>"
         "<span class=\\\"bg-blue \\\">&#xF020;&#xF03c;"
     );
-    for (unsigned column = 0u; column < 36u; ++column) {
+    for (unsigned column = 0u; column < 34u; ++column) {
         append_text(json, capacity, &length, "&#xF020;");
     }
-    append_text(json, capacity, &length, "</span>\\n");
+    // A mode switch with no blank control cell, as seen on NOS page 200.
+    append_text(json, capacity, &length, "&#xF035;X</span>\\n");
 
-    append_text(json, capacity, &length, " Belgi&euml;");
-    for (unsigned column = 0u; column < 33u; ++column) {
+    append_text(json, capacity, &length, " Belgi&euml; &");
+    for (unsigned column = 0u; column < 31u; ++column) {
         append_text(json, capacity, &length, " ");
     }
     append_text(json, capacity, &length, "\\n");
@@ -213,6 +253,12 @@ typedef struct {
     uint8_t graphics;
 } rendered_cell_t;
 
+/**
+ * @brief Interpret one compiled row into visual cells for semantic assertions.
+ *
+ * @param input Forty SAA5050 display bytes.
+ * @param[out] rendered Resulting glyph and colour state for every cell.
+ */
 static void render_saa5050_row(
     const uint8_t input[TELETEKST_COLUMNS],
     rendered_cell_t rendered[TELETEKST_COLUMNS]
@@ -251,6 +297,9 @@ static void render_saa5050_row(
     }
 }
 
+/**
+ * @brief Verify NOS content parsing and SAA5050 row compilation semantics.
+ */
 static void test_teletekst_conversion(void) {
     char json[16384];
     const size_t json_length = build_teletekst_json(json, sizeof(json));
@@ -278,10 +327,13 @@ static void test_teletekst_conversion(void) {
     assert(row[3].foreground == 7u);
     assert(row[3].background == 4u);
     assert(row[3].graphics == 1u);
+    assert(row[39].glyph == 'X');
+    assert(row[39].graphics == 0u);
 
     render_saa5050_row(screen + 2u * TELETEKST_COLUMNS, row);
     assert(row[1].glyph == 'B');
     assert(row[6].glyph == 'e');
+    assert(row[8].glyph == '&');
 
     render_saa5050_row(screen + 3u * TELETEKST_COLUMNS, row);
     assert(row[1].glyph == 'X');
@@ -296,6 +348,9 @@ static void test_teletekst_conversion(void) {
     assert(row[5].glyph == 0x5du); // right arrow
 }
 
+/**
+ * @brief Verify exact binaryDisplay preference and malformed base64 rejection.
+ */
 static void test_exact_binary_display(void) {
     FILE *file = fopen("data/engineering.bin", "rb");
     assert(file != NULL);
@@ -339,6 +394,11 @@ static void test_exact_binary_display(void) {
     ));
 }
 
+/**
+ * @brief Run all native framing and Teletekst decoder regression tests.
+ *
+ * @return Zero after all assertions pass.
+ */
 int main(void) {
     test_crc();
     test_round_trip();

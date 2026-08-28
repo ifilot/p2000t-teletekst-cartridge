@@ -15,10 +15,23 @@ ROM_SIZE = 16 * 1024
 
 
 def payload_sum(image: bytes, length: int) -> int:
+    """@brief Calculate the monitor's additive checksum over a payload.
+
+    @param image Complete cartridge image including its five-byte header.
+    @param length Number of payload bytes to include after the header.
+    @return Unsigned 16-bit payload sum.
+    """
     return sum(image[HEADER_SIZE:HEADER_SIZE + length]) & 0xFFFF
 
 
 def sign(path: Path, length: int | None) -> tuple[int, int]:
+    """@brief Atomically write a valid additive checksum header.
+
+    @param path Cartridge image to validate and update.
+    @param length Payload length override, or None for the complete image.
+    @return Tuple containing the signed payload length and checksum value.
+    @raise ValueError If the image structure or payload length is invalid.
+    """
     image = path.read_bytes()
     if len(image) != ROM_SIZE:
         raise ValueError(f"expected a {ROM_SIZE}-byte cartridge, got {len(image)} bytes")
@@ -49,6 +62,12 @@ def sign(path: Path, length: int | None) -> tuple[int, int]:
 
 
 def verify(path: Path) -> tuple[int, int]:
+    """@brief Verify the structure and additive checksum of an image.
+
+    @param path Cartridge image to read.
+    @return Tuple containing the stored payload length and checksum value.
+    @raise ValueError If the image or checksum is invalid.
+    """
     image = path.read_bytes()
     if len(image) != ROM_SIZE or image[0] != MARKER:
         raise ValueError("not a valid 16 KiB P2000T cartridge")
@@ -63,6 +82,10 @@ def verify(path: Path) -> tuple[int, int]:
 
 
 def main() -> int:
+    """@brief Run the cartridge signing or verification command.
+
+    @return Process exit status: zero on success and one on validation/I/O error.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path, help="16 KiB cartridge image")
     parser.add_argument("--verify", action="store_true", help="verify instead of signing")

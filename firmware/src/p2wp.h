@@ -85,16 +85,58 @@ typedef struct {
     uint8_t body[P2WP_MAX_BODY];
 } p2wp_parser_t;
 
+/**
+ * @brief Calculate a CRC-16/CCITT-FALSE checksum.
+ *
+ * @param data Bytes to include in the checksum.
+ * @param length Number of bytes in @p data.
+ * @return The 16-bit checksum using polynomial 0x1021 and initial value 0xffff.
+ */
 uint16_t p2wp_crc16(const uint8_t *data, size_t length);
+
+/**
+ * @brief Calculate the identity used to recognize a retransmitted request.
+ *
+ * The identity covers the decoded header and payload, independently of the
+ * escaping used by the wire representation.
+ *
+ * @param frame Decoded frame to identify.
+ * @return CRC-based identity of the frame header and payload.
+ */
 uint16_t p2wp_frame_identity(const p2wp_frame_t *frame);
 
+/**
+ * @brief Reset a streaming P2WP/2 parser.
+ *
+ * @param[out] parser Parser state to initialize.
+ */
 void p2wp_parser_init(p2wp_parser_t *parser);
+
+/**
+ * @brief Feed one encoded byte into a streaming P2WP/2 parser.
+ *
+ * A frame or error is reported only when a closing delimiter is received.
+ * Intermediate bytes return P2WP_PARSE_NONE.
+ *
+ * @param[in,out] parser Parser state retained between bytes.
+ * @param byte Next encoded wire byte.
+ * @param[out] frame Destination for a successfully decoded frame.
+ * @return Current parsing result.
+ */
 p2wp_parse_result_t p2wp_parser_feed(
     p2wp_parser_t *parser,
     uint8_t byte,
     p2wp_frame_t *frame
 );
 
+/**
+ * @brief Encode a decoded frame into its escaped P2WP/2 wire representation.
+ *
+ * @param frame Frame header and payload to encode.
+ * @param[out] output Destination for delimiters, escaped body, and CRC.
+ * @param capacity Number of bytes available in @p output.
+ * @return Encoded byte count, or zero for invalid input or insufficient space.
+ */
 size_t p2wp_encode(
     const p2wp_frame_t *frame,
     uint8_t *output,

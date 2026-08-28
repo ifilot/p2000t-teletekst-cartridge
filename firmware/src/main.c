@@ -46,7 +46,6 @@ enum {
 #define WIFI_FAILURE_CONFIRM_MS 2000u
 #define WIFI_MAX_RESULTS 9u
 #define WIFI_MAX_PASSWORD 63u
-#define TELETEKST_HTTP_BODY_MAX 16384u
 #define TELETEKST_NOS_HOST "teletekst-data.nos.nl"
 #define TELETEKST_P2000T_HOST "teletekst.philips-p2000t.nl"
 #define TELETEKST_NOS_PORT 443u
@@ -179,6 +178,11 @@ static const char *teletekst_tls_hostname;
 static altcp_allocator_t teletekst_tls_allocator;
 static httpc_connection_t teletekst_http_settings;
 
+/**
+ * @brief Publish a terminal Teletekst fetch error to the mailbox core.
+ *
+ * @param error TELETEKST_ERROR_* value describing the failure.
+ */
 static void teletekst_set_failed(uint8_t error) {
     mutex_enter_blocking(&wifi_mutex);
     teletekst_fetch_state = TELETEKST_FETCH_FAILED;
@@ -186,6 +190,13 @@ static void teletekst_set_failed(uint8_t error) {
     mutex_exit(&wifi_mutex);
 }
 
+/**
+ * @brief Allocate an lwIP TLS connection and configure hostname validation.
+ *
+ * @param arg TLS configuration supplied through the lwIP allocator interface.
+ * @param ip_type lwIP address-family selector.
+ * @return Configured connection, or NULL when allocation/setup fails.
+ */
 static struct altcp_pcb *teletekst_tls_alloc(void *arg, u8_t ip_type) {
     struct altcp_pcb *connection = altcp_tls_alloc(arg, ip_type);
     if (connection == NULL) {
@@ -200,6 +211,16 @@ static struct altcp_pcb *teletekst_tls_alloc(void *arg, u8_t ip_type) {
     return connection;
 }
 
+/**
+ * @brief Record HTTP response metadata after lwIP has parsed the headers.
+ *
+ * @param connection Active HTTP client state.
+ * @param argument Caller context; unused.
+ * @param headers Header pbuf chain; unused after lwIP validation.
+ * @param header_length Encoded header length; unused.
+ * @param content_length Declared body length, or UINT32_MAX when unknown.
+ * @return ERR_OK so lwIP continues delivering the response body.
+ */
 static err_t teletekst_headers_done(
     httpc_state_t *connection,
     void *argument,
@@ -222,6 +243,18 @@ static err_t teletekst_headers_done(
     return ERR_OK;
 }
 
+/**
+ * @brief Append one received pbuf chain to the bounded Teletekst body buffer.
+ *
+ * The callback always acknowledges and frees the pbuf. Overflow is remembered
+ * so the completion callback can return error 06 without writing out of bounds.
+ *
+ * @param argument Caller context; unused.
+ * @param connection Active TLS connection used for receive-window accounting.
+ * @param data Received pbuf chain, or NULL when no data is supplied.
+ * @param error lwIP receive status; completion handles the final result.
+ * @return ERR_OK after consuming the supplied data.
+ */
 static err_t teletekst_receive(
     void *argument,
     struct altcp_pcb *connection,
@@ -255,6 +288,15 @@ static err_t teletekst_receive(
     return ERR_OK;
 }
 
+/**
+ * @brief Finalize an asynchronous HTTP request and decode a successful body.
+ *
+ * @param argument Caller context; unused.
+ * @param result lwIP HTTP client result.
+ * @param received_length Length reported by lwIP; internal accounting is used.
+ * @param server_status HTTP status code.
+ * @param error lwIP error detail; @p result determines the public error.
+ */
 static void teletekst_request_done(
     void *argument,
     httpc_result_t result,
@@ -310,6 +352,12 @@ static void teletekst_request_done(
     mutex_exit(&wifi_mutex);
 }
 
+/**
+ * @brief Free a completed request's TLS configuration outside its callback.
+ *
+ * lwIP still owns connection objects during the result callback, so cleanup is
+ * deferred until cyw43_arch_poll() has returned.
+ */
 static void teletekst_cleanup_tls(void) {
     if (!teletekst_tls_cleanup_pending) {
         return;
@@ -321,6 +369,12 @@ static void teletekst_cleanup_tls(void) {
     }
 }
 
+/**
+ * @brief Start a Teletekst request queued by the mailbox core.
+ *
+ * This core-0 routine selects the endpoint and trust root, formats the API
+ * path, resets bounded body state, and registers asynchronous lwIP callbacks.
+ */
 static void teletekst_start_requested_fetch(void) {
     mutex_enter_blocking(&wifi_mutex);
     const bool requested = teletekst_fetch_requested;
@@ -405,6 +459,12 @@ static void teletekst_start_requested_fetch(void) {
     }
 }
 
+/**
+ * @brief Reduce a CYW43 scan authentication bit mask to the P2WP security enum.
+ *
+ * @param auth_mode Authentication flags returned by the CYW43 scan.
+ * @return WIFI_SECURITY_OPEN, WIFI_SECURITY_PSK, or WIFI_SECURITY_UNSUPPORTED.
+ */
 static uint8_t wifi_security_from_auth(uint8_t auth_mode) {
     if (auth_mode == 0u) {
         return WIFI_SECURITY_OPEN;
@@ -415,6 +475,12 @@ static uint8_t wifi_security_from_auth(uint8_t auth_mode) {
     return WIFI_SECURITY_UNSUPPORTED;
 }
 
+/**
+ * @brief Select the CYW43 connection mode corresponding to scan flags.
+ *
+ * @param auth_mode Authentication flags returned by the CYW43 scan.
+ * @return CYW43_AUTH_* value suitable for a connection request.
+ */
 static uint32_t wifi_auth_from_scan(uint8_t auth_mode) {
     if ((auth_mode & 4u) != 0u) {
         return (auth_mode & 2u) != 0u
@@ -427,6 +493,16 @@ static uint32_t wifi_auth_from_scan(uint8_t auth_mode) {
     return CYW43_AUTH_OPEN;
 }
 
+/**
+ * @brief Collect, deduplicate, and rank one asynchronous Wi-Fi scan result.
+ *
+ * Duplicate SSIDs retain the strongest access point. When the bounded result
+ * array is full, a stronger new result replaces the weakest entry.
+ *
+ * @param environment Scan callback context; unused.
+ * @param result Result supplied by CYW43, or NULL at callback completion.
+ * @return Zero as required by the CYW43 scan callback contract.
+ */
 static int wifi_scan_callback(
     void *environment,
     const cyw43_ev_scan_result_t *result
@@ -481,6 +557,9 @@ static int wifi_scan_callback(
     return 0;
 }
 
+/**
+ * @brief Sort collected Wi-Fi results by descending signal strength.
+ */
 static void wifi_sort_results(void) {
     for (uint8_t index = 1u; index < wifi_result_count; ++index) {
         wifi_result_t value = wifi_results[index];
@@ -493,6 +572,12 @@ static void wifi_sort_results(void) {
     }
 }
 
+/**
+ * @brief Poll CYW43/lwIP and advance scan and connection state machines.
+ *
+ * This function runs only on core 0 because the polled CYW43 context and its
+ * callbacks are core-affine.
+ */
 static void wifi_service(void) {
     cyw43_arch_poll();
     // A completed HTTP callback runs inside poll(). The connection has been
@@ -570,6 +655,11 @@ static void wifi_service(void) {
     gpio_put(GPIO_WIFI_UP, connected);
 }
 
+/**
+ * @brief Start a Wi-Fi scan queued by the mailbox core.
+ *
+ * A failed driver call is converted into the public WIFI_SCAN_FAILED state.
+ */
 static void wifi_start_requested_scan(void) {
     mutex_enter_blocking(&wifi_mutex);
     const bool requested = wifi_scan_requested;
@@ -598,6 +688,12 @@ static void wifi_start_requested_scan(void) {
     mutex_exit(&wifi_mutex);
 }
 
+/**
+ * @brief Start an asynchronous Wi-Fi connection queued by the mailbox core.
+ *
+ * Passwords are copied under the mutex and wiped from both shared and local
+ * storage as soon as the CYW43 API has consumed them.
+ */
 static void wifi_start_requested_connection(void) {
     char ssid[sizeof(wifi_ssid)];
     char password[sizeof(wifi_password)];
@@ -636,6 +732,12 @@ static void wifi_start_requested_connection(void) {
     mutex_exit(&wifi_mutex);
 }
 
+/**
+ * @brief Execute one queued encrypted-profile operation on core 0.
+ *
+ * Flash-safe execution requires cooperation from both cores. This routine also
+ * wipes temporary plaintext credentials and publishes the resulting state.
+ */
 static void wifi_profile_service(void) {
     uint8_t ssid[WIFI_PROFILE_MAX_SSID] = {0};
     uint8_t password[WIFI_PROFILE_MAX_PASSWORD] = {0};
@@ -705,9 +807,13 @@ static void wifi_profile_service(void) {
     mutex_exit(&wifi_mutex);
 }
 
-// The polled CYW43 context is core-affine. Keep initialization, callbacks and
-// all subsequent Wi-Fi API calls on core 0, matching the Pico SDK reference
-// applications. Core 1 independently services the P2000 mailbox.
+/**
+ * @brief Initialize CYW43 and run the permanent core-0 network service loop.
+ *
+ * The polled CYW43 context is core-affine. Initialization, callbacks, and all
+ * subsequent Wi-Fi API calls therefore remain on core 0. Core 1 independently
+ * services the P2000 mailbox.
+ */
 static void wifi_radio_main(void) {
     bool available =
         cyw43_arch_init_with_country(CYW43_COUNTRY_NETHERLANDS) == 0;
@@ -758,6 +864,12 @@ static void wifi_radio_main(void) {
     }
 }
 
+/**
+ * @brief Enforce radio-initialization and queued-scan deadlines from core 1.
+ *
+ * This keeps local-link status requests responsive even if core 0 is blocked
+ * inside CYW43 initialization.
+ */
 static void wifi_check_deadlines(void) {
     mutex_enter_blocking(&wifi_mutex);
     if (wifi_init_state == WIFI_INIT_STARTING &&
@@ -785,6 +897,14 @@ static void wifi_check_deadlines(void) {
     }
 }
 
+/**
+ * @brief Wait for a GPIO input to reach a requested logic level.
+ *
+ * @param gpio GPIO number to sample.
+ * @param value Expected logic level.
+ * @param timeout_ms Maximum wait in milliseconds.
+ * @return true when the level is observed before the deadline.
+ */
 static bool wait_for_gpio(uint gpio, bool value, uint32_t timeout_ms) {
     const absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
     while (gpio_get(gpio) != value) {
@@ -796,12 +916,24 @@ static bool wait_for_gpio(uint gpio, bool value, uint32_t timeout_ms) {
     return true;
 }
 
+/**
+ * @brief Initialize one GPIO output without producing an unwanted pulse.
+ *
+ * @param gpio GPIO number to configure.
+ * @param initial_value Logic level applied before output mode is enabled.
+ */
 static void init_output(uint gpio, bool initial_value) {
     gpio_init(gpio);
     gpio_put(gpio, initial_value);
     gpio_set_dir(gpio, GPIO_OUT);
 }
 
+/**
+ * @brief Configure the parallel mailbox bus and clear stale handshake state.
+ *
+ * Data directions follow the external latches: GPIO0-7 are host-to-Pico input,
+ * while GPIO8-15 are Pico-to-host output.
+ */
 static void mailbox_init(void) {
     for (uint gpio = GPIO_HOST_DATA_BASE; gpio < GPIO_HOST_DATA_BASE + 8u; ++gpio) {
         gpio_init(gpio);
@@ -836,6 +968,12 @@ static void mailbox_init(void) {
     gpio_put(GPIO_RX_ACK_CLEAR_N, true);
 }
 
+/**
+ * @brief Non-blockingly receive one latched host-to-Pico byte.
+ *
+ * @param[out] byte Destination for the sampled data bus.
+ * @return true when a byte was present and acknowledged.
+ */
 static bool mailbox_try_receive(uint8_t *byte) {
     if (!gpio_get(GPIO_TX_FULL)) {
         return false;
@@ -852,6 +990,12 @@ static bool mailbox_try_receive(uint8_t *byte) {
     return true;
 }
 
+/**
+ * @brief Send one byte to the P2000T using the acknowledged GPIO handshake.
+ *
+ * @param byte Value to drive on the Pico-to-host data bus.
+ * @return true after the host acknowledges and releases the byte.
+ */
 static bool mailbox_send_byte(uint8_t byte) {
     if (!wait_for_gpio(GPIO_RX_ACK_PENDING, false, BYTE_TIMEOUT_MS)) {
         return false;
@@ -875,6 +1019,13 @@ static bool mailbox_send_byte(uint8_t byte) {
     return cleared;
 }
 
+/**
+ * @brief Send a complete encoded frame over the byte mailbox.
+ *
+ * @param data Encoded frame bytes.
+ * @param length Number of bytes to send.
+ * @return false when any byte handshake times out.
+ */
 static bool mailbox_send(const uint8_t *data, size_t length) {
     for (size_t index = 0; index < length; ++index) {
         if (!mailbox_send_byte(data[index])) {
@@ -884,6 +1035,12 @@ static bool mailbox_send(const uint8_t *data, size_t length) {
     return true;
 }
 
+/**
+ * @brief Encode and send an error response without changing retry-cache state.
+ *
+ * @param source Request whose type and sequence are reflected in the response.
+ * @param error_code P2WP_ERROR_* payload value.
+ */
 static void send_uncached_error(const p2wp_frame_t *source, uint8_t error_code) {
     p2wp_frame_t response = {
         .version = P2WP_VERSION,
@@ -903,6 +1060,15 @@ static void send_uncached_error(const p2wp_frame_t *source, uint8_t error_code) 
     }
 }
 
+/**
+ * @brief Encode, cache, and send a successful response.
+ *
+ * The cached request identity makes cartridge retries idempotent while still
+ * detecting reuse of a sequence number for different content.
+ *
+ * @param source Request associated with the response.
+ * @param response Decoded response to encode and transmit.
+ */
 static void cache_and_send(
     const p2wp_frame_t *source,
     const p2wp_frame_t *response
@@ -929,6 +1095,12 @@ static void cache_and_send(
     }
 }
 
+/**
+ * @brief Validate the fixed HELLO signature and compatible version range.
+ *
+ * @param frame Candidate HELLO request.
+ * @return true when its payload is structurally and version compatible.
+ */
 static bool hello_is_valid(const p2wp_frame_t *frame) {
     static const uint8_t magic[] = {'P', '2', 'W', 'P'};
     return frame->payload_length == 8u &&
@@ -937,10 +1109,25 @@ static bool hello_is_valid(const p2wp_frame_t *frame) {
         frame->payload[5] >= P2WP_VERSION;
 }
 
+/**
+ * @brief Check that a request type which carries no arguments is empty.
+ *
+ * @param frame Request to inspect.
+ * @return true when payload_length is zero.
+ */
 static bool empty_request(const p2wp_frame_t *frame) {
     return frame->payload_length == 0u;
 }
 
+/**
+ * @brief Validate and dispatch one decoded P2WP/2 request.
+ *
+ * Fast mailbox operations are completed immediately. Network and flash work is
+ * queued in mutex-protected state for core 0, then observed through status
+ * requests. Password bytes are wiped after they have been copied.
+ *
+ * @param frame Mutable decoded request; secret payload bytes may be zeroized.
+ */
 static void handle_request(const p2wp_frame_t *frame) {
     const uint16_t identity = p2wp_frame_identity(frame);
     if (cached_request_valid &&
@@ -1373,6 +1560,12 @@ static void handle_request(const p2wp_frame_t *frame) {
     }
 }
 
+/**
+ * @brief Run the permanent core-1 mailbox and protocol service loop.
+ *
+ * Partial frames are discarded after a finite timeout so a reset or interrupted
+ * transaction cannot leave the streaming parser wedged indefinitely.
+ */
 static void mailbox_core_main(void) {
     if (!flash_safe_execute_core_init()) {
         gpio_put(GPIO_ERROR, true);
@@ -1411,6 +1604,11 @@ static void mailbox_core_main(void) {
     }
 }
 
+/**
+ * @brief Initialize shared state, launch the mailbox core, and service Wi-Fi.
+ *
+ * @return This firmware entry point does not return.
+ */
 int main(void) {
     mailbox_init();
     mutex_init(&wifi_mutex);

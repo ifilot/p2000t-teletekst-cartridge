@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+/** @copydoc p2wp_crc16 */
 uint16_t p2wp_crc16(const uint8_t *data, size_t length) {
     uint16_t crc = 0xffffu;
 
@@ -17,6 +18,13 @@ uint16_t p2wp_crc16(const uint8_t *data, size_t length) {
     return crc;
 }
 
+/**
+ * @brief Add one byte to an in-progress CRC-16/CCITT-FALSE checksum.
+ *
+ * @param crc Current checksum value.
+ * @param byte Byte to incorporate.
+ * @return Updated checksum value.
+ */
 static uint16_t crc_update(uint16_t crc, uint8_t byte) {
     crc ^= (uint16_t)byte << 8;
     for (unsigned bit = 0; bit < 8; ++bit) {
@@ -27,6 +35,7 @@ static uint16_t crc_update(uint16_t crc, uint8_t byte) {
     return crc;
 }
 
+/** @copydoc p2wp_frame_identity */
 uint16_t p2wp_frame_identity(const p2wp_frame_t *frame) {
     uint16_t crc = 0xffffu;
     const uint8_t header[P2WP_HEADER_SIZE] = {
@@ -47,10 +56,19 @@ uint16_t p2wp_frame_identity(const p2wp_frame_t *frame) {
     return crc;
 }
 
+/** @copydoc p2wp_parser_init */
 void p2wp_parser_init(p2wp_parser_t *parser) {
     memset(parser, 0, sizeof(*parser));
 }
 
+/**
+ * @brief Validate and decode one unescaped frame body.
+ *
+ * @param body Header, payload, and little-endian CRC bytes.
+ * @param body_length Number of bytes in @p body.
+ * @param[out] frame Destination for the validated frame.
+ * @return P2WP_PARSE_FRAME on success, otherwise P2WP_PARSE_ERROR.
+ */
 static p2wp_parse_result_t decode_body(
     const uint8_t *body,
     size_t body_length,
@@ -85,6 +103,7 @@ static p2wp_parse_result_t decode_body(
     return P2WP_PARSE_FRAME;
 }
 
+/** @copydoc p2wp_parser_feed */
 p2wp_parse_result_t p2wp_parser_feed(
     p2wp_parser_t *parser,
     uint8_t byte,
@@ -127,6 +146,15 @@ p2wp_parse_result_t p2wp_parser_feed(
     return P2WP_PARSE_NONE;
 }
 
+/**
+ * @brief Append one byte using P2WP/2 delimiter escaping when required.
+ *
+ * @param byte Decoded byte to append.
+ * @param[out] output Encoded destination buffer.
+ * @param capacity Total capacity of @p output.
+ * @param[in,out] length Current and resulting encoded length.
+ * @return true when the byte fits, otherwise false.
+ */
 static bool append_escaped(
     uint8_t byte,
     uint8_t *output,
@@ -149,6 +177,7 @@ static bool append_escaped(
     return true;
 }
 
+/** @copydoc p2wp_encode */
 size_t p2wp_encode(
     const p2wp_frame_t *frame,
     uint8_t *output,

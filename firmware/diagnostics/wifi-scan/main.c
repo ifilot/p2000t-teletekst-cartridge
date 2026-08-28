@@ -9,6 +9,13 @@
 
 static unsigned scan_result_count;
 
+/**
+ * @brief Print and count one CYW43 scan result.
+ *
+ * @param environment Scan callback context; unused.
+ * @param result Access point result, or NULL when no result is supplied.
+ * @return Zero as required by the CYW43 callback contract.
+ */
 static int scan_result(void *environment, const cyw43_ev_scan_result_t *result) {
     (void)environment;
     if (result != NULL) {
@@ -25,6 +32,12 @@ static int scan_result(void *environment, const cyw43_ev_scan_result_t *result) 
     return 0;
 }
 
+/**
+ * @brief Repeatedly report a terminal diagnostic state and blink the LED.
+ *
+ * @param status Text printed every two seconds.
+ * @param rapid_blink true for a failure blink, false for a steady-ready LED.
+ */
 static void report_forever(const char *status, bool rapid_blink) {
     bool led = false;
     absolute_time_t next_report = get_absolute_time();
@@ -45,6 +58,11 @@ static void report_forever(const char *status, bool rapid_blink) {
     }
 }
 
+/**
+ * @brief Initialize CYW43, run one scan, and report the terminal result.
+ *
+ * @return This interactive diagnostic does not return.
+ */
 int main(void) {
     stdio_init_all();
 

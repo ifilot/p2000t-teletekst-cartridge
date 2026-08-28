@@ -103,6 +103,14 @@ here.
   <img src="docs/images/p2kpico.jpg" alt="P2000T Teletekst cartridge with Raspberry Pi Pico 2 W" width="450">
 </p>
 
+### Enclosure
+
+<p align="center">
+  <img src="docs/images/p2000t-teletekst-enclosure.jpg" alt="Completed P2000T Teletekst cartridge enclosure" width="640">
+</p>
+
+The printable enclosure and label models are available in [`enclosure/`](enclosure/).
+
 ### Circuit schematic
 
 <p align="center">
@@ -142,3 +150,16 @@ Build the cartridge with `make -C src`.
 Build the firmware with `cmake -S firmware -B firmware/build -G Ninja` followed
 by `cmake --build firmware/build`; this requires `PICO_SDK_PATH` to point to a
 Raspberry Pi Pico SDK.
+
+The host-side replay tool fetches a live NOS response and passes it through the
+same size limit and JSON-to-SAA5050 decoder as the Pico firmware:
+
+```sh
+firmware/tools/replay-nos-page 101
+firmware/tools/replay-nos-page 200-2
+```
+
+For a saved response, build with `make -C firmware/tools` and run
+`firmware/tools/teletekst-replay PAGE response.json [screen.bin]`. Failures are
+reported as the Pico's `06`/`07` code plus the rejected decoder stage or row,
+which makes captured API responses suitable as regression fixtures.
