@@ -85,6 +85,7 @@ TELETEKST_ERROR_PAGE_NOT_FOUND: equ 8
 TELETEKST_CHUNK_COUNT: equ 4
 TELETEKST_CHUNK_SIZE:  equ 240
 TELETEKST_ROTATE_TICKS: equ 500
+TELETEKST_CLOCK_TICKS:  equ 50
 LINK_TIMEOUT_TICKS:    equ 100 ; 100 monitor ticks at 20 ms = 2 seconds
 TELETEKST_SOURCE_NOS:   equ 0
 TELETEKST_SOURCE_P2000T: equ 1
@@ -99,6 +100,8 @@ start:
         ; The monitor initialized its 20 ms keyboard interrupt before entering
         ; the cartridge. Keep interrupts enabled so its key FIFO stays active.
         ei
+        xor a
+        ld (teletekst_clock_valid),a
         call show_opening_screen
         ; Discard the key that may have launched the cartridge, then leave the
         ; completed splash visible until the user deliberately continues.
@@ -1264,6 +1267,7 @@ teletekst_change_wifi:
 ; drives subpage rotation while its interrupt-owned FIFO supplies debounced
 ; keys without blocking this loop.
 teletekst_main_loop:
+        call teletekst_clock_update
         call try_read_key
         jp z,teletekst_check_rotation
         cp KEY_STOP_EVENT
@@ -1621,7 +1625,7 @@ teletekst_fetch_poll:
         call transact
         jp c,teletekst_fetch_failed
         ld a,(RX_BUFFER+4)
-        cp 5
+        cp 9
         jp nz,teletekst_fetch_failed
         ld a,(RX_BUFFER+5)
         or a
@@ -1645,6 +1649,20 @@ teletekst_fetch_poll:
 teletekst_fetch_rows:
         ld a,(RX_BUFFER+10)
         ld (teletekst_next_subpage),a
+        ld a,(RX_BUFFER+12)
+        or a
+        jr z,teletekst_fetch_rows_no_clock
+        ld a,(RX_BUFFER+9)
+        ld (teletekst_clock_hours),a
+        ld a,(RX_BUFFER+10)
+        ld (teletekst_clock_minutes),a
+        ld a,(RX_BUFFER+11)
+        ld (teletekst_clock_seconds),a
+        ld hl,(MONITOR_CLOCK)
+        ld (teletekst_clock_last_tick),hl
+        ld a,1
+        ld (teletekst_clock_valid),a
+teletekst_fetch_rows_no_clock:
         ld hl,TELETEXT_SCREEN_BUFFER
         ld (teletekst_screen_pointer),hl
         xor a
@@ -1675,6 +1693,7 @@ teletekst_chunk_loop:
         cp TELETEKST_CHUNK_COUNT
         jr nz,teletekst_chunk_loop
 
+        call teletekst_draw_clock_buffer
         call teletekst_commit_screen
         ld a,(teletekst_rotation_paused)
         or a
@@ -1753,6 +1772,108 @@ teletekst_commit_row:
         call wait_for_vsync
         xor a
         out (VIDEO_CONTROL_PORT),a
+        ret
+
+; The Pico supplies Dutch local seconds since midnight after a successful NTP
+; sync. The monitor's 20 ms tick advances that value between page fetches, so
+; the top-row clock remains live without repeated network traffic.
+teletekst_clock_update:
+        ld a,(teletekst_clock_valid)
+        or a
+        ret z
+        ld hl,(MONITOR_CLOCK)
+        ld de,(teletekst_clock_last_tick)
+        or a
+        sbc hl,de
+        ld a,h
+        or a
+        jr nz,teletekst_clock_tick
+        ld a,l
+        cp TELETEKST_CLOCK_TICKS
+        ret c
+teletekst_clock_tick:
+        ld hl,(MONITOR_CLOCK)
+        ld (teletekst_clock_last_tick),hl
+        ld a,(teletekst_clock_seconds)
+        inc a
+        cp 60
+        jr c,teletekst_clock_store_seconds
+        xor a
+        ld (teletekst_clock_seconds),a
+        ld a,(teletekst_clock_minutes)
+        inc a
+        cp 60
+        jr c,teletekst_clock_store_minutes
+        xor a
+        ld (teletekst_clock_minutes),a
+        ld a,(teletekst_clock_hours)
+        inc a
+        cp 24
+        jr c,teletekst_clock_store_hours
+        xor a
+teletekst_clock_store_hours:
+        ld (teletekst_clock_hours),a
+        jr teletekst_clock_saved
+teletekst_clock_store_minutes:
+        ld (teletekst_clock_minutes),a
+        jr teletekst_clock_saved
+teletekst_clock_store_seconds:
+        ld (teletekst_clock_seconds),a
+teletekst_clock_saved:
+        ld a,(teletekst_rotation_paused)
+        or a
+        ret nz
+        ld a,(teletekst_input_count)
+        or a
+        ret nz
+        ld de,VIDEO_RAM+32
+        jp teletekst_write_clock
+
+; Render the current clock into the staged page before its atomic display
+; commit. This is the common top-banner treatment for both content sources.
+teletekst_draw_clock_buffer:
+        ld a,(teletekst_clock_valid)
+        or a
+        ret z
+        ld de,TELETEXT_SCREEN_BUFFER+32
+        ; fall through
+teletekst_write_clock:
+        ld a,SAA5050_ALPHA_WHITE
+        dec de
+        ld (de),a
+        inc de
+        ; fall through
+teletekst_write_clock_style:
+        ld a,(teletekst_clock_hours)
+        call teletekst_write_two_digits
+        ld a,':'
+        ld (de),a
+        inc de
+        ld a,(teletekst_clock_minutes)
+        call teletekst_write_two_digits
+        ld a,':'
+        ld (de),a
+        inc de
+        ld a,(teletekst_clock_seconds)
+        ; fall through
+teletekst_write_two_digits:
+        ld b,0
+teletekst_clock_tens:
+        cp 10
+        jr c,teletekst_clock_tens_done
+        sub 10
+        inc b
+        jr teletekst_clock_tens
+teletekst_clock_tens_done:
+        push af
+        ld a,b
+        add a,'0'
+        ld (de),a
+        inc de
+        pop af
+        add a,'0'
+        ld (de),a
+        inc de
         ret
 
 ; The monitor ROM increments this clock from the video/CTC interrupt every
@@ -2935,6 +3056,11 @@ teletekst_rotation_paused: equ 07479h
 TELETEXT_SUBPAGE_INPUT:   equ 0747ah
 teletekst_pause_saved_cell: equ 0747ch
 teletekst_help_return_source: equ 0747dh
+teletekst_clock_hours:   equ 0747eh
+teletekst_clock_minutes: equ 0747fh
+teletekst_clock_seconds: equ 07480h
+teletekst_clock_last_tick: equ 07481h
+teletekst_clock_valid:   equ 07483h
 TELETEXT_SCREEN_BUFFER: equ 07500h
 
         defs 05000h-$,0ffh

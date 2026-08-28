@@ -115,6 +115,11 @@ Pages arrive as four validated 240-byte chunks. Each contains six packed
 attributes needed for the NOS foreground and background colours and native
 mosaic graphics. The API's 25th Fastext row is not shown.
 
+After Wi-Fi connects, the Pico obtains Dutch civil time from an NTP server.
+The cartridge places `HH:MM:SS` in the rightmost eight cells of the first
+Teletekst row for both NOS and P2000T pages, then advances it from the
+monitor's 20 ms clock between network synchronizations.
+
 Without an explicitly saved profile, Wi-Fi credentials remain session-only.
 The cartridge keeps the password in RAM only while retry or profile creation
 remains an option, then wipes it. A saved profile is authenticated and encrypted

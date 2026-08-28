@@ -11,6 +11,8 @@
 #include "hardware/gpio.h"
 #include "lwip/altcp_tls.h"
 #include "lwip/apps/http_client.h"
+#include "lwip/dns.h"
+#include "lwip/udp.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/platform_util.h"
 #include "pico/cyw43_arch.h"
@@ -55,6 +57,12 @@ enum {
     (TELETEKST_COLUMNS * TELETEKST_ROWS_PER_CHUNK)
 #define TELETEKST_CHUNK_COUNT \
     (TELETEKST_DISPLAY_ROWS / TELETEKST_ROWS_PER_CHUNK)
+#define NTP_HOST "time.cloudflare.com"
+#define NTP_PORT 123u
+#define NTP_PACKET_SIZE 48u
+#define NTP_UNIX_EPOCH_OFFSET 2208988800u
+#define NTP_RETRY_MS 30000u
+#define NTP_RESYNC_MS (6u * 60u * 60u * 1000u)
 
 enum wifi_scan_state {
     WIFI_SCAN_IDLE = 0,
@@ -177,6 +185,163 @@ static struct altcp_tls_config *teletekst_tls_config;
 static const char *teletekst_tls_hostname;
 static altcp_allocator_t teletekst_tls_allocator;
 static httpc_connection_t teletekst_http_settings;
+static struct udp_pcb *ntp_pcb;
+static bool ntp_request_active;
+static bool clock_valid;
+static uint32_t clock_unix_seconds;
+static absolute_time_t clock_reference;
+static absolute_time_t ntp_next_attempt;
+static absolute_time_t ntp_request_deadline;
+
+/** Return the synchronized Unix time, or zero until the first NTP reply. */
+static uint32_t clock_now(void) {
+    uint32_t seconds = 0u;
+    mutex_enter_blocking(&wifi_mutex);
+    if (clock_valid) {
+        const int64_t elapsed = absolute_time_diff_us(
+            clock_reference,
+            get_absolute_time()
+        );
+        if (elapsed >= 0) {
+            seconds = clock_unix_seconds + (uint32_t)(elapsed / 1000000);
+        }
+    }
+    mutex_exit(&wifi_mutex);
+    return seconds;
+}
+
+/** Convert a Unix timestamp to Dutch local seconds since midnight (CET/CEST). */
+static uint32_t clock_local_seconds(uint32_t unix_time, bool *valid) {
+    if (unix_time == 0u) {
+        *valid = false;
+        return 0u;
+    }
+    const uint32_t days = unix_time / 86400u;
+    uint32_t first_day = 0u;
+    unsigned year = 1970u;
+    while (true) {
+        const bool leap = (year % 4u == 0u && year % 100u != 0u) ||
+                          year % 400u == 0u;
+        const uint32_t year_days = leap ? 366u : 365u;
+        if (days < first_day + year_days) {
+            break;
+        }
+        first_day += year_days;
+        ++year;
+    }
+    const bool leap = (year % 4u == 0u && year % 100u != 0u) ||
+                      year % 400u == 0u;
+    // Sunday is zero; Unix day zero (1970-01-01) was Thursday.
+    const uint32_t march_31 = first_day + 31u + 28u + (leap ? 1u : 0u) + 30u;
+    const uint32_t october_31 = first_day + 304u;
+    const uint32_t dst_start_day = march_31 - ((march_31 + 4u) % 7u);
+    const uint32_t dst_end_day = october_31 - ((october_31 + 4u) % 7u);
+    const uint32_t dst_start = dst_start_day * 86400u + 3600u;
+    const uint32_t dst_end = dst_end_day * 86400u + 3600u;
+    const uint32_t offset = 3600u +
+        (unix_time >= dst_start && unix_time < dst_end ? 3600u : 0u);
+    *valid = true;
+    return (unix_time + offset) % 86400u;
+}
+
+/** Send one minimal NTP client request to a resolved server address. */
+static void ntp_send_request(const ip_addr_t *address) {
+    if (ntp_pcb == NULL) {
+        return;
+    }
+    struct pbuf *packet = pbuf_alloc(PBUF_TRANSPORT, NTP_PACKET_SIZE, PBUF_RAM);
+    if (packet == NULL) {
+        ntp_next_attempt = make_timeout_time_ms(NTP_RETRY_MS);
+        return;
+    }
+    memset(packet->payload, 0, NTP_PACKET_SIZE);
+    ((uint8_t *)packet->payload)[0] = 0x23u; // NTP v4 client request.
+    if (udp_sendto(ntp_pcb, packet, address, NTP_PORT) == ERR_OK) {
+        ntp_request_active = true;
+        ntp_request_deadline = make_timeout_time_ms(NTP_RETRY_MS);
+    } else {
+        ntp_next_attempt = make_timeout_time_ms(NTP_RETRY_MS);
+    }
+    pbuf_free(packet);
+}
+
+/** Continue an NTP request after asynchronous DNS resolution. */
+static void ntp_dns_found(const char *name, const ip_addr_t *address, void *arg) {
+    (void)name;
+    (void)arg;
+    if (address == NULL) {
+        ntp_request_active = false;
+        ntp_next_attempt = make_timeout_time_ms(NTP_RETRY_MS);
+        return;
+    }
+    ntp_send_request(address);
+}
+
+/** Accept an NTP transmit timestamp and establish the Pico's wall clock. */
+static void ntp_receive(
+    void *arg,
+    struct udp_pcb *pcb,
+    struct pbuf *packet,
+    const ip_addr_t *address,
+    u16_t port
+) {
+    (void)arg;
+    (void)pcb;
+    (void)address;
+    (void)port;
+    uint8_t timestamp[4];
+    if (packet->tot_len >= NTP_PACKET_SIZE &&
+        pbuf_copy_partial(packet, timestamp, sizeof(timestamp), 40u) ==
+            sizeof(timestamp)) {
+        const uint32_t ntp_seconds =
+            ((uint32_t)timestamp[0] << 24u) |
+            ((uint32_t)timestamp[1] << 16u) |
+            ((uint32_t)timestamp[2] << 8u) |
+            (uint32_t)timestamp[3];
+        if (ntp_seconds >= NTP_UNIX_EPOCH_OFFSET) {
+            mutex_enter_blocking(&wifi_mutex);
+            clock_unix_seconds = ntp_seconds - NTP_UNIX_EPOCH_OFFSET;
+            clock_reference = get_absolute_time();
+            clock_valid = true;
+            mutex_exit(&wifi_mutex);
+            ntp_next_attempt = make_timeout_time_ms(NTP_RESYNC_MS);
+        }
+    }
+    ntp_request_active = false;
+    pbuf_free(packet);
+}
+
+/** Start or periodically resynchronize the wall clock while Wi-Fi is up. */
+static void ntp_service(bool connected) {
+    if (!connected) {
+        return;
+    }
+    if (ntp_request_active && time_reached(ntp_request_deadline)) {
+        ntp_request_active = false;
+        ntp_next_attempt = make_timeout_time_ms(NTP_RETRY_MS);
+    }
+    if (ntp_request_active || !time_reached(ntp_next_attempt)) {
+        return;
+    }
+    if (ntp_pcb == NULL) {
+        ntp_pcb = udp_new_ip_type(IPADDR_TYPE_ANY);
+        if (ntp_pcb == NULL) {
+            ntp_next_attempt = make_timeout_time_ms(NTP_RETRY_MS);
+            return;
+        }
+        udp_recv(ntp_pcb, ntp_receive, NULL);
+    }
+    ip_addr_t address;
+    const err_t result = dns_gethostbyname(NTP_HOST, &address, ntp_dns_found, NULL);
+    if (result == ERR_OK) {
+        ntp_send_request(&address);
+    } else if (result != ERR_INPROGRESS) {
+        ntp_next_attempt = make_timeout_time_ms(NTP_RETRY_MS);
+    } else {
+        ntp_request_active = true;
+        ntp_request_deadline = make_timeout_time_ms(NTP_RETRY_MS);
+    }
+}
 
 /**
  * @brief Publish a terminal Teletekst fetch error to the mailbox core.
@@ -652,6 +817,7 @@ static void wifi_service(void) {
     mutex_enter_blocking(&wifi_mutex);
     const bool connected = wifi_connection_state == WIFI_CONNECTED;
     mutex_exit(&wifi_mutex);
+    ntp_service(connected);
     gpio_put(GPIO_WIFI_UP, connected);
 }
 
@@ -1525,7 +1691,16 @@ static void handle_request(const p2wp_frame_t *frame) {
             response.payload[3] = (uint8_t)(received >> 8u);
             response.payload[4] = teletekst_next_subpage;
             mutex_exit(&wifi_mutex);
-            response.payload_length = 5u;
+            bool clock_is_valid;
+            const uint32_t local_time = clock_local_seconds(
+                clock_now(),
+                &clock_is_valid
+            );
+            response.payload[5] = (uint8_t)(local_time / 3600u);
+            response.payload[6] = (uint8_t)((local_time / 60u) % 60u);
+            response.payload[7] = (uint8_t)(local_time % 60u);
+            response.payload[8] = clock_is_valid ? 1u : 0u;
+            response.payload_length = 9u;
             cache_and_send(frame, &response);
             break;
         }

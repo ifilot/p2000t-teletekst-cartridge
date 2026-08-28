@@ -220,7 +220,7 @@ responses.
 | `0x22` | `WIFI_PROFILE_SAVE` | Wi-Fi password | Empty acknowledgement |
 | `0x23` | `WIFI_PROFILE_DELETE` | Empty | Empty acknowledgement |
 | `0x30` | `TELETEKST_FETCH_START` | Page, subpage, and source | Empty acknowledgement |
-| `0x31` | `TELETEKST_FETCH_STATUS` | Empty | Fetch state, error, byte count, and next subpage |
+| `0x31` | `TELETEKST_FETCH_STATUS` | Empty | Fetch state, error, byte count, next subpage, and clock |
 | `0x32` | `TELETEKST_FETCH_ROWS` | Chunk index | Six display-ready rows |
 
 `LINK_STATS` reserves its message number for a future statistics format. A
@@ -370,7 +370,7 @@ A `TELETEKST_FETCH_START` request contains:
 | 2 | Subpage (`0` selects the API's default first subpage, otherwise `1`-`99`) |
 | 3 | Source: `0` NOS Teletekst, `1` P2000T Teletekst |
 
-`TELETEKST_FETCH_STATUS` returns five bytes:
+`TELETEKST_FETCH_STATUS` returns nine bytes:
 
 | Offset | Field |
 | ---: | --- |
@@ -378,12 +378,21 @@ A `TELETEKST_FETCH_START` request contains:
 | 1 | Error: `0` none, `1` not connected, `2` TLS setup, `3` request start, `4` network, `5` HTTP status, `6` response too large, `7` invalid data, `8` page not found |
 | 2-3 | HTTP response bytes received so far, little-endian |
 | 4 | Next subpage number, or zero when the API supplies none |
+| 5 | Dutch local hour (`0`-`23`) from NTP |
+| 6 | Dutch local minute (`0`-`59`) from NTP |
+| 7 | Dutch local second (`0`-`59`) from NTP |
+| 8 | Clock validity (`1` after NTP synchronization, otherwise `0`) |
 
 After state `3`, request chunk indexes `0` through `3` from
 `TELETEKST_FETCH_ROWS`. Each successful response is exactly 240 bytes: six
 consecutive 40-column rows ready to copy to the SAA5050-backed display. Together
 the chunks provide the P2000T's 24 visible rows. Compatible source documents
 MAY have 25 rows; row 25 contains Fastext prompts and is intentionally omitted.
+
+When the clock-valid byte is set, the cartridge overlays `HH:MM:SS` in the
+rightmost eight cells of row one. It advances that value using the P2000T's
+20 ms monitor clock between fetches, and does not alter either provider's
+remaining header cells.
 
 The Pico translates HTML colour classes and Unicode private-use mosaic glyphs
 into native SAA5050 bytes. Because foreground and graphics controls occupy a
