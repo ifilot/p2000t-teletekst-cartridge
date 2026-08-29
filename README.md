@@ -22,7 +22,7 @@ Teletekst project:
 
 - `src/` is the 16 KiB slot-1 cartridge client.
 - `firmware/` is the Raspberry Pi Pico W firmware for the slot-2 interface.
-- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2 link protocol
+- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2–3 link protocol
   between them.
 - `pcb/` contains the KiCad hardware design and manufacturing files.
 - `enclosure/` contains the enclosure and label models.
@@ -93,7 +93,7 @@ for more detail.
 
 Both modules provide the same cartridge features and should feel the same in
 normal use. Page loading is dominated by the shared CYW43439 wireless subsystem,
-Internet and server latency, and the same P2WP/2 cartridge transport, so the
+Internet and server latency, and the same negotiated P2WP cartridge transport, so the
 Pico 2 W's faster processor is not expected to provide a noticeable benefit
 here.
 
@@ -121,7 +121,7 @@ The printable enclosure and label models are available in [`enclosure/`](enclosu
 
 ## Documentation
 
-[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2 interface
+[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–3 interface
 specification. The Sphinx documentation adds implementation guides for
 [P2000T BASIC](docs/basic.rst) and
 [Z80 assembly](docs/assembly.rst).

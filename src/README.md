@@ -9,9 +9,9 @@ with `make -C src`; this requires `z80asm` 1.8 or a compatible assembler.
 The build signs the image with the P2000T additive 16-bit cartridge checksum.
 Use `make -C src verify` to validate it. This is an integrity checksum, not a
 cryptographic signature.
-The cartridge release version is `v0.3.0`.
+The cartridge release version is `v0.4.0`.
 
-At runtime it negotiates P2WP/2 with `HELLO`, requests a wireless scan, and
+At runtime it negotiates P2WP/2 or P2WP/3 with `HELLO`, requests a wireless scan, and
 polls while the Pico W performs it asynchronously. Up to nine unique SSIDs are
 shown strongest first using one to four signal bars. `*` marks supported
 WPA/WPA2 networks and `!` marks security modes that this first client cannot
@@ -23,9 +23,12 @@ and Shift produces upper-case letters.
 
 Startup presents a native SAA5050 `P2000T TELETEKST` composition inspired by
 the blue, white, and black NOS page 100 masthead, and waits for any key before
-continuing to Wi-Fi setup. Its first row is blank, its title is a full
-white-on-blue bar without a page number, and its footer identifies cartridge
-version 0.3.0 and P2WP/2. All cartridge UI text is Dutch. The scan, network
+continuing to Wi-Fi setup. Its first two rows extend the blue background, its
+centered title is a full white-on-blue bar without a page number, and the bold `P2000T` mark is a
+centered blue mosaic badge with a white border matching the Teletekst motif.
+The P2000T contour and upper Teletekst frame share a mosaic row, making them a
+single stacked logo. Its footer identifies cartridge version 0.4.0. All cartridge UI text
+is Dutch. The scan, network
 list, connection state, prompts,
 and errors reserve the first screen row, use full white-on-blue menu headers,
 and retain blue separator/action bands and white content panels with blue text.
@@ -50,6 +53,11 @@ Initial `HELLO` negotiation and every later local-link transaction have a
 two-second overall timeout. A missing or unresponsive Pico W therefore shows a
 clear error instead of leaving the cartridge waiting indefinitely. Each
 transaction still makes up to three attempts within that deadline.
+The v0.4 cartridge advertises P2WP/2–3 and selects the newest revision shared
+with the Pico. P2WP/2 remains fully usable, but the cartridge displays a
+one-time compatibility warning recommending a Pico firmware update. A HELLO
+response with no common revision displays a dedicated protocol-incompatibility
+screen instead of being reported as an Internet or server failure.
 
 The cartridge then starts an asynchronous connection and polls until the Pico
 has either acquired an IP address or reported a specific failure. Open networks
@@ -116,9 +124,13 @@ attributes needed for the NOS foreground and background colours and native
 mosaic graphics. The API's 25th Fastext row is not shown.
 
 After Wi-Fi connects, the Pico obtains Dutch civil time from an NTP server.
-The cartridge places `HH:MM:SS` in the rightmost eight cells of the first
-Teletekst row for both NOS and P2000T pages, then advances it from the
-monitor's 20 ms clock between network synchronizations.
+The cartridge places an alpha-yellow control in column zero. NOS pages show
+`ww DD.mmm HH:MM:SS` in columns one through eighteen of the first row. P2000T
+pages use the shorter `ww DD.mmm HH:MM` in columns one through fifteen, with a
+half-second blinking colon between hours and minutes. Dutch two-letter weekdays
+and three-letter month names are used throughout. The display advances from the
+monitor's 20 ms clock between network synchronizations, including the date and
+weekday at midnight. This leaves provider text on the right free.
 
 Without an explicitly saved profile, Wi-Fi credentials remain session-only.
 The cartridge keeps the password in RAM only while retry or profile creation

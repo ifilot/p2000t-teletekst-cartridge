@@ -19,7 +19,7 @@
   </defs>
 
   <rect width="1200" height="650" fill="#fff"/>
-  <text x="600" y="42" text-anchor="middle" class="title">P2WP/2 hardware transport</text>
+  <text x="600" y="42" text-anchor="middle" class="title">P2WP hardware transport</text>
 
   <rect x="30" y="75" width="230" height="535" rx="10" class="device"/>
   <text x="145" y="112" text-anchor="middle" class="heading">P2000T</text>

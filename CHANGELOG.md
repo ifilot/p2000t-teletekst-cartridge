@@ -6,6 +6,29 @@ in this file. The format is based on [Keep a Changelog].
 Entries through version 0.2.0 were reconstructed from the tagged Git history
 and release diffs.
 
+## [0.4.0] - 2026-08-29
+
+### Added
+
+- Added a visual P2000T emulator that boots the real monitor and cartridge
+  ROMs and emulates the slot-2 P2WP interface, including fixture-backed and
+  live Teletekst access.
+- Added headless end-to-end coverage for both NOS and P2000T Teletekst sources.
+- Added Dutch date and time synchronization, local clock advancement, midnight
+  calendar rollover, and source-specific clock presentation.
+- Added negotiated P2WP/2–3 operation, a legacy-firmware compatibility warning,
+  and a dedicated no-common-protocol error screen.
+
+### Changed
+
+- Reworked the opening screen around a joined native SAA5050 `P2000T
+  TELETEKST` mosaic logo, a blinking start prompt, and a fixed release footer.
+- Polished the Teletekst source selector with aligned choices and a complete
+  one-action-per-line key reference.
+- Added emulator keyboard shortcuts for the P2000T STOP key and machine reset.
+- Kept the original five-byte P2WP/2 fetch status for bidirectional v0.3
+  compatibility; the thirteen-byte date/time status is now explicitly P2WP/3.
+
 ## [0.3.0] - 2026-08-28
 
 ### Added

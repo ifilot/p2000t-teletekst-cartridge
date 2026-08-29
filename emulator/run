@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_dir=$(dirname "$script_dir")
+monitor_rom=${P2000_MONITOR_ROM:-$project_dir/../P2000T-IDE/assets/emulator/p2000rom.bin}
+if [ ! -f "$monitor_rom" ]; then
+    echo "Set P2000_MONITOR_ROM to a 4096-byte P2000T monitor ROM." >&2
+    exit 1
+fi
+make -C "$project_dir/src"
+make -C "$script_dir"
+cd "$project_dir"
+exec "$script_dir/build/p2000t-emulator" \
+    --monitor "$monitor_rom" \
+    --cartridge "$project_dir/src/p2wp-cartridge.bin" \
+    --font "$script_dir/assets/Default.fnt" \
+    --live "$@"

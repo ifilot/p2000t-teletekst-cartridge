@@ -18,6 +18,26 @@ uint16_t p2wp_crc16(const uint8_t *data, size_t length) {
     return crc;
 }
 
+/** @copydoc p2wp_select_version */
+uint8_t p2wp_select_version(
+    uint8_t host_minimum,
+    uint8_t host_maximum,
+    uint8_t peripheral_minimum,
+    uint8_t peripheral_maximum
+) {
+    if (host_minimum > host_maximum ||
+        peripheral_minimum > peripheral_maximum) {
+        return 0u;
+    }
+    const uint8_t lowest = host_minimum > peripheral_minimum
+        ? host_minimum
+        : peripheral_minimum;
+    const uint8_t highest = host_maximum < peripheral_maximum
+        ? host_maximum
+        : peripheral_maximum;
+    return highest >= lowest ? highest : 0u;
+}
+
 /**
  * @brief Add one byte to an in-progress CRC-16/CCITT-FALSE checksum.
  *
@@ -147,7 +167,7 @@ p2wp_parse_result_t p2wp_parser_feed(
 }
 
 /**
- * @brief Append one byte using P2WP/2 delimiter escaping when required.
+ * @brief Append one byte using P2WP delimiter escaping when required.
  *
  * @param byte Decoded byte to append.
  * @param[out] output Encoded destination buffer.

@@ -142,6 +142,8 @@ static bool cached_request_valid;
 static uint8_t cached_request_type;
 static uint8_t cached_request_sequence;
 static uint16_t cached_request_identity;
+static bool p2wp_session_valid;
+static uint8_t p2wp_session_version;
 static mutex_t wifi_mutex;
 static uint8_t wifi_init_state;
 static uint8_t wifi_scan_state;
@@ -210,11 +212,11 @@ static uint32_t clock_now(void) {
     return seconds;
 }
 
-/** Convert a Unix timestamp to Dutch local seconds since midnight (CET/CEST). */
-static uint32_t clock_local_seconds(uint32_t unix_time, bool *valid) {
+/** Convert a Unix timestamp to Dutch local date and time (CET/CEST). */
+static bool clock_local_components(uint32_t unix_time, uint8_t result[7]) {
     if (unix_time == 0u) {
-        *valid = false;
-        return 0u;
+        memset(result, 0, 7u);
+        return false;
     }
     const uint32_t days = unix_time / 86400u;
     uint32_t first_day = 0u;
@@ -240,8 +242,48 @@ static uint32_t clock_local_seconds(uint32_t unix_time, bool *valid) {
     const uint32_t dst_end = dst_end_day * 86400u + 3600u;
     const uint32_t offset = 3600u +
         (unix_time >= dst_start && unix_time < dst_end ? 3600u : 0u);
-    *valid = true;
-    return (unix_time + offset) % 86400u;
+    const uint32_t local_time = unix_time + offset;
+    const uint32_t local_days = local_time / 86400u;
+    const uint32_t day_seconds = local_time % 86400u;
+    first_day = 0u;
+    year = 1970u;
+    while (true) {
+        const bool local_leap =
+            (year % 4u == 0u && year % 100u != 0u) || year % 400u == 0u;
+        const uint32_t year_days = local_leap ? 366u : 365u;
+        if (local_days < first_day + year_days) {
+            break;
+        }
+        first_day += year_days;
+        ++year;
+    }
+    const bool local_leap =
+        (year % 4u == 0u && year % 100u != 0u) || year % 400u == 0u;
+    static const uint8_t month_days[12] = {
+        31u, 28u, 31u, 30u, 31u, 30u, 31u, 31u, 30u, 31u, 30u, 31u
+    };
+    uint32_t day_of_year = local_days - first_day;
+    unsigned month = 0u;
+    while (month < 11u) {
+        uint32_t days_in_month = month_days[month];
+        if (month == 1u && local_leap) {
+            ++days_in_month;
+        }
+        if (day_of_year < days_in_month) {
+            break;
+        }
+        day_of_year -= days_in_month;
+        ++month;
+    }
+    result[0] = (uint8_t)(day_seconds / 3600u);
+    result[1] = (uint8_t)((day_seconds / 60u) % 60u);
+    result[2] = (uint8_t)(day_seconds % 60u);
+    result[3] = (uint8_t)(day_of_year + 1u);
+    result[4] = (uint8_t)(month + 1u);
+    result[5] = (uint8_t)(year - 2000u);
+    // Sunday is zero; Unix day zero (1970-01-01) was Thursday.
+    result[6] = (uint8_t)((local_days + 4u) % 7u);
+    return true;
 }
 
 /** Send one minimal NTP client request to a resolved server address. */
@@ -1209,7 +1251,7 @@ static bool mailbox_send(const uint8_t *data, size_t length) {
  */
 static void send_uncached_error(const p2wp_frame_t *source, uint8_t error_code) {
     p2wp_frame_t response = {
-        .version = P2WP_VERSION,
+        .version = source->version,
         .flags = P2WP_FLAG_RESPONSE | P2WP_FLAG_ERROR,
         .type = source->type,
         .sequence = source->sequence,
@@ -1262,7 +1304,7 @@ static void cache_and_send(
 }
 
 /**
- * @brief Validate the fixed HELLO signature and compatible version range.
+ * @brief Validate the fixed HELLO signature and ordered version range.
  *
  * @param frame Candidate HELLO request.
  * @return true when its payload is structurally and version compatible.
@@ -1271,8 +1313,17 @@ static bool hello_is_valid(const p2wp_frame_t *frame) {
     static const uint8_t magic[] = {'P', '2', 'W', 'P'};
     return frame->payload_length == 8u &&
         memcmp(frame->payload, magic, sizeof(magic)) == 0 &&
-        frame->payload[4] <= P2WP_VERSION &&
-        frame->payload[5] >= P2WP_VERSION;
+        frame->payload[4] <= frame->payload[5];
+}
+
+/** Select the newest protocol revision shared with a valid HELLO request. */
+static uint8_t hello_select_version(const p2wp_frame_t *frame) {
+    return p2wp_select_version(
+        frame->payload[4],
+        frame->payload[5],
+        P2WP_MIN_VERSION,
+        P2WP_MAX_VERSION
+    );
 }
 
 /**
@@ -1286,7 +1337,7 @@ static bool empty_request(const p2wp_frame_t *frame) {
 }
 
 /**
- * @brief Validate and dispatch one decoded P2WP/2 request.
+ * @brief Validate and dispatch one decoded negotiated P2WP request.
  *
  * Fast mailbox operations are completed immediately. Network and flash work is
  * queued in mutex-protected state for core 0, then observed through status
@@ -1311,7 +1362,12 @@ static void handle_request(const p2wp_frame_t *frame) {
         return;
     }
 
-    if (frame->version != P2WP_VERSION) {
+    if (frame->type == P2WP_TYPE_HELLO) {
+        if (frame->version != P2WP_BOOTSTRAP_VERSION) {
+            send_uncached_error(frame, P2WP_ERROR_UNSUPPORTED_VERSION);
+            return;
+        }
+    } else if (!p2wp_session_valid || frame->version != p2wp_session_version) {
         send_uncached_error(frame, P2WP_ERROR_UNSUPPORTED_VERSION);
         return;
     }
@@ -1323,7 +1379,9 @@ static void handle_request(const p2wp_frame_t *frame) {
     }
 
     p2wp_frame_t response = {
-        .version = P2WP_VERSION,
+        .version = frame->type == P2WP_TYPE_HELLO
+            ? P2WP_BOOTSTRAP_VERSION
+            : p2wp_session_version,
         .flags = P2WP_FLAG_RESPONSE,
         .type = frame->type,
         .sequence = frame->sequence,
@@ -1333,6 +1391,12 @@ static void handle_request(const p2wp_frame_t *frame) {
         case P2WP_TYPE_HELLO: {
             if (!hello_is_valid(frame)) {
                 send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
+                return;
+            }
+
+            const uint8_t selected_version = hello_select_version(frame);
+            if (selected_version == 0u) {
+                send_uncached_error(frame, P2WP_ERROR_UNSUPPORTED_VERSION);
                 return;
             }
 
@@ -1348,7 +1412,7 @@ static void handle_request(const p2wp_frame_t *frame) {
 
             static const uint8_t magic[] = {'P', '2', 'W', 'P'};
             memcpy(response.payload, magic, sizeof(magic));
-            response.payload[4] = P2WP_VERSION;
+            response.payload[4] = selected_version;
             mutex_enter_blocking(&wifi_mutex);
             const bool wifi_capable = wifi_init_state != WIFI_INIT_FAILED;
             mutex_exit(&wifi_mutex);
@@ -1362,6 +1426,8 @@ static void handle_request(const p2wp_frame_t *frame) {
             response.payload_length = 8u;
 
             cached_request_valid = false;
+            p2wp_session_version = selected_version;
+            p2wp_session_valid = true;
             cache_and_send(frame, &response);
             break;
         }
@@ -1691,16 +1757,18 @@ static void handle_request(const p2wp_frame_t *frame) {
             response.payload[3] = (uint8_t)(received >> 8u);
             response.payload[4] = teletekst_next_subpage;
             mutex_exit(&wifi_mutex);
-            bool clock_is_valid;
-            const uint32_t local_time = clock_local_seconds(
-                clock_now(),
-                &clock_is_valid
-            );
-            response.payload[5] = (uint8_t)(local_time / 3600u);
-            response.payload[6] = (uint8_t)((local_time / 60u) % 60u);
-            response.payload[7] = (uint8_t)(local_time % 60u);
-            response.payload[8] = clock_is_valid ? 1u : 0u;
-            response.payload_length = 9u;
+            if (p2wp_session_version >= 3u) {
+                uint8_t local_clock[7];
+                const bool clock_is_valid = clock_local_components(
+                    clock_now(), local_clock
+                );
+                memcpy(response.payload + 5u, local_clock, 3u);
+                response.payload[8] = clock_is_valid ? 1u : 0u;
+                memcpy(response.payload + 9u, local_clock + 3u, 4u);
+                response.payload_length = 13u;
+            } else {
+                response.payload_length = 5u;
+            }
             cache_and_send(frame, &response);
             break;
         }
@@ -1787,6 +1855,8 @@ static void mailbox_core_main(void) {
 int main(void) {
     mailbox_init();
     mutex_init(&wifi_mutex);
+    p2wp_session_valid = false;
+    p2wp_session_version = P2WP_BOOTSTRAP_VERSION;
     wifi_init_state = WIFI_INIT_STARTING;
     stored_profile_state = wifi_profile_present()
         ? WIFI_PROFILE_STATE_READY

@@ -1,7 +1,7 @@
 Z80 assembly client
 ===================
 
-The slot-1 ROM in ``src/p2wp-cartridge.asm`` is the production P2WP/2 host
+The slot-1 ROM in ``src/p2wp-cartridge.asm`` is the production P2WP/2–3 host
 implementation. It is also the reference for clients written in Z80 assembly.
 The code uses ``z80asm`` syntax and communicates with the interface through
 three constants:

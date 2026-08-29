@@ -1,4 +1,4 @@
-; P2WP/2 Wi-Fi and Teletekst client for a Philips P2000T cartridge.
+; P2WP/2-3 Wi-Fi and Teletekst client for a Philips P2000T cartridge.
 ;
 ; The monitor maps this 16 KiB ROM at 1000h and enters it at 1010h. The
 ; sign_cartridge.py fills the checksum length and value after assembly.  The
@@ -26,9 +26,11 @@ MONITOR_CLOCK:         equ 06010h
 STATUS_RX_READY:       equ 001h
 STATUS_TX_READY:       equ 002h
 
-P2WP_VERSION:          equ 002h
+P2WP_BOOTSTRAP_VERSION: equ 002h
+P2WP_MIN_VERSION:      equ 002h
+P2WP_MAX_VERSION:      equ 003h
 CARTRIDGE_VERSION_MAJOR: equ 0
-CARTRIDGE_VERSION_MINOR: equ 3
+CARTRIDGE_VERSION_MINOR: equ 4
 CARTRIDGE_VERSION_PATCH: equ 0
 P2WP_FLAG_RESPONSE:    equ 001h
 P2WP_FLAG_ERROR:       equ 002h
@@ -59,6 +61,7 @@ MENU_RULE_RAM:         equ VIDEO_RAM+160
 STACK_TOP:             equ 09ff0h
 DISPLAY_HASH:          equ 05fh
 SAA5050_ALPHA_WHITE:   equ 007h
+SAA5050_ALPHA_YELLOW:  equ 003h
 SAA5050_GRAPHICS_WHITE: equ 017h
 SAA5050_CONTIGUOUS_GRAPHICS: equ 019h
 KEY_STOP_EVENT:        equ 080h
@@ -86,6 +89,7 @@ TELETEKST_CHUNK_COUNT: equ 4
 TELETEKST_CHUNK_SIZE:  equ 240
 TELETEKST_ROTATE_TICKS: equ 500
 TELETEKST_CLOCK_TICKS:  equ 50
+TELETEKST_BLINK_TICKS:  equ 25
 LINK_TIMEOUT_TICKS:    equ 100 ; 100 monitor ticks at 20 ms = 2 seconds
 TELETEKST_SOURCE_NOS:   equ 0
 TELETEKST_SOURCE_P2000T: equ 1
@@ -102,11 +106,15 @@ start:
         ei
         xor a
         ld (teletekst_clock_valid),a
+        ld (hello_error_kind),a
+        ld a,P2WP_BOOTSTRAP_VERSION
+        ld (p2wp_session_version),a
         call show_opening_screen
         ; Discard the key that may have launched the cartridge, then leave the
-        ; completed splash visible until the user deliberately continues.
+        ; completed splash visible, with a blinking prompt, until the user
+        ; deliberately continues.
         call MONITOR_CLEAR_KEY
-        call MONITOR_READ_KEY
+        call wait_for_opening_key
         ld de,VIDEO_RAM+1760
         call clear_line
         ld hl,hello_wait_text
@@ -125,11 +133,21 @@ hello_retry:
         ; A missing or unresponsive Pico must not leave the cartridge waiting
         ; forever. transact bounds the complete three-attempt exchange to two
         ; seconds using the monitor's interrupt-driven 20 ms clock.
-        jr c,hello_failed
+        jr c,hello_check_failure
         call validate_hello
-        jr c,hello_failed
+        jr c,hello_check_failure
+
+        ld a,(p2wp_session_version)
+        cp P2WP_MAX_VERSION
+        call c,show_protocol_legacy_warning
 
         jp wifi_profile_startup
+
+hello_check_failure:
+        ld a,(hello_error_kind)
+        or a
+        jp nz,show_protocol_incompatible
+        jr hello_failed
 
 echo_loop:
         ld de,VIDEO_RAM+160
@@ -206,6 +224,8 @@ build_echo:
         ld de,FRAME_BUFFER
         ld bc,echo_header_end-echo_header
         ldir
+        ld a,(p2wp_session_version)
+        ld (FRAME_BUFFER),a
         ld a,(sequence)
         ld (FRAME_BUFFER+3),a
         ld a,(line_length)
@@ -226,12 +246,12 @@ build_echo_length:
         ret
 
 hello_template:
-        defb P2WP_VERSION,0,P2WP_TYPE_HELLO,0,8,0
-        defb "P2WP",P2WP_VERSION,P2WP_VERSION,HOST_MAX_PAYLOAD,0
+        defb P2WP_BOOTSTRAP_VERSION,0,P2WP_TYPE_HELLO,0,8,0
+        defb "P2WP",P2WP_MIN_VERSION,P2WP_MAX_VERSION,HOST_MAX_PAYLOAD,0
 hello_template_end:
 
 echo_header:
-        defb P2WP_VERSION,0,P2WP_TYPE_ECHO,0,0,0
+        defb P2WP_BOOTSTRAP_VERSION,0,P2WP_TYPE_ECHO,0,0,0
 echo_header_end:
 
 ; ---------------------------------------------------------------------------
@@ -251,12 +271,10 @@ transact_attempt:
         call receive_frame
         jr c,transact_retry
 
+        ld a,(p2wp_session_version)
+        ld b,a
         ld a,(RX_BUFFER)
-        cp P2WP_VERSION
-        jr nz,transact_retry
-        ld a,(RX_BUFFER+1)
-        and P2WP_FLAG_RESPONSE+P2WP_FLAG_ERROR
-        cp P2WP_FLAG_RESPONSE
+        cp b
         jr nz,transact_retry
         ld a,(expected_type)
         ld b,a
@@ -268,6 +286,29 @@ transact_attempt:
         ld a,(RX_BUFFER+3)
         cp b
         jr nz,transact_retry
+        ld a,(RX_BUFFER+1)
+        and P2WP_FLAG_RESPONSE+P2WP_FLAG_ERROR
+        cp P2WP_FLAG_RESPONSE
+        jr z,transact_success
+        cp P2WP_FLAG_RESPONSE+P2WP_FLAG_ERROR
+        jr nz,transact_retry
+        ld a,(expected_type)
+        cp P2WP_TYPE_HELLO
+        jr nz,transact_retry
+        ld a,(RX_BUFFER+4)
+        cp 1
+        jr nz,transact_retry
+        ld a,(RX_BUFFER+5)
+        or a
+        jr nz,transact_retry
+        ld a,(RX_BUFFER+6)
+        cp 1                    ; P2WP_ERROR_UNSUPPORTED_VERSION
+        jr nz,transact_retry
+        ld a,1
+        ld (hello_error_kind),a
+        scf
+        ret
+transact_success:
         or a                    ; clear carry
         ret
 
@@ -575,7 +616,7 @@ validate_hello:
         jr nz,payload_bad
         ld hl,RX_BUFFER+6
         ld de,hello_response_prefix
-        ld b,5
+        ld b,4
 validate_hello_loop:
         ld a,(de)
         cp (hl)
@@ -583,6 +624,12 @@ validate_hello_loop:
         inc de
         inc hl
         djnz validate_hello_loop
+        ld a,(RX_BUFFER+10)
+        cp P2WP_MIN_VERSION
+        jr c,hello_payload_incompatible
+        cp P2WP_MAX_VERSION+1
+        jr nc,hello_payload_incompatible
+        ld (p2wp_session_version),a
         ld a,(RX_BUFFER+11)
         and 00eh
         cp 00eh
@@ -593,8 +640,14 @@ validate_hello_loop:
         or a
         ret
 
+hello_payload_incompatible:
+        ld a,1
+        ld (hello_error_kind),a
+        scf
+        ret
+
 hello_response_prefix:
-        defb "P2WP",P2WP_VERSION
+        defb "P2WP"
 
 validate_echo:
         ld a,(RX_BUFFER+4)
@@ -1191,11 +1244,17 @@ teletekst_choose_source:
         ld hl,source_title_text
         ld de,MENU_HEADER_RAM
         call write_string
+        ld hl,source_title_tag_text
+        ld de,MENU_HEADER_RAM+31
+        call write_string
         ld hl,opening_blue_rule_text
         ld de,MENU_RULE_RAM
         call write_string
         ld hl,source_intro_text
         ld de,VIDEO_RAM+240
+        call write_string
+        ld hl,source_white_blank_text
+        ld de,VIDEO_RAM+320
         call write_string
         ld hl,source_nos_text
         ld de,VIDEO_RAM+400
@@ -1203,17 +1262,38 @@ teletekst_choose_source:
         ld hl,source_p2000t_text
         ld de,VIDEO_RAM+480
         call write_string
+        ld hl,source_white_blank_text
+        ld de,VIDEO_RAM+560
+        call write_string
         ld hl,opening_blue_rule_text
         ld de,VIDEO_RAM+640
         call write_string
         ld hl,source_prompt_text
         ld de,VIDEO_RAM+720
         call write_string
-        ld hl,source_controls_text
+        ld hl,source_controls_title_text
         ld de,VIDEO_RAM+880
         call write_string
-        ld hl,source_controls_more_text
+        ld hl,source_control_pause_text
         ld de,VIDEO_RAM+960
+        call write_string
+        ld hl,source_control_subpage_text
+        ld de,VIDEO_RAM+1040
+        call write_string
+        ld hl,source_control_wifi_text
+        ld de,VIDEO_RAM+1120
+        call write_string
+        ld hl,source_control_help_text
+        ld de,VIDEO_RAM+1200
+        call write_string
+        ld hl,source_control_stop_text
+        ld de,VIDEO_RAM+1280
+        call write_string
+        ld hl,opening_footer_text
+        ld de,VIDEO_RAM+1840
+        call write_string
+        ld hl,opening_footer_version_text
+        ld de,VIDEO_RAM+1840+34
         call write_string
 teletekst_choose_source_key:
         call read_key
@@ -1624,12 +1704,27 @@ teletekst_fetch_poll:
         call prepare_request
         call transact
         jp c,teletekst_fetch_failed
-        ld a,(RX_BUFFER+4)
-        cp 9
-        jp nz,teletekst_fetch_failed
         ld a,(RX_BUFFER+5)
         or a
         jp nz,teletekst_fetch_failed
+        ld a,(RX_BUFFER+4)
+        ld (teletekst_status_length),a
+        ld b,a
+        ld a,(p2wp_session_version)
+        cp 3
+        ld a,b
+        jr z,teletekst_fetch_poll_v3_length
+        cp 5
+        jr z,teletekst_fetch_poll_length_ok
+        cp 9
+        jr z,teletekst_fetch_poll_length_ok
+        cp 13
+        jp nz,teletekst_fetch_failed
+        jr teletekst_fetch_poll_length_ok
+teletekst_fetch_poll_v3_length:
+        cp 13
+        jp nz,teletekst_fetch_failed
+teletekst_fetch_poll_length_ok:
         call next_sequence
         ld a,(RX_BUFFER+6)
         cp TELETEKST_CONNECTING
@@ -1649,19 +1744,41 @@ teletekst_fetch_poll:
 teletekst_fetch_rows:
         ld a,(RX_BUFFER+10)
         ld (teletekst_next_subpage),a
-        ld a,(RX_BUFFER+12)
+        xor a
+        ld (teletekst_clock_valid),a
+        ld (teletekst_clock_has_date),a
+        ld a,(teletekst_status_length)
+        cp 5
+        jr z,teletekst_fetch_rows_no_clock
+        ld a,(RX_BUFFER+14)
         or a
         jr z,teletekst_fetch_rows_no_clock
-        ld a,(RX_BUFFER+9)
-        ld (teletekst_clock_hours),a
-        ld a,(RX_BUFFER+10)
-        ld (teletekst_clock_minutes),a
         ld a,(RX_BUFFER+11)
+        ld (teletekst_clock_hours),a
+        ld a,(RX_BUFFER+12)
+        ld (teletekst_clock_minutes),a
+        ld a,(RX_BUFFER+13)
         ld (teletekst_clock_seconds),a
+        ld a,(teletekst_status_length)
+        cp 13
+        jr nz,teletekst_fetch_rows_clock_ready
+        ld a,(RX_BUFFER+15)
+        ld (teletekst_clock_day),a
+        ld a,(RX_BUFFER+16)
+        ld (teletekst_clock_month),a
+        ld a,(RX_BUFFER+17)
+        ld (teletekst_clock_year),a
+        ld a,(RX_BUFFER+18)
+        ld (teletekst_clock_weekday),a
+        ld a,1
+        ld (teletekst_clock_has_date),a
+teletekst_fetch_rows_clock_ready:
         ld hl,(MONITOR_CLOCK)
         ld (teletekst_clock_last_tick),hl
         ld a,1
         ld (teletekst_clock_valid),a
+        xor a
+        ld (teletekst_clock_blink_phase),a
 teletekst_fetch_rows_no_clock:
         ld hl,TELETEXT_SCREEN_BUFFER
         ld (teletekst_screen_pointer),hl
@@ -1789,11 +1906,15 @@ teletekst_clock_update:
         or a
         jr nz,teletekst_clock_tick
         ld a,l
-        cp TELETEKST_CLOCK_TICKS
+        cp TELETEKST_BLINK_TICKS
         ret c
 teletekst_clock_tick:
         ld hl,(MONITOR_CLOCK)
         ld (teletekst_clock_last_tick),hl
+        ld a,(teletekst_clock_blink_phase)
+        xor 1
+        ld (teletekst_clock_blink_phase),a
+        jr nz,teletekst_clock_saved
         ld a,(teletekst_clock_seconds)
         inc a
         cp 60
@@ -1811,6 +1932,12 @@ teletekst_clock_tick:
         cp 24
         jr c,teletekst_clock_store_hours
         xor a
+        ld (teletekst_clock_hours),a
+        ld a,(teletekst_clock_has_date)
+        or a
+        jr z,teletekst_clock_saved
+        call teletekst_clock_increment_date
+        jr teletekst_clock_saved
 teletekst_clock_store_hours:
         ld (teletekst_clock_hours),a
         jr teletekst_clock_saved
@@ -1826,8 +1953,63 @@ teletekst_clock_saved:
         ld a,(teletekst_input_count)
         or a
         ret nz
-        ld de,VIDEO_RAM+32
+        ld de,VIDEO_RAM+1
         jp teletekst_write_clock
+
+; Advance the locally cached calendar date after the clock crosses midnight.
+teletekst_clock_increment_date:
+        ld a,(teletekst_clock_weekday)
+        inc a
+        cp 7
+        jr c,teletekst_clock_store_weekday
+        xor a
+teletekst_clock_store_weekday:
+        ld (teletekst_clock_weekday),a
+        ld a,(teletekst_clock_month)
+        dec a
+        ld e,a
+        ld d,0
+        ld hl,teletekst_month_days
+        add hl,de
+        ld b,(hl)
+        ld a,(teletekst_clock_month)
+        cp 2
+        jr nz,teletekst_clock_date_length_ready
+        ld a,(teletekst_clock_year)
+        cp 100
+        jr z,teletekst_clock_date_length_ready
+        cp 200
+        jr z,teletekst_clock_date_length_ready
+        and 3
+        jr nz,teletekst_clock_date_length_ready
+        inc b
+teletekst_clock_date_length_ready:
+        ld a,(teletekst_clock_day)
+        inc a
+        cp b
+        jr c,teletekst_clock_store_day
+        jr z,teletekst_clock_store_day
+        ld a,1
+        ld (teletekst_clock_day),a
+        ld a,(teletekst_clock_month)
+        inc a
+        cp 13
+        jr c,teletekst_clock_store_month
+        ld a,1
+        ld (teletekst_clock_month),a
+        ld a,(teletekst_clock_year)
+        inc a
+        ld (teletekst_clock_year),a
+        ret
+teletekst_clock_store_month:
+        ld (teletekst_clock_month),a
+        ret
+teletekst_clock_store_day:
+        ld (teletekst_clock_day),a
+        ret
+
+teletekst_month_days:
+        defb 31,28,31,30,31,30,31,31,30,31,30,31
 
 ; Render the current clock into the staged page before its atomic display
 ; commit. This is the common top-banner treatment for both content sources.
@@ -1835,17 +2017,65 @@ teletekst_draw_clock_buffer:
         ld a,(teletekst_clock_valid)
         or a
         ret z
-        ld de,TELETEXT_SCREEN_BUFFER+32
+        ld de,TELETEXT_SCREEN_BUFFER+1
         ; fall through
 teletekst_write_clock:
-        ld a,SAA5050_ALPHA_WHITE
+        ld a,SAA5050_ALPHA_YELLOW
         dec de
         ld (de),a
         inc de
         ; fall through
 teletekst_write_clock_style:
+        ld a,(teletekst_clock_has_date)
+        or a
+        jr z,teletekst_write_clock_hours
+        ld a,(teletekst_clock_weekday)
+        add a,a
+        ld c,a
+        ld b,0
+        ld hl,teletekst_weekday_names
+        add hl,bc
+        ld bc,2
+        ldir
+        ld a,' '
+        ld (de),a
+        inc de
+        ld a,(teletekst_clock_day)
+        call teletekst_write_two_digits
+        ld a,'.'
+        ld (de),a
+        inc de
+        ld a,(teletekst_clock_month)
+        dec a
+        ld c,a
+        add a,a
+        add a,c
+        ld c,a
+        ld b,0
+        ld hl,teletekst_month_names
+        add hl,bc
+        ld bc,3
+        ldir
+        ld a,' '
+        ld (de),a
+        inc de
+teletekst_write_clock_hours:
         ld a,(teletekst_clock_hours)
         call teletekst_write_two_digits
+        ld a,(teletekst_source)
+        cp TELETEKST_SOURCE_P2000T
+        jr nz,teletekst_write_clock_with_seconds
+        ld a,(teletekst_clock_blink_phase)
+        or a
+        ld a,' '
+        jr nz,teletekst_write_clock_blink_colon
+        ld a,':'
+teletekst_write_clock_blink_colon:
+        ld (de),a
+        inc de
+        ld a,(teletekst_clock_minutes)
+        jp teletekst_write_two_digits
+teletekst_write_clock_with_seconds:
         ld a,':'
         ld (de),a
         inc de
@@ -1875,6 +2105,13 @@ teletekst_clock_tens_done:
         ld (de),a
         inc de
         ret
+
+teletekst_month_names:
+        defb "jan","feb","mrt","apr","mei","jun"
+        defb "jul","aug","sep","okt","nov","dec"
+
+teletekst_weekday_names:
+        defb "zo","ma","di","wo","do","vr","za"
 
 ; The monitor ROM increments this clock from the video/CTC interrupt every
 ; vertical retrace. Only the low byte is needed to detect the next field.
@@ -2145,6 +2382,10 @@ prepare_request:
         ld bc,6
         ldir
         pop af
+        push af
+        ld a,(p2wp_session_version)
+        ld (FRAME_BUFFER),a
+        pop af
         ld (FRAME_BUFFER+2),a
         ld (expected_type),a
         ld a,(sequence)
@@ -2155,7 +2396,7 @@ prepare_request:
         ret
 
 request_header:
-        defb P2WP_VERSION,0,0,0,0,0
+        defb P2WP_BOOTSTRAP_VERSION,0,0,0,0,0
 
 next_sequence:
         ld a,(sequence)
@@ -2552,56 +2793,110 @@ keyboard_shifted_table:
 ; ---------------------------------------------------------------------------
 ; Minimal screen output
 
-; Page-100-inspired SAA5050 splash in the classic blue, white and black NOS
-; palette. P2000T is drawn as white mosaics on blue; the seven-row centrepiece
-; uses the native mosaic forms from the NOS page 100 masthead.
-show_opening_screen:
+; A P2WP/2 peripheral remains usable, but lacks the v0.4 P2WP/3 date-status
+; contract. Explain the fallback once, then let the user continue normally.
+show_protocol_legacy_warning:
         call clear_screen
-        ld hl,opening_header_text
+        ld hl,protocol_legacy_title_text
         ld de,MENU_HEADER_RAM
         call write_string
-
-        ld hl,opening_p2000t_row_1
-        ld de,VIDEO_RAM+160
-        call write_blue_mosaic_pattern
-        ld hl,opening_p2000t_row_2
-        ld de,VIDEO_RAM+240
-        call write_blue_mosaic_pattern
-        ld hl,opening_p2000t_row_3
-        ld de,VIDEO_RAM+320
-        call write_blue_mosaic_pattern
-        ld hl,opening_p2000t_row_4
-        ld de,VIDEO_RAM+400
-        call write_blue_mosaic_pattern
-        ld hl,opening_p2000t_row_5
-        ld de,VIDEO_RAM+480
-        call write_blue_mosaic_pattern
-
         ld hl,opening_blue_rule_text
-        ld de,VIDEO_RAM+560
+        ld de,MENU_RULE_RAM
+        call write_string
+        ld hl,protocol_legacy_mode_text
+        ld de,VIDEO_RAM+240
+        call write_string
+        ld hl,protocol_legacy_found_text
+        ld de,VIDEO_RAM+400
+        call write_string
+        ld hl,protocol_legacy_available_text
+        ld de,VIDEO_RAM+480
+        call write_string
+        ld hl,protocol_legacy_update_text
+        ld de,VIDEO_RAM+640
+        call write_string
+        ld hl,protocol_continue_text
+        ld de,VIDEO_RAM+800
+        call write_string
+        ld hl,opening_footer_text
+        ld de,VIDEO_RAM+1840
+        call write_string
+        ld hl,opening_footer_version_text
+        ld de,VIDEO_RAM+1840+34
+        call write_string
+        call MONITOR_CLEAR_KEY
+        call MONITOR_READ_KEY
+        ret
+
+; A syntactically valid HELLO with no common revision must not be presented as
+; an Internet failure. Stop on a dedicated, actionable compatibility screen.
+show_protocol_incompatible:
+        call clear_screen
+        ld hl,protocol_incompatible_title_text
+        ld de,MENU_HEADER_RAM
+        call write_string
+        ld hl,opening_blue_rule_text
+        ld de,MENU_RULE_RAM
+        call write_string
+        ld hl,protocol_incompatible_shared_text
+        ld de,VIDEO_RAM+320
+        call write_string
+        ld hl,protocol_incompatible_range_text
+        ld de,VIDEO_RAM+480
+        call write_string
+        ld hl,protocol_incompatible_update_text
+        ld de,VIDEO_RAM+640
+        call write_string
+        ld hl,opening_footer_text
+        ld de,VIDEO_RAM+1840
+        call write_string
+        ld hl,opening_footer_version_text
+        ld de,VIDEO_RAM+1840+34
+        call write_string
+protocol_incompatible_loop:
+        halt
+        jr protocol_incompatible_loop
+
+; Page-100-inspired SAA5050 splash in the classic blue, white and black NOS
+; palette. P2000T is drawn as a centered blue mosaic badge with a white
+; border; the seven-row centrepiece uses the native mosaic forms from the NOS
+; page 100 masthead.
+show_opening_screen:
+        call clear_screen
+        ld hl,opening_blue_blank_text
+        ld de,VIDEO_RAM
+        call write_string
+        ld hl,opening_blue_blank_text
+        ld de,VIDEO_RAM+80
+        call write_string
+        ld hl,opening_header_text
+        ld de,VIDEO_RAM+160
         call write_string
 
+        ld hl,opening_p2000t_logo_rows
+        ld de,VIDEO_RAM+240
+        ld a,7
+        call write_packed_rows
+
         ld hl,opening_nos_logo_rows
-        ld de,VIDEO_RAM+640
+        ld de,VIDEO_RAM+800
         ld a,7
         call write_packed_rows
 
         ld hl,opening_live_text
-        ld de,VIDEO_RAM+1200
+        ld de,VIDEO_RAM+1360
         call write_string
         ld hl,opening_hardware_text
-        ld de,VIDEO_RAM+1280
-        call write_string
-
-        ld hl,opening_blue_rule_text
         ld de,VIDEO_RAM+1440
         call write_string
+
         ld hl,opening_service_text
         ld de,VIDEO_RAM+1520
         call write_string
         ld hl,opening_service_detail_text
         ld de,VIDEO_RAM+1600
         call write_string
+
         ld hl,opening_blue_rule_text
         ld de,VIDEO_RAM+1680
         call write_string
@@ -2611,7 +2906,47 @@ show_opening_screen:
         call write_string
         ld hl,opening_footer_text
         ld de,VIDEO_RAM+1840
+        call write_string
+        ld hl,opening_footer_version_text
+        ld de,VIDEO_RAM+1840+34
         jp write_string
+
+; Wait nonblockingly so the start prompt can blink every 500 ms using the
+; monitor's interrupt-driven 20 ms clock. Any regular key or STOP continues.
+wait_for_opening_key:
+        ld a,1
+        ld (opening_blink_visible),a
+        ld a,(MONITOR_CLOCK)
+        ld (opening_blink_last_tick),a
+opening_wait_key:
+        call MONITOR_KEY_AVAILABLE
+        ret c
+        jr z,opening_blink_update
+        call MONITOR_READ_KEY
+        ret
+opening_blink_update:
+        ld a,(MONITOR_CLOCK)
+        ld b,a
+        ld a,(opening_blink_last_tick)
+        ld c,a
+        ld a,b
+        sub c
+        cp TELETEKST_BLINK_TICKS
+        jr c,opening_wait_key
+        ld a,b
+        ld (opening_blink_last_tick),a
+        ld a,(opening_blink_visible)
+        xor 1
+        ld (opening_blink_visible),a
+        ld de,VIDEO_RAM+1760
+        or a
+        jr z,opening_blink_hide
+        ld hl,opening_start_text
+        call write_string
+        jr opening_wait_key
+opening_blink_hide:
+        call clear_line
+        jr opening_wait_key
 
 ; Establish a blue background and white separated-graphics foreground, then
 ; turn the readable '#' ROM patterns into full SAA5050 mosaic cells.
@@ -2875,21 +3210,49 @@ wifi_profile_save_failed_text:
 wifi_profile_continue_text:
         defb 004h,01dh,007h," DRUK OP EEN TOETS OM DOOR TE GAAN",0
 source_title_text:
-        defb 004h,01dh,007h," P2000T  TELETEKSTBRON"
+        defb 004h,01dh,007h," P2000T TELETEKST"
         defs 40-($-source_title_text),020h
         defb 0
+source_title_tag_text:
+        defb "BRONKEUZE",0
 source_intro_text:
-        defb 004h,01dh,007h,"        KIES ONLINE DIENST",0
+        defb 004h,01dh,007h,"      KIES UW TELETEKSTBRON",0
+source_white_blank_text:
+        defb 007h,01dh,004h
+        defs 37,020h
+        defb 0
 source_nos_text:
-        defb 007h,01dh,004h," (1) NOS TELETEKST",0
+        defb 007h,01dh,004h,"  1 - NOS TELETEKST"
+        defs 40-($-source_nos_text),020h
+        defb 0
 source_p2000t_text:
-        defb 007h,01dh,004h," (2) P2000T TELETEKST",0
+        defb 007h,01dh,004h,"  2 - P2000T TELETEKST"
+        defs 40-($-source_p2000t_text),020h
+        defb 0
 source_prompt_text:
-        defb 004h,01dh,007h," KIES BRON (1-2): ",0
-source_controls_text:
-        defb 007h,01dh,004h," OP PAGINA: P=PAUZE S=SUBPAGINA",0
-source_controls_more_text:
-        defb 007h,01dh,004h," W=WIFI H=HULP STOP=BRON",0
+        defb 004h,01dh,007h,"         KIES BRON (1-2)",0
+source_controls_title_text:
+        defb 004h,01dh,007h,"      BEDIENING OP DE PAGINA",0
+source_control_pause_text:
+        defb 007h,01dh,004h,"  P - PAUZE / DOORGAAN"
+        defs 40-($-source_control_pause_text),020h
+        defb 0
+source_control_subpage_text:
+        defb 007h,01dh,004h,"  S - SUBPAGINA KIEZEN"
+        defs 40-($-source_control_subpage_text),020h
+        defb 0
+source_control_wifi_text:
+        defb 007h,01dh,004h,"  W - WIFI-NETWERK WIJZIGEN"
+        defs 40-($-source_control_wifi_text),020h
+        defb 0
+source_control_help_text:
+        defb 007h,01dh,004h,"  H - HULP TONEN"
+        defs 40-($-source_control_help_text),020h
+        defb 0
+source_control_stop_text:
+        defb 007h,01dh,004h,"  STOP - ANDERE TELETEKSTBRON"
+        defs 40-($-source_control_stop_text),020h
+        defb 0
 teletekst_title_text:
         defb 004h,01dh,007h," P2000T  TELETEKST VIA PICO W"
         defs 40-($-teletekst_title_text),020h
@@ -2927,27 +3290,59 @@ teletekst_indicator_frames:
         defb SAA5050_GRAPHICS_WHITE,024h,SAA5050_CONTIGUOUS_GRAPHICS,SAA5050_ALPHA_WHITE ; middle left
 
 opening_header_text:
-        defb 004h,01dh,007h," P2000T  INTERNET TELETEKST"
+        defb 004h,01dh,007h,"    P2000T  INTERNET TELETEKST"
         defs 40-($-opening_header_text),020h
+        defb 0
+opening_blue_blank_text:
+        defb 004h,01dh
+        defs 38,020h
         defb 0
 opening_blue_rule_text:
         defb 014h
         defs 39,073h
         defb 0
 opening_live_text:
-        defb 007h,01dh,004h,"       LIVE TELETEKST VIA PICO W",0
+        defb 007h,01dh,004h,"     UW VENSTER OP DE WERELD",0
 opening_hardware_text:
-        defb 007h,01dh,004h,"     ORIGINEEL SAA5050-MOZAIEKBEELD",0
+        defb 007h,01dh,004h,"     NOS EN P2000T TELETEKST",0
 opening_service_text:
-        defb 004h,01dh,007h,"       P2000T INTERNETDIENST",0
+        defb 004h,01dh,007h,"  ORIGINEEL SAA5050-MOZAIEKBEELD",0
 opening_service_detail_text:
-        defb 004h,01dh,007h,"     KLASSIEK BEELD / LIVE GEGEVENS",0
+        defb 004h,01dh,007h,"  KLASSIEK BEELD, ACTUEEL NIEUWS",0
 opening_start_text:
-        defb 007h,"       DRUK OP EEN TOETS",0
+        defb 007h,"          DRUK OP EEN TOETS",0
 opening_footer_text:
-        defb 004h,01dh,007h," P2000T PICO W P2WP/2 v0.3.0"
+        defb 004h,01dh,007h,"P2000T Teletekst Cartridge"
         defs 40-($-opening_footer_text),020h
         defb 0
+opening_footer_version_text:
+        defb "v0.4.0",0
+
+protocol_legacy_title_text:
+        defb 004h,01dh,007h,"        PROTOCOLWAARSCHUWING"
+        defs 40-($-protocol_legacy_title_text),020h
+        defb 0
+protocol_legacy_mode_text:
+        defb 004h,01dh,007h,"   COMPATIBILITEITSMODUS ACTIEF",0
+protocol_legacy_found_text:
+        defb 007h,01dh,004h,"     P2WP/2 VERBINDING GEVONDEN",0
+protocol_legacy_available_text:
+        defb 007h,01dh,004h,"    TELETEKST BLIJFT BESCHIKBAAR",0
+protocol_legacy_update_text:
+        defb 004h,01dh,007h,"     UPDATE CARTRIDGE NAAR v0.4.0",0
+protocol_continue_text:
+        defb 007h,"   DRUK OP EEN TOETS OM DOOR TE GAAN",0
+
+protocol_incompatible_title_text:
+        defb 004h,01dh,007h,"      PROTOCOL NIET COMPATIBEL"
+        defs 40-($-protocol_incompatible_title_text),020h
+        defb 0
+protocol_incompatible_shared_text:
+        defb 007h,01dh,004h,"      GEEN GEDEELDE P2WP-VERSIE",0
+protocol_incompatible_range_text:
+        defb 007h,01dh,004h,"    CARTRIDGE: P2WP/2 TOT P2WP/3",0
+protocol_incompatible_update_text:
+        defb 004h,01dh,007h,"     UPDATE CARTRIDGE OF INTERFACE",0
 
 ; Cartridge-resident Dutch help page. Each text row includes its SAA5050
 ; foreground/background controls and remains within the 40-cell display width.
@@ -2999,10 +3394,23 @@ opening_p2000t_row_4:
 opening_p2000t_row_5:
         defb "     ","#  "," ","###"," ","###"," ","###"," ","###"," "," # ",0
 
-; Seven compiled rows from the stable blue-and-white NOS page 100 masthead.
-; They are already valid SAA5050 control and separated-mosaic bytes.
+; Seven packed rows of native partial mosaics. White foreground subcells trace
+; a one-subcell contour around blue negative-space letterforms, so the border
+; follows P2000T instead of filling a rectangular character-cell background.
+; The final row also starts the upper Teletekst frame, joining both wordmarks.
+opening_p2000t_logo_rows:
+        defb 004h,01dh,017h,020h,020h,020h,020h,020h,020h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,020h,020h,020h,020h,020h,020h,020h
+        defb 004h,01dh,017h,020h,020h,020h,020h,020h,020h,035h,020h,020h,06ah,035h,020h,020h,06ah,035h,020h,020h,06ah,035h,020h,020h,06ah,035h,020h,020h,06ah,035h,020h,020h,06ah,020h,020h,020h,020h,020h,020h,020h
+        defb 004h,01dh,017h,020h,020h,020h,020h,020h,020h,035h,06ah,035h,06ah,07fh,07fh,035h,06ah,035h,06ah,035h,06ah,035h,06ah,035h,06ah,035h,06ah,035h,06ah,07fh,035h,06ah,023h,020h,020h,020h,020h,020h,020h,020h
+        defb 004h,01dh,017h,020h,020h,020h,020h,020h,020h,035h,020h,020h,06ah,035h,020h,020h,06ah,035h,06ah,035h,06ah,035h,06ah,035h,06ah,035h,06ah,035h,06ah,07fh,035h,06ah,020h,020h,020h,020h,020h,020h,020h,020h
+        defb 004h,01dh,017h,020h,020h,020h,020h,020h,020h,035h,06ah,07fh,07fh,035h,06ah,07fh,07fh,035h,06ah,035h,06ah,035h,06ah,035h,06ah,035h,06ah,035h,06ah,07fh,035h,06ah,020h,020h,020h,020h,020h,020h,020h,020h
+        defb 004h,01dh,017h,020h,020h,020h,020h,020h,020h,035h,06ah,07fh,07fh,035h,020h,020h,06ah,035h,020h,020h,06ah,035h,020h,020h,06ah,035h,020h,020h,06ah,07fh,035h,06ah,020h,020h,020h,020h,020h,020h,020h,020h
+        defb 004h,01dh,017h,03ch,02ch,02ch,02ch,02ch,02ch,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02fh,02ch,02ch,02ch,02ch,02ch,02ch,034h,020h
+
+; Seven display-ready continuation rows derived from the stable blue-and-white
+; NOS page 100 masthead. Its upper frame begins in the shared row above.
 opening_nos_logo_rows:
-        defb 004h,01dh,017h,03ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,02ch,034h,020h
+        defb 004h,01dh,017h,035h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,020h,035h,020h
         defb 004h,01dh,017h,075h,070h,070h,030h,020h,060h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,030h,020h,060h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,070h,020h,020h,070h,070h,070h,035h,020h
         defb 004h,01dh,020h,020h,020h,017h,035h,020h,06ah,020h,060h,070h,035h,020h,07fh,07fh,020h,060h,070h,035h,020h,06ah,020h,060h,070h,035h,020h,035h,020h,035h,020h,070h,07ah,020h,020h,035h,020h,020h,020h,020h
         defb 004h,01dh,020h,020h,020h,017h,035h,020h,06ah,020h,02ah,02fh,035h,020h,07fh,07fh,020h,02ah,02fh,035h,020h,06ah,020h,02ah,02fh,035h,020h,065h,070h,035h,020h,02fh,06fh,020h,020h,035h,020h,020h,020h,020h
@@ -3061,6 +3469,17 @@ teletekst_clock_minutes: equ 0747fh
 teletekst_clock_seconds: equ 07480h
 teletekst_clock_last_tick: equ 07481h
 teletekst_clock_valid:   equ 07483h
+teletekst_clock_day:     equ 07484h
+teletekst_clock_month:   equ 07485h
+teletekst_clock_year:    equ 07486h
+teletekst_clock_weekday: equ 07487h
+teletekst_clock_blink_phase: equ 07488h
+opening_blink_last_tick: equ 07489h
+opening_blink_visible:  equ 0748ah
+p2wp_session_version:  equ 0748bh
+hello_error_kind:      equ 0748ch
+teletekst_status_length: equ 0748dh
+teletekst_clock_has_date: equ 0748eh
 TELETEXT_SCREEN_BUFFER: equ 07500h
 
         defs 05000h-$,0ffh

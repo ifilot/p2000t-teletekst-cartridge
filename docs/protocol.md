@@ -1,11 +1,11 @@
-# P2000T to Pico W Protocol (P2WP/2)
+# P2000T to Pico W Protocol (P2WP/2–3)
 
-P2WP/2 is a reliable, framed request/response protocol carried by the three
+P2WP is a reliable, version-negotiated request/response protocol carried by the three
 I/O ports on the P2000T Pico W interface. Multi-byte fields are little-endian.
 
 ## Status and conformance
 
-This document is the normative specification for protocol version 2. The key
+This document is the normative specification for protocol versions 2 and 3. The key
 words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and
 **MAY** describe conformance requirements.
 
@@ -113,7 +113,7 @@ The unescaped body is:
 
 | Offset | Size | Field |
 | ---: | ---: | --- |
-| 0 | 1 | Protocol version (`0x02`) |
+| 0 | 1 | Negotiated protocol version (`0x02` or `0x03`) |
 | 1 | 1 | Flags |
 | 2 | 1 | Message type |
 | 3 | 1 | Sequence number |
@@ -149,7 +149,7 @@ be ignored on receipt.
 The CRC covers the unescaped bytes from version through the final payload
 byte. It does not cover delimiters, escape bytes, or the transmitted CRC.
 
-P2WP/2 uses CRC-16/CCITT-FALSE:
+P2WP uses CRC-16/CCITT-FALSE:
 
 - polynomial: `0x1021`
 - initial value: `0xFFFF`
@@ -171,7 +171,7 @@ error indication and statistics counter.
 
 ## Transactions and recovery
 
-The P2000T is the only request initiator in P2WP/2. The Pico MUST send a frame
+The P2000T is the only request initiator in P2WP. The Pico MUST send a frame
 only in response to a valid request. This avoids unsolicited traffic and lets
 future web events be retrieved with polling requests.
 
@@ -203,7 +203,7 @@ message-specific; the reference implementation uses a short local-link
 timeout, while network operations MAY use longer timeouts or chunked progress
 responses.
 
-## Version 2 messages
+## Versioned messages
 
 | Type | Name | Request payload | Successful response payload |
 | ---: | --- | --- | --- |
@@ -259,6 +259,15 @@ The selected version MUST fall within the host's advertised range. The
 negotiated maximum payload is the smaller of the host and peripheral limits and
 MUST be non-zero. Reserved capability bits MUST be sent as zero and ignored on
 receipt.
+
+`HELLO` request and response frame headers use bootstrap version `2`. After a
+successful response, both endpoints MUST use the selected version in every
+subsequent frame header. A peripheral selects the newest revision in the
+intersection of its supported range and the host's advertised range. If that
+intersection is empty, it returns `UNSUPPORTED_VERSION` in a bootstrap-version
+error response. Version 3 peripherals MUST retain version 2 operation; this
+allows both a new cartridge with old Pico firmware and an old cartridge with
+new Pico firmware to remain usable.
 
 `HELLO` is independent of Wi-Fi state and MUST work while `WIFI_UP` is zero.
 
@@ -370,7 +379,16 @@ A `TELETEKST_FETCH_START` request contains:
 | 2 | Subpage (`0` selects the API's default first subpage, otherwise `1`-`99`) |
 | 3 | Source: `0` NOS Teletekst, `1` P2000T Teletekst |
 
-`TELETEKST_FETCH_STATUS` returns nine bytes:
+In P2WP/2, `TELETEKST_FETCH_STATUS` returns the original five-byte payload:
+
+| Offset | Field |
+| ---: | --- |
+| 0 | State: `0` idle, `1` connecting/requesting, `2` receiving, `3` complete, `4` failed |
+| 1 | Error: `0` none, `1` not connected, `2` TLS setup, `3` request start, `4` network, `5` HTTP status, `6` response too large, `7` invalid data, `8` page not found |
+| 2-3 | HTTP response bytes received so far, little-endian |
+| 4 | Next subpage number, or zero when the API supplies none |
+
+P2WP/3 extends that payload to thirteen bytes:
 
 | Offset | Field |
 | ---: | --- |
@@ -382,6 +400,10 @@ A `TELETEKST_FETCH_START` request contains:
 | 6 | Dutch local minute (`0`-`59`) from NTP |
 | 7 | Dutch local second (`0`-`59`) from NTP |
 | 8 | Clock validity (`1` after NTP synchronization, otherwise `0`) |
+| 9 | Dutch local day of month (`1`-`31`) |
+| 10 | Dutch local month (`1`-`12`) |
+| 11 | Dutch local year minus 2000 |
+| 12 | Dutch local weekday (`0` Sunday through `6` Saturday) |
 
 After state `3`, request chunk indexes `0` through `3` from
 `TELETEKST_FETCH_ROWS`. Each successful response is exactly 240 bytes: six
@@ -389,10 +411,14 @@ consecutive 40-column rows ready to copy to the SAA5050-backed display. Together
 the chunks provide the P2000T's 24 visible rows. Compatible source documents
 MAY have 25 rows; row 25 contains Fastext prompts and is intentionally omitted.
 
-When the clock-valid byte is set, the cartridge overlays `HH:MM:SS` in the
-rightmost eight cells of row one. It advances that value using the P2000T's
-20 ms monitor clock between fetches, and does not alter either provider's
-remaining header cells.
+The clock and calendar fields are a P2WP/3 addition. When the clock-valid byte
+is set, the cartridge places an alpha-yellow control
+in column zero. NOS pages show `ww DD.mmm HH:MM:SS` in yellow in columns one
+through eighteen. P2000T pages show the shorter `ww DD.mmm HH:MM` in columns
+one through fifteen, with the time separator blinking every half second. Both
+use Dutch two-letter weekdays and three-letter month names. The cartridge
+advances the time, date, weekday, and blink using the P2000T's 20 ms monitor
+clock between fetches, leaving provider text on the right untouched.
 
 The Pico translates HTML colour classes and Unicode private-use mosaic glyphs
 into native SAA5050 bytes. Because foreground and graphics controls occupy a

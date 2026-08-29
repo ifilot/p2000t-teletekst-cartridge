@@ -5,7 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define P2WP_VERSION 2u
+#define P2WP_BOOTSTRAP_VERSION 2u
+#define P2WP_MIN_VERSION 2u
+#define P2WP_MAX_VERSION 3u
+#define P2WP_VERSION P2WP_MAX_VERSION
 #define P2WP_MAX_PAYLOAD 512u
 #define P2WP_HEADER_SIZE 6u
 #define P2WP_CRC_SIZE 2u
@@ -95,6 +98,18 @@ typedef struct {
 uint16_t p2wp_crc16(const uint8_t *data, size_t length);
 
 /**
+ * @brief Select the newest protocol revision shared by two ordered ranges.
+ *
+ * @return Selected revision, or zero when the ranges do not overlap.
+ */
+uint8_t p2wp_select_version(
+    uint8_t host_minimum,
+    uint8_t host_maximum,
+    uint8_t peripheral_minimum,
+    uint8_t peripheral_maximum
+);
+
+/**
  * @brief Calculate the identity used to recognize a retransmitted request.
  *
  * The identity covers the decoded header and payload, independently of the
@@ -106,14 +121,14 @@ uint16_t p2wp_crc16(const uint8_t *data, size_t length);
 uint16_t p2wp_frame_identity(const p2wp_frame_t *frame);
 
 /**
- * @brief Reset a streaming P2WP/2 parser.
+ * @brief Reset a streaming P2WP parser.
  *
  * @param[out] parser Parser state to initialize.
  */
 void p2wp_parser_init(p2wp_parser_t *parser);
 
 /**
- * @brief Feed one encoded byte into a streaming P2WP/2 parser.
+ * @brief Feed one encoded byte into a streaming P2WP parser.
  *
  * A frame or error is reported only when a closing delimiter is received.
  * Intermediate bytes return P2WP_PARSE_NONE.
@@ -130,7 +145,7 @@ p2wp_parse_result_t p2wp_parser_feed(
 );
 
 /**
- * @brief Encode a decoded frame into its escaped P2WP/2 wire representation.
+ * @brief Encode a decoded frame into its escaped P2WP wire representation.
  *
  * @param frame Frame header and payload to encode.
  * @param[out] output Destination for delimiters, escaped body, and CRC.

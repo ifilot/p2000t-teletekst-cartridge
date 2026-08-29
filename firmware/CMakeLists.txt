@@ -7,7 +7,7 @@ endif()
 set(PICO_BOARD pico_w CACHE STRING "Target board")
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
-project(p2wp_pico VERSION 0.3.0 LANGUAGES C CXX ASM)
+project(p2wp_pico VERSION 0.4.0 LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -26,7 +26,7 @@ pico_set_program_name(p2wp-pico "P2000T Teletekst Pico")
 pico_set_program_version(p2wp-pico "${PROJECT_VERSION}")
 pico_set_program_description(
     p2wp-pico
-    "P2WP/2 Wi-Fi and Teletekst firmware"
+    "P2WP/2-3 Wi-Fi and Teletekst firmware"
 )
 
 target_include_directories(p2wp-pico PRIVATE src)

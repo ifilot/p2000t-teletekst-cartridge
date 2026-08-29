@@ -13,6 +13,16 @@ static void test_crc(void) {
     assert(p2wp_crc16(input, sizeof(input) - 1u) == 0x29b1u);
 }
 
+/** Verify newest-common-version selection and incompatible ranges. */
+static void test_version_negotiation(void) {
+    assert(p2wp_select_version(2u, 3u, 2u, 3u) == 3u);
+    assert(p2wp_select_version(2u, 2u, 2u, 3u) == 2u);
+    assert(p2wp_select_version(2u, 3u, 2u, 2u) == 2u);
+    assert(p2wp_select_version(2u, 3u, 1u, 1u) == 0u);
+    assert(p2wp_select_version(2u, 3u, 4u, 4u) == 0u);
+    assert(p2wp_select_version(3u, 2u, 2u, 3u) == 0u);
+}
+
 /**
  * @brief Verify frame encoding, escaping, streaming decode, and field recovery.
  */
@@ -401,6 +411,7 @@ static void test_exact_binary_display(void) {
  */
 int main(void) {
     test_crc();
+    test_version_negotiation();
     test_round_trip();
     test_corruption();
     test_profile_save_round_trip();
