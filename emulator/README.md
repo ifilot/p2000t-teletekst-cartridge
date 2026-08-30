@@ -40,6 +40,14 @@ It executes the production cartridge, completes negotiated P2WP HELLO, fictitiou
 scan/connect, source selection, live-code JSON decoding, four chunk transfers,
 and asserts that NOS page content reached emulated video RAM.
 
+The Pico side is a native simulation built around the production
+`firmware/src/firmware_core.c` command processor. Consequently, negotiation,
+payload validation, device/version replies, retry caching, sequence-conflict
+handling, sensitive-payload erasure, and command dispatch are identical to the
+real Pico firmware. The emulator supplies deterministic platform operations for
+Wi-Fi, HTTP and storage; it does not simulate the RP2040/RP2350 processor,
+CYW43 radio, GPIO electrical timing, or Pico SDK drivers.
+
 Use `--p2wp-version 2` to emulate legacy firmware and exercise the cartridge's
 compatibility warning, or `--p2wp-version 1` to exercise the no-common-version
 error screen. Without this option the emulator negotiates the current P2WP/3.

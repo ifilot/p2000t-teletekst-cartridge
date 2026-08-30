@@ -16,6 +16,7 @@ pico_sdk_init()
 
 add_executable(p2wp-pico
     src/main.c
+    src/firmware_core.c
     src/p2wp.c
     src/teletekst.c
     src/version.c
@@ -34,6 +35,7 @@ pico_set_program_description(
 target_include_directories(p2wp-pico PRIVATE src)
 set_source_files_properties(
     src/main.c
+    src/firmware_core.c
     src/p2wp.c
     src/teletekst.c
     src/version.c

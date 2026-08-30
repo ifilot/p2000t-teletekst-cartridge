@@ -169,3 +169,9 @@ GitHub release. Two rows beneath the post-login source menu show that online
 version beside the installed cartridge and firmware versions. Both cartridge
 and Pico artifacts use the repository's canonical `VERSION` value. The Pico
 generation remains available to hosts through the `DEVICE_INFO` protocol command.
+
+The emulator directly compiles the firmware's portable production command
+processor. Its end-to-end cartridge tests therefore cover the same protocol
+negotiation, validation, retry/sequence rules, device information, and command
+dispatch used on the Pico. Deterministic host adapters replace only GPIO,
+CYW43 Wi-Fi, network timing, and flash hardware.

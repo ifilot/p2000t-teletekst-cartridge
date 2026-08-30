@@ -1,4 +1,5 @@
 #include "p2wp.h"
+#include "firmware_core.h"
 #include "teletekst.h"
 #include "version.h"
 
@@ -431,6 +432,172 @@ static void test_exact_binary_display(void) {
     ));
 }
 
+typedef struct {
+    unsigned command_calls;
+    unsigned capability_calls;
+    unsigned sensitive_clears;
+    uint8_t command_error;
+} fake_firmware_platform_t;
+
+static uint8_t fake_capabilities(void *context) {
+    fake_firmware_platform_t *platform = context;
+    ++platform->capability_calls;
+    return P2WP_CAPABILITY_ECHO | P2WP_CAPABILITY_WIFI |
+        P2WP_CAPABILITY_INTERNET | P2WP_CAPABILITY_WIFI_PROFILE |
+        P2WP_CAPABILITY_DEVICE_INFO | P2WP_CAPABILITY_VERSION_CHECK;
+}
+
+static uint8_t fake_command(
+    void *context,
+    const p2wp_frame_t *request,
+    p2wp_frame_t *response
+) {
+    fake_firmware_platform_t *platform = context;
+    ++platform->command_calls;
+    response->payload[0] = request->type;
+    response->payload_length = 1u;
+    return platform->command_error;
+}
+
+static void fake_clear_sensitive(void *context) {
+    fake_firmware_platform_t *platform = context;
+    ++platform->sensitive_clears;
+}
+
+static const p2wp_firmware_operations_t fake_operations = {
+    .capabilities = fake_capabilities,
+    .version_check_start = fake_command,
+    .version_check_status = fake_command,
+    .wifi_scan_start = fake_command,
+    .wifi_scan_status = fake_command,
+    .wifi_scan_result = fake_command,
+    .wifi_connect = fake_command,
+    .wifi_status = fake_command,
+    .wifi_profile_status = fake_command,
+    .wifi_profile_connect = fake_command,
+    .wifi_profile_save = fake_command,
+    .wifi_profile_delete = fake_command,
+    .teletekst_fetch_start = fake_command,
+    .teletekst_fetch_status = fake_command,
+    .teletekst_fetch_rows = fake_command,
+    .clear_sensitive = fake_clear_sensitive,
+};
+
+static p2wp_frame_t make_hello(uint8_t sequence) {
+    p2wp_frame_t request = {
+        .version = P2WP_BOOTSTRAP_VERSION,
+        .type = P2WP_TYPE_HELLO,
+        .sequence = sequence,
+        .payload_length = 8u,
+        .payload = {'P', '2', 'W', 'P', 2u, 3u, 240u, 0u},
+    };
+    return request;
+}
+
+/** Verify the portable production dispatcher and its platform boundary. */
+static void test_firmware_core(void) {
+    fake_firmware_platform_t platform = {0};
+    p2wp_firmware_core_t core;
+    p2wp_firmware_core_init(
+        &core,
+        &fake_operations,
+        &platform,
+        P2WP_HARDWARE_PICO_2_W
+    );
+
+    p2wp_frame_t request = {
+        .version = 3u,
+        .type = P2WP_TYPE_DEVICE_INFO,
+        .sequence = 1u,
+    };
+    p2wp_frame_t response;
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_UNSUPPORTED_VERSION);
+
+    request = make_hello(0u);
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(response.payload_length == 8u);
+    assert(memcmp(response.payload, "P2WP", 4u) == 0);
+    assert(response.payload[4] == 3u);
+    assert(response.payload[5] == 0x3fu);
+    assert(platform.capability_calls == 1u);
+
+    p2wp_frame_t retry = make_hello(0u);
+    p2wp_firmware_core_handle(&core, &retry, &response);
+    assert(response.payload[4] == 3u);
+    assert(platform.capability_calls == 1u);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_DEVICE_INFO,
+        .sequence = 1u,
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(response.payload_length == 4u);
+    assert(response.payload[0] == P2WP_HARDWARE_PICO_2_W);
+    assert(response.payload[1] == P2WP_FIRMWARE_VERSION_MAJOR);
+    assert(response.payload[2] == P2WP_FIRMWARE_VERSION_MINOR);
+    assert(response.payload[3] == P2WP_FIRMWARE_VERSION_PATCH);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_WIFI_CONNECT,
+        .sequence = 2u,
+        .payload_length = 4u,
+        .payload = {0u, 2u, 'p', 'w'},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 1u);
+    assert(platform.sensitive_clears == 1u);
+    assert(request.payload[2] == 0u && request.payload[3] == 0u);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_WIFI_CONNECT,
+        .sequence = 2u,
+        .payload_length = 4u,
+        .payload = {0u, 2u, 'p', 'w'},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(platform.command_calls == 1u);
+    assert(platform.sensitive_clears == 2u);
+    assert(request.payload[2] == 0u && request.payload[3] == 0u);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_WIFI_STATUS,
+        .sequence = 2u,
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_SEQUENCE_CONFLICT);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_TELETEKST_FETCH_START,
+        .sequence = 3u,
+        .payload_length = 4u,
+        .payload = {99u, 0u, 0u, P2WP_TELETEKST_SOURCE_NOS},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+    assert(platform.command_calls == 1u);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = 0xfeu,
+        .sequence = 4u,
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_UNKNOWN_TYPE);
+}
+
 /**
  * @brief Run all native framing and Teletekst decoder regression tests.
  *
@@ -445,6 +612,7 @@ int main(void) {
     test_profile_save_round_trip();
     test_teletekst_conversion();
     test_exact_binary_display();
+    test_firmware_core();
     puts("p2wp tests passed");
     return 0;
 }

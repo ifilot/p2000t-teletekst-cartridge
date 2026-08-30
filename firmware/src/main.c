@@ -1,4 +1,5 @@
 #include "p2wp.h"
+#include "firmware_core.h"
 #include "version.h"
 #include "teletekst.h"
 #include "wifi_profile.h"
@@ -151,14 +152,7 @@ typedef struct {
 static p2wp_parser_t parser;
 static p2wp_frame_t request;
 static uint8_t encoded_response[P2WP_MAX_ENCODED];
-static uint8_t cached_response[P2WP_MAX_ENCODED];
-static size_t cached_response_length;
-static bool cached_request_valid;
-static uint8_t cached_request_type;
-static uint8_t cached_request_sequence;
-static uint16_t cached_request_identity;
-static bool p2wp_session_valid;
-static uint8_t p2wp_session_version;
+static p2wp_firmware_core_t firmware_core;
 static mutex_t wifi_mutex;
 static uint8_t wifi_init_state;
 static uint8_t wifi_scan_state;
@@ -1455,21 +1449,400 @@ static bool mailbox_send(const uint8_t *data, size_t length) {
     return true;
 }
 
-/**
- * @brief Encode and send an error response without changing retry-cache state.
- *
- * @param source Request whose type and sequence are reflected in the response.
- * @param error_code P2WP_ERROR_* payload value.
- */
-static void send_uncached_error(const p2wp_frame_t *source, uint8_t error_code) {
-    p2wp_frame_t response = {
-        .version = source->version,
-        .flags = P2WP_FLAG_RESPONSE | P2WP_FLAG_ERROR,
-        .type = source->type,
-        .sequence = source->sequence,
-        .payload_length = 1,
-        .payload = {error_code},
-    };
+
+static uint8_t pico_capabilities(void *context) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    const bool wifi_capable = wifi_init_state != WIFI_INIT_FAILED;
+    mutex_exit(&wifi_mutex);
+    return P2WP_CAPABILITY_ECHO |
+        P2WP_CAPABILITY_DEVICE_INFO |
+        P2WP_CAPABILITY_VERSION_CHECK |
+        (wifi_capable
+            ? P2WP_CAPABILITY_WIFI | P2WP_CAPABILITY_INTERNET |
+                P2WP_CAPABILITY_WIFI_PROFILE
+            : 0u);
+}
+
+static uint8_t pico_version_check_start(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    version_check_state = P2WP_VERSION_CHECK_RUNNING;
+    version_check_error = VERSION_CHECK_ERROR_NONE;
+    memset(&latest_release_version, 0, sizeof(latest_release_version));
+    version_check_requested = true;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_version_check_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    response->payload[0] = version_check_state;
+    response->payload[1] = version_check_error;
+    response->payload[2] = latest_release_version.major;
+    response->payload[3] = latest_release_version.minor;
+    response->payload[4] = latest_release_version.patch;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 5u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_scan_start(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    if (wifi_scan_state == WIFI_SCAN_RUNNING) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    wifi_result_count = 0u;
+    wifi_scan_state = WIFI_SCAN_RUNNING;
+    wifi_scan_deadline = make_timeout_time_ms(WIFI_SCAN_QUEUE_TIMEOUT_MS);
+    wifi_scan_requested = true;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_scan_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    response->payload[0] = wifi_scan_state;
+    response->payload[1] = wifi_result_count;
+    response->payload[2] = wifi_init_state;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 3u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_scan_result(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    if (wifi_scan_state != WIFI_SCAN_COMPLETE ||
+        frame->payload[0] >= wifi_result_count) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    const uint8_t index = frame->payload[0];
+    const wifi_result_t *result = &wifi_results[index];
+    response->payload[0] = index;
+    int16_t rssi = result->rssi;
+    if (rssi < -127) {
+        rssi = -127;
+    } else if (rssi > 0) {
+        rssi = 0;
+    }
+    response->payload[1] = (uint8_t)(int8_t)rssi;
+    response->payload[2] = result->security;
+    response->payload[3] = result->ssid_length;
+    memcpy(response->payload + 4u, result->ssid, result->ssid_length);
+    response->payload_length = 4u + result->ssid_length;
+    mutex_exit(&wifi_mutex);
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_connect(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    if (wifi_scan_state != WIFI_SCAN_COMPLETE ||
+        frame->payload[0] >= wifi_result_count) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    const wifi_result_t *result = &wifi_results[frame->payload[0]];
+    const uint8_t password_length = frame->payload[1];
+    if (result->security == WIFI_SECURITY_UNSUPPORTED ||
+        (result->security == WIFI_SECURITY_OPEN && password_length != 0u) ||
+        (result->security == WIFI_SECURITY_PSK &&
+         (password_length < 8u || password_length > WIFI_MAX_PASSWORD))) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    memcpy(wifi_ssid, result->ssid, result->ssid_length);
+    wifi_ssid[result->ssid_length] = '\0';
+    memcpy(wifi_password, frame->payload + 2u, password_length);
+    wifi_password[password_length] = '\0';
+    wifi_connect_auth = result->auth;
+    wifi_connection_state = WIFI_CONNECTING;
+    wifi_connect_requested = true;
+    mutex_exit(&wifi_mutex);
+    gpio_put(GPIO_WIFI_UP, false);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    response->payload[0] = wifi_connection_state;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 1u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_profile_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    response->payload[0] = stored_profile_state;
+    response->payload[1] = stored_profile_error;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 2u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_profile_connect(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_profile_state != WIFI_PROFILE_STATE_READY ||
+        stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    if (wifi_connection_state == WIFI_CONNECTED) {
+        stored_profile_error = WIFI_PROFILE_OK;
+        mutex_exit(&wifi_mutex);
+        response->payload_length = 0u;
+        return P2WP_FIRMWARE_COMMAND_OK;
+    }
+    stored_profile_error = WIFI_PROFILE_OK;
+    stored_profile_state = WIFI_PROFILE_STATE_BUSY;
+    stored_profile_operation = WIFI_PROFILE_OPERATION_CONNECT;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_profile_save(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_profile_state == WIFI_PROFILE_STATE_BUSY ||
+        stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    if (wifi_connection_state != WIFI_CONNECTED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    stored_profile_password_length = frame->payload[0];
+    stored_profile_ssid_length = (uint8_t)strlen(wifi_ssid);
+    stored_profile_auth = wifi_connect_auth;
+    memcpy(
+        stored_profile_password,
+        frame->payload + 1u,
+        stored_profile_password_length
+    );
+    memcpy(stored_profile_ssid, wifi_ssid, stored_profile_ssid_length);
+    stored_profile_error = WIFI_PROFILE_OK;
+    stored_profile_state = WIFI_PROFILE_STATE_BUSY;
+    stored_profile_operation = WIFI_PROFILE_OPERATION_SAVE;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_profile_delete(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_profile_state == WIFI_PROFILE_STATE_BUSY ||
+        stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    stored_profile_error = WIFI_PROFILE_OK;
+    stored_profile_state = WIFI_PROFILE_STATE_BUSY;
+    stored_profile_operation = WIFI_PROFILE_OPERATION_DELETE;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_fetch_start(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    const uint16_t page =
+        (uint16_t)frame->payload[0] |
+        ((uint16_t)frame->payload[1] << 8u);
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED ||
+        wifi_connection_state != WIFI_CONNECTED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    if (teletekst_fetch_requested ||
+        teletekst_fetch_state == TELETEKST_FETCH_CONNECTING ||
+        teletekst_fetch_state == TELETEKST_FETCH_RECEIVING) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    teletekst_requested_page = page;
+    teletekst_requested_subpage = frame->payload[2];
+    teletekst_requested_source = frame->payload[3];
+    teletekst_next_subpage = 0u;
+    teletekst_http_length = 0u;
+    teletekst_http_overflow = false;
+    teletekst_error = TELETEKST_ERROR_NONE;
+    teletekst_fetch_state = TELETEKST_FETCH_CONNECTING;
+    teletekst_fetch_requested = true;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_fetch_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    response->payload[0] = teletekst_fetch_state;
+    response->payload[1] = teletekst_error;
+    size_t received = teletekst_http_length;
+    if (received > UINT16_MAX) {
+        received = UINT16_MAX;
+    }
+    response->payload[2] = (uint8_t)received;
+    response->payload[3] = (uint8_t)(received >> 8u);
+    response->payload[4] = teletekst_next_subpage;
+    mutex_exit(&wifi_mutex);
+    if (frame->version >= 3u) {
+        uint8_t local_clock[7];
+        const bool clock_is_valid = clock_local_components(
+            clock_now(),
+            local_clock
+        );
+        memcpy(response->payload + 5u, local_clock, 3u);
+        response->payload[8] = clock_is_valid ? 1u : 0u;
+        memcpy(response->payload + 9u, local_clock + 3u, 4u);
+        response->payload_length = 13u;
+    } else {
+        response->payload_length = 5u;
+    }
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_fetch_rows(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    if (teletekst_fetch_state != TELETEKST_FETCH_COMPLETE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    response->payload_length = TELETEKST_CHUNK_SIZE;
+    memcpy(
+        response->payload,
+        teletekst_screen +
+            (size_t)frame->payload[0] * TELETEKST_CHUNK_SIZE,
+        TELETEKST_CHUNK_SIZE
+    );
+    mutex_exit(&wifi_mutex);
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static void pico_clear_sensitive(void *context) {
+    (void)context;
+    mbedtls_platform_zeroize(parser.body, sizeof(parser.body));
+}
+
+static const p2wp_firmware_operations_t pico_firmware_operations = {
+    .capabilities = pico_capabilities,
+    .version_check_start = pico_version_check_start,
+    .version_check_status = pico_version_check_status,
+    .wifi_scan_start = pico_wifi_scan_start,
+    .wifi_scan_status = pico_wifi_scan_status,
+    .wifi_scan_result = pico_wifi_scan_result,
+    .wifi_connect = pico_wifi_connect,
+    .wifi_status = pico_wifi_status,
+    .wifi_profile_status = pico_wifi_profile_status,
+    .wifi_profile_connect = pico_wifi_profile_connect,
+    .wifi_profile_save = pico_wifi_profile_save,
+    .wifi_profile_delete = pico_wifi_profile_delete,
+    .teletekst_fetch_start = pico_teletekst_fetch_start,
+    .teletekst_fetch_status = pico_teletekst_fetch_status,
+    .teletekst_fetch_rows = pico_teletekst_fetch_rows,
+    .clear_sensitive = pico_clear_sensitive,
+};
+
+static void handle_request(p2wp_frame_t *frame) {
+    p2wp_frame_t response;
+    p2wp_firmware_core_handle(&firmware_core, frame, &response);
     const size_t length = p2wp_encode(
         &response,
         encoded_response,
@@ -1477,587 +1850,6 @@ static void send_uncached_error(const p2wp_frame_t *source, uint8_t error_code) 
     );
     if (length == 0u || !mailbox_send(encoded_response, length)) {
         gpio_put(GPIO_ERROR, true);
-    }
-}
-
-/**
- * @brief Encode, cache, and send a successful response.
- *
- * The cached request identity makes cartridge retries idempotent while still
- * detecting reuse of a sequence number for different content.
- *
- * @param source Request associated with the response.
- * @param response Decoded response to encode and transmit.
- */
-static void cache_and_send(
-    const p2wp_frame_t *source,
-    const p2wp_frame_t *response
-) {
-    const size_t length = p2wp_encode(
-        response,
-        encoded_response,
-        sizeof(encoded_response)
-    );
-    if (length == 0u) {
-        gpio_put(GPIO_ERROR, true);
-        return;
-    }
-
-    memcpy(cached_response, encoded_response, length);
-    cached_response_length = length;
-    cached_request_type = source->type;
-    cached_request_sequence = source->sequence;
-    cached_request_identity = p2wp_frame_identity(source);
-    cached_request_valid = true;
-
-    if (!mailbox_send(encoded_response, length)) {
-        gpio_put(GPIO_ERROR, true);
-    }
-}
-
-/**
- * @brief Validate the fixed HELLO signature and ordered version range.
- *
- * @param frame Candidate HELLO request.
- * @return true when its payload is structurally and version compatible.
- */
-static bool hello_is_valid(const p2wp_frame_t *frame) {
-    static const uint8_t magic[] = {'P', '2', 'W', 'P'};
-    return frame->payload_length == 8u &&
-        memcmp(frame->payload, magic, sizeof(magic)) == 0 &&
-        frame->payload[4] <= frame->payload[5];
-}
-
-/** Select the newest protocol revision shared with a valid HELLO request. */
-static uint8_t hello_select_version(const p2wp_frame_t *frame) {
-    return p2wp_select_version(
-        frame->payload[4],
-        frame->payload[5],
-        P2WP_MIN_VERSION,
-        P2WP_MAX_VERSION
-    );
-}
-
-/**
- * @brief Check that a request type which carries no arguments is empty.
- *
- * @param frame Request to inspect.
- * @return true when payload_length is zero.
- */
-static bool empty_request(const p2wp_frame_t *frame) {
-    return frame->payload_length == 0u;
-}
-
-/**
- * @brief Validate and dispatch one decoded negotiated P2WP request.
- *
- * Fast mailbox operations are completed immediately. Network and flash work is
- * queued in mutex-protected state for core 0, then observed through status
- * requests. Password bytes are wiped after they have been copied.
- *
- * @param frame Mutable decoded request; secret payload bytes may be zeroized.
- */
-static void handle_request(const p2wp_frame_t *frame) {
-    const uint16_t identity = p2wp_frame_identity(frame);
-    if (cached_request_valid &&
-        frame->type == cached_request_type &&
-        frame->sequence == cached_request_sequence &&
-        identity == cached_request_identity) {
-        if (!mailbox_send(cached_response, cached_response_length)) {
-            gpio_put(GPIO_ERROR, true);
-        }
-        return;
-    }
-
-    if ((frame->flags & P2WP_FLAG_RESPONSE) != 0u) {
-        send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-        return;
-    }
-
-    if (frame->type == P2WP_TYPE_HELLO) {
-        if (frame->version != P2WP_BOOTSTRAP_VERSION) {
-            send_uncached_error(frame, P2WP_ERROR_UNSUPPORTED_VERSION);
-            return;
-        }
-    } else if (!p2wp_session_valid || frame->version != p2wp_session_version) {
-        send_uncached_error(frame, P2WP_ERROR_UNSUPPORTED_VERSION);
-        return;
-    }
-
-    if (frame->type != P2WP_TYPE_HELLO && cached_request_valid &&
-        frame->sequence == cached_request_sequence) {
-        send_uncached_error(frame, P2WP_ERROR_SEQUENCE_CONFLICT);
-        return;
-    }
-
-    p2wp_frame_t response = {
-        .version = frame->type == P2WP_TYPE_HELLO
-            ? P2WP_BOOTSTRAP_VERSION
-            : p2wp_session_version,
-        .flags = P2WP_FLAG_RESPONSE,
-        .type = frame->type,
-        .sequence = frame->sequence,
-    };
-
-    switch (frame->type) {
-        case P2WP_TYPE_HELLO: {
-            if (!hello_is_valid(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            const uint8_t selected_version = hello_select_version(frame);
-            if (selected_version == 0u) {
-                send_uncached_error(frame, P2WP_ERROR_UNSUPPORTED_VERSION);
-                return;
-            }
-
-            const uint16_t host_limit =
-                (uint16_t)frame->payload[6] | ((uint16_t)frame->payload[7] << 8);
-            const uint16_t negotiated_limit = host_limit < P2WP_MAX_PAYLOAD
-                ? host_limit
-                : P2WP_MAX_PAYLOAD;
-            if (negotiated_limit == 0u) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            static const uint8_t magic[] = {'P', '2', 'W', 'P'};
-            memcpy(response.payload, magic, sizeof(magic));
-            response.payload[4] = selected_version;
-            mutex_enter_blocking(&wifi_mutex);
-            const bool wifi_capable = wifi_init_state != WIFI_INIT_FAILED;
-            mutex_exit(&wifi_mutex);
-            response.payload[5] = P2WP_CAPABILITY_ECHO |
-                P2WP_CAPABILITY_DEVICE_INFO |
-                P2WP_CAPABILITY_VERSION_CHECK |
-                (wifi_capable
-                    ? P2WP_CAPABILITY_WIFI | P2WP_CAPABILITY_INTERNET |
-                        P2WP_CAPABILITY_WIFI_PROFILE
-                    : 0u);
-            response.payload[6] = (uint8_t)negotiated_limit;
-            response.payload[7] = (uint8_t)(negotiated_limit >> 8);
-            response.payload_length = 8u;
-
-            cached_request_valid = false;
-            p2wp_session_version = selected_version;
-            p2wp_session_valid = true;
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_DEVICE_INFO:
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            response.payload[0] = hardware_model;
-            response.payload[1] = P2WP_FIRMWARE_VERSION_MAJOR;
-            response.payload[2] = P2WP_FIRMWARE_VERSION_MINOR;
-            response.payload[3] = P2WP_FIRMWARE_VERSION_PATCH;
-            response.payload_length = 4u;
-            cache_and_send(frame, &response);
-            break;
-
-        case P2WP_TYPE_VERSION_CHECK_START:
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            version_check_state = P2WP_VERSION_CHECK_RUNNING;
-            version_check_error = VERSION_CHECK_ERROR_NONE;
-            memset(&latest_release_version, 0, sizeof(latest_release_version));
-            version_check_requested = true;
-            mutex_exit(&wifi_mutex);
-            response.payload_length = 0u;
-            cache_and_send(frame, &response);
-            break;
-
-        case P2WP_TYPE_VERSION_CHECK_STATUS:
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            response.payload[0] = version_check_state;
-            response.payload[1] = version_check_error;
-            response.payload[2] = latest_release_version.major;
-            response.payload[3] = latest_release_version.minor;
-            response.payload[4] = latest_release_version.patch;
-            mutex_exit(&wifi_mutex);
-            response.payload_length = 5u;
-            cache_and_send(frame, &response);
-            break;
-
-        case P2WP_TYPE_ECHO:
-            response.payload_length = frame->payload_length;
-            if (frame->payload_length != 0u) {
-                memcpy(response.payload, frame->payload, frame->payload_length);
-            }
-            cache_and_send(frame, &response);
-            break;
-
-        case P2WP_TYPE_WIFI_SCAN_START: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            if (wifi_scan_state == WIFI_SCAN_RUNNING) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-
-            wifi_result_count = 0u;
-            wifi_scan_state = WIFI_SCAN_RUNNING;
-            wifi_scan_deadline =
-                make_timeout_time_ms(WIFI_SCAN_QUEUE_TIMEOUT_MS);
-            wifi_scan_requested = true;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_SCAN_STATUS: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            response.payload[0] = wifi_scan_state;
-            response.payload[1] = wifi_result_count;
-            response.payload[2] = wifi_init_state;
-            mutex_exit(&wifi_mutex);
-            response.payload_length = 3u;
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_SCAN_RESULT: {
-            if (frame->payload_length != 1u) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            if (wifi_scan_state != WIFI_SCAN_COMPLETE ||
-                frame->payload[0] >= wifi_result_count) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            const uint8_t index = frame->payload[0];
-            const wifi_result_t *result = &wifi_results[index];
-            response.payload[0] = index;
-            int16_t rssi = result->rssi;
-            if (rssi < -127) {
-                rssi = -127;
-            } else if (rssi > 0) {
-                rssi = 0;
-            }
-            response.payload[1] = (uint8_t)(int8_t)rssi;
-            response.payload[2] = result->security;
-            response.payload[3] = result->ssid_length;
-            memcpy(response.payload + 4u, result->ssid, result->ssid_length);
-            response.payload_length = 4u + result->ssid_length;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_CONNECT: {
-            if (frame->payload_length < 2u ||
-                frame->payload[1] > WIFI_MAX_PASSWORD ||
-                frame->payload_length != (uint16_t)(2u + frame->payload[1])) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            if (wifi_scan_state != WIFI_SCAN_COMPLETE ||
-                frame->payload[0] >= wifi_result_count) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            const wifi_result_t *result = &wifi_results[frame->payload[0]];
-            const uint8_t password_length = frame->payload[1];
-            if (result->security == WIFI_SECURITY_UNSUPPORTED ||
-                (result->security == WIFI_SECURITY_OPEN && password_length != 0u) ||
-                (result->security == WIFI_SECURITY_PSK &&
-                 (password_length < 8u || password_length > WIFI_MAX_PASSWORD))) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            memcpy(wifi_ssid, result->ssid, result->ssid_length);
-            wifi_ssid[result->ssid_length] = '\0';
-            memcpy(wifi_password, frame->payload + 2u, password_length);
-            wifi_password[password_length] = '\0';
-            wifi_connect_auth = result->auth;
-            wifi_connection_state = WIFI_CONNECTING;
-            wifi_connect_requested = true;
-            mutex_exit(&wifi_mutex);
-            gpio_put(GPIO_WIFI_UP, false);
-            cache_and_send(frame, &response);
-            mbedtls_platform_zeroize(
-                (uint8_t *)frame->payload + 2u,
-                password_length
-            );
-            mbedtls_platform_zeroize(parser.body, sizeof(parser.body));
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_STATUS: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            response.payload[0] = wifi_connection_state;
-            mutex_exit(&wifi_mutex);
-            response.payload_length = 1u;
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_PROFILE_STATUS: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            response.payload[0] = stored_profile_state;
-            response.payload[1] = stored_profile_error;
-            mutex_exit(&wifi_mutex);
-            response.payload_length = 2u;
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_PROFILE_CONNECT: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            if (stored_profile_state != WIFI_PROFILE_STATE_READY ||
-                stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-            // A P2000T-only reset leaves the Pico and Wi-Fi association alive.
-            // Treat that as a successful profile connection instead of asking
-            // CYW43 to reconnect an interface that is already online.
-            if (wifi_connection_state == WIFI_CONNECTED) {
-                stored_profile_error = WIFI_PROFILE_OK;
-                mutex_exit(&wifi_mutex);
-                cache_and_send(frame, &response);
-                break;
-            }
-            stored_profile_error = WIFI_PROFILE_OK;
-            stored_profile_state = WIFI_PROFILE_STATE_BUSY;
-            stored_profile_operation = WIFI_PROFILE_OPERATION_CONNECT;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_PROFILE_SAVE: {
-            if (frame->payload_length < 1u ||
-                frame->payload[0] > WIFI_PROFILE_MAX_PASSWORD ||
-                frame->payload_length != (uint16_t)(1u + frame->payload[0])) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            if (stored_profile_state == WIFI_PROFILE_STATE_BUSY ||
-                stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-            if (wifi_connection_state != WIFI_CONNECTED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            stored_profile_password_length = frame->payload[0];
-            stored_profile_ssid_length = (uint8_t)strlen(wifi_ssid);
-            stored_profile_auth = wifi_connect_auth;
-            memcpy(
-                stored_profile_password,
-                frame->payload + 1u,
-                stored_profile_password_length
-            );
-            memcpy(
-                stored_profile_ssid,
-                wifi_ssid,
-                stored_profile_ssid_length
-            );
-            stored_profile_error = WIFI_PROFILE_OK;
-            stored_profile_state = WIFI_PROFILE_STATE_BUSY;
-            stored_profile_operation = WIFI_PROFILE_OPERATION_SAVE;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            mbedtls_platform_zeroize(
-                (uint8_t *)frame->payload + 1u,
-                frame->payload[0]
-            );
-            mbedtls_platform_zeroize(parser.body, sizeof(parser.body));
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_PROFILE_DELETE: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            if (stored_profile_state == WIFI_PROFILE_STATE_BUSY ||
-                stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-            stored_profile_error = WIFI_PROFILE_OK;
-            stored_profile_state = WIFI_PROFILE_STATE_BUSY;
-            stored_profile_operation = WIFI_PROFILE_OPERATION_DELETE;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_TELETEKST_FETCH_START: {
-            if (frame->payload_length != 4u) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            const uint16_t page =
-                (uint16_t)frame->payload[0] |
-                ((uint16_t)frame->payload[1] << 8u);
-            const uint8_t subpage = frame->payload[2];
-            const uint8_t source = frame->payload[3];
-            if (page < 100u || page > 899u || subpage > 99u ||
-                source > P2WP_TELETEKST_SOURCE_P2000T) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED ||
-                wifi_connection_state != WIFI_CONNECTED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            if (teletekst_fetch_requested ||
-                teletekst_fetch_state == TELETEKST_FETCH_CONNECTING ||
-                teletekst_fetch_state == TELETEKST_FETCH_RECEIVING) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-            teletekst_requested_page = page;
-            teletekst_requested_subpage = subpage;
-            teletekst_requested_source = source;
-            teletekst_next_subpage = 0u;
-            teletekst_http_length = 0u;
-            teletekst_http_overflow = false;
-            teletekst_error = TELETEKST_ERROR_NONE;
-            teletekst_fetch_state = TELETEKST_FETCH_CONNECTING;
-            teletekst_fetch_requested = true;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_TELETEKST_FETCH_STATUS: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            response.payload[0] = teletekst_fetch_state;
-            response.payload[1] = teletekst_error;
-            size_t received = teletekst_http_length;
-            if (received > UINT16_MAX) {
-                received = UINT16_MAX;
-            }
-            response.payload[2] = (uint8_t)received;
-            response.payload[3] = (uint8_t)(received >> 8u);
-            response.payload[4] = teletekst_next_subpage;
-            mutex_exit(&wifi_mutex);
-            if (p2wp_session_version >= 3u) {
-                uint8_t local_clock[7];
-                const bool clock_is_valid = clock_local_components(
-                    clock_now(), local_clock
-                );
-                memcpy(response.payload + 5u, local_clock, 3u);
-                response.payload[8] = clock_is_valid ? 1u : 0u;
-                memcpy(response.payload + 9u, local_clock + 3u, 4u);
-                response.payload_length = 13u;
-            } else {
-                response.payload_length = 5u;
-            }
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_TELETEKST_FETCH_ROWS: {
-            if (frame->payload_length != 1u ||
-                frame->payload[0] >= TELETEKST_CHUNK_COUNT) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            if (teletekst_fetch_state != TELETEKST_FETCH_COMPLETE) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            response.payload_length = TELETEKST_CHUNK_SIZE;
-            memcpy(
-                response.payload,
-                teletekst_screen +
-                    (size_t)frame->payload[0] * TELETEKST_CHUNK_SIZE,
-                TELETEKST_CHUNK_SIZE
-            );
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        default:
-            send_uncached_error(frame, P2WP_ERROR_UNKNOWN_TYPE);
-            break;
     }
 }
 
@@ -2113,8 +1905,12 @@ static void mailbox_core_main(void) {
 int main(void) {
     mailbox_init();
     mutex_init(&wifi_mutex);
-    p2wp_session_valid = false;
-    p2wp_session_version = P2WP_BOOTSTRAP_VERSION;
+    p2wp_firmware_core_init(
+        &firmware_core,
+        &pico_firmware_operations,
+        NULL,
+        hardware_model
+    );
     version_check_state = P2WP_VERSION_CHECK_IDLE;
     version_check_error = VERSION_CHECK_ERROR_NONE;
     wifi_init_state = WIFI_INIT_STARTING;

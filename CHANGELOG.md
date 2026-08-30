@@ -18,6 +18,9 @@ and release diffs.
   firmware release numbers synchronized.
 - Bundled the 4096-byte P2000T monitor ROM with the emulator and made it the
   launcher's default.
+- Added a portable production firmware core shared by the Pico builds and
+  emulator, with native tests for negotiation, retries, sequence conflicts,
+  command validation, dispatch, and sensitive-payload erasure.
 
 ### Fixed
 
