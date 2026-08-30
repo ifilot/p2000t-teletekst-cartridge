@@ -9,7 +9,9 @@ with `make -C src`; this requires `z80asm` 1.8 or a compatible assembler.
 The build signs the image with the P2000T additive 16-bit cartridge checksum.
 Use `make -C src verify` to validate it. This is an integrity checksum, not a
 cryptographic signature.
-The cartridge release version is `v0.4.0`.
+The cartridge release version is `v0.5.0`. `../VERSION`, the cartridge
+constants, and the Pico firmware constants are checked together during tests
+so both release artifacts always identify the same version.
 
 At runtime it negotiates P2WP/2 or P2WP/3 with `HELLO`, requests a wireless scan, and
 polls while the Pico W performs it asynchronously. Up to nine unique SSIDs are
@@ -27,7 +29,10 @@ continuing to Wi-Fi setup. Its first two rows extend the blue background, its
 centered title is a full white-on-blue bar without a page number, and the bold `P2000T` mark is a
 centered blue mosaic badge with a white border matching the Teletekst motif.
 The P2000T contour and upper Teletekst frame share a mosaic row, making them a
-single stacked logo. Its footer identifies cartridge version 0.4.0. All cartridge UI text
+single stacked logo. Its footer identifies cartridge version 0.5.0. The four
+original slogan rows remain on the opening screen. After Wi-Fi connects, the
+two spare rows below the source menu's function-key list show the cartridge and
+Pico versions and latest published release. All cartridge UI text
 is Dutch. The scan, network
 list, connection state, prompts,
 and errors reserve the first screen row, use full white-on-blue menu headers,
@@ -69,6 +74,9 @@ The cartridge then requests page 100. Enter any page number from 100 through
 899 as three digits; the request starts after the third digit, without Enter.
 If the selected API identifies another subpage, the cartridge retrieves it
 automatically after ten seconds and continues following the subpage sequence.
+After the last subpage reports no successor, an active loop requests subpage
+zero and returns to the first subpage. Pausing suppresses this wrap as well as
+ordinary advances; pressing `P` again resumes with a fresh ten-second interval.
 A newly entered page always starts at its default first subpage.
 Pressing the dedicated P2000T `STOP` key returns to the source-selection
 screen without reconnecting Wi-Fi. After choosing a new source, the cartridge

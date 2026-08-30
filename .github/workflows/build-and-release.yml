@@ -74,6 +74,7 @@ jobs:
         run: |
           make -C src
           make -C src verify
+          make -C firmware/tests test
 
       - uses: actions/upload-artifact@v4
         with:

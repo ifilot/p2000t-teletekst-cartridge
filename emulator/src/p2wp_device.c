@@ -1,5 +1,6 @@
 #include "p2wp_device.h"
 #include "../../firmware/src/p2wp.h"
+#include "../../firmware/src/version.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -50,9 +51,25 @@ static void dispatch(const p2wp_frame_t *request) {
                                              protocol_minimum,protocol_maximum);
         if(!selected){respond_error(request,P2WP_ERROR_UNSUPPORTED_VERSION);break;}
         session_version=selected;
-        const uint8_t hello[]={'P','2','W','P',selected,15,240,0};
+        const uint8_t capabilities=protocol_maximum>=3u?63u:15u;
+        const uint8_t hello[]={'P','2','W','P',selected,capabilities,240,0};
         respond(request, hello, sizeof(hello)); break;
     }
+    case P2WP_TYPE_DEVICE_INFO:
+        payload[0]=P2WP_HARDWARE_PICO_2_W;
+        payload[1]=P2WP_FIRMWARE_VERSION_MAJOR;
+        payload[2]=P2WP_FIRMWARE_VERSION_MINOR;
+        payload[3]=P2WP_FIRMWARE_VERSION_PATCH;
+        respond(request,payload,4);break;
+    case P2WP_TYPE_VERSION_CHECK_START:
+        respond(request,NULL,0);break;
+    case P2WP_TYPE_VERSION_CHECK_STATUS:
+        payload[0]=P2WP_VERSION_CHECK_COMPLETE;
+        payload[1]=0;
+        payload[2]=P2WP_FIRMWARE_VERSION_MAJOR;
+        payload[3]=P2WP_FIRMWARE_VERSION_MINOR;
+        payload[4]=P2WP_FIRMWARE_VERSION_PATCH;
+        respond(request,payload,5);break;
     case P2WP_TYPE_WIFI_PROFILE_STATUS:
         payload[0]=profile_state; payload[1]=0; respond(request,payload,2); break;
     case P2WP_TYPE_ECHO:

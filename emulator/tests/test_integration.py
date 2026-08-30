@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Boot SLOT1+SLOT2, join fictitious Wi-Fi, and render NOS page 100."""
 from pathlib import Path
+import hashlib
 import subprocess
 import tempfile
 
 ROOT=Path(__file__).resolve().parents[2]
 EMU=ROOT/'emulator'
 with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
-    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'
+    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'
+    bundled_monitor=EMU/'assets/P2000ROM.bin'
+    assert bundled_monitor.stat().st_size == 4096
+    assert hashlib.sha256(bundled_monitor.read_bytes()).hexdigest() == \
+        '351e0d3dcb9e39e0ed375bb0cb7debf7a6e8afcc93a3aa1f147dfdf68392dac8'
     subprocess.run(['make','-C',str(ROOT/'src')],check=True)
     subprocess.run(['cmake','-S',str(EMU),'-B',str(build),'-G','Ninja'],check=True)
     subprocess.run(['cmake','--build',str(build)],check=True)
@@ -29,15 +34,15 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
                for value in p2000_mosaics)
     assert intro[9*40+3] == 0x3c
     assert intro[10*40:10*40+4] == bytes((0x04,0x1d,0x17,0x35))
-    assert intro[17*40+8:17*40+31] == b'UW VENSTER OP DE WERELD'
-    assert intro[18*40+8:18*40+31] == b'NOS EN P2000T TELETEKST'
-    assert intro[19*40+5:19*40+35] == b'ORIGINEEL SAA5050-MOZAIEKBEELD'
-    assert intro[20*40+5:20*40+35] == b'KLASSIEK BEELD, ACTUEEL NIEUWS'
+    assert b'UW VENSTER OP DE WERELD' in intro[17*40:18*40]
+    assert b'NOS EN P2000T TELETEKST' in intro[18*40:19*40]
+    assert b'ORIGINEEL SAA5050-MOZAIEKBEELD' in intro[19*40:20*40]
+    assert b'KLASSIEK BEELD, ACTUEEL NIEUWS' in intro[20*40:21*40]
     assert intro[22*40+11:22*40+28] == b'DRUK OP EEN TOETS'
     assert intro[23*40:23*40+3] == bytes((0x04,0x1d,0x07))
     assert intro[23*40+3:23*40+29] == b'P2000T Teletekst Cartridge'
     assert intro[23*40+29:23*40+34] == b'     '
-    assert intro[23*40+34:24*40] == b'v0.4.0'
+    assert intro[23*40+34:24*40] == b'v0.5.0'
     subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
@@ -47,7 +52,7 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
-        '--headless','--auto','--frames','119','--dump-screen',str(source_screen)],check=True)
+        '--headless','--auto','--frames','149','--dump-screen',str(source_screen)],check=True)
     source=source_screen.read_bytes()
     assert source[5*40+5:5*40+22] == b'1 - NOS TELETEKST'
     assert source[6*40+5:6*40+25] == b'2 - P2000T TELETEKST'
@@ -56,6 +61,23 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     assert source[14*40+5:14*40+30] == b'W - WIFI-NETWERK WIJZIGEN'
     assert source[15*40+5:15*40+19] == b'H - HULP TONEN'
     assert source[16*40+5:16*40+32] == b'STOP - ANDERE TELETEKSTBRON'
+    assert b'CARTRIDGE: v0.5.0 / PICO v0.5.0' in source[18*40:19*40]
+    assert b'LAATSTE VERSIE ONLINE: v0.5.0' in source[19*40:20*40]
+    common=[str(build/'p2000t-emulator'),'--monitor',str(monitor),
+        '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
+        str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
+        '--headless','--auto']
+    subprocess.run(common+['--frames','1300','--dump-fetches',str(loop_fetches)],check=True)
+    assert loop_fetches.read_bytes()[:3] == bytes((0,2,0)), \
+        'automatic subpage rotation did not wrap from the last subpage to the first'
+    subprocess.run(common+['--auto-pause-frame','250','--frames','900',
+        '--dump-fetches',str(pause_fetches)],check=True)
+    assert pause_fetches.read_bytes() == bytes((0,)), \
+        'paused subpage rotation performed an automatic fetch'
+    subprocess.run(common+['--auto-pause-frame','250','--auto-resume-frame','350',
+        '--frames','1000','--dump-fetches',str(resume_fetches)],check=True)
+    assert resume_fetches.read_bytes()[:2] == bytes((0,2)), \
+        'P did not resume automatic subpage rotation'
     subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),

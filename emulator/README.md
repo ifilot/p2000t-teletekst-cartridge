@@ -17,15 +17,11 @@ make -C src
 make -C emulator
 ```
 
-M2000 requires a 4096-byte P2000T monitor ROM, which is not redistributed here.
-Start the real cartridge with live NOS/P2000T Internet access using:
+and run it via
 
 ```sh
-P2000_MONITOR_ROM=/path/to/P2000ROM.bin emulator/run
+emulator/run
 ```
-
-In this development workspace the launcher automatically finds the monitor ROM
-in the adjacent `P2000T-IDE` checkout, so simply run `emulator/run`.
 
 The emulator presents one open network named `Emulated WiFi`; select it with
 `1`, decline profile storage with `N`, then choose NOS with `1`. Regular host

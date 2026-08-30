@@ -3,7 +3,7 @@ ROM := p2wp-cartridge.bin
 SOURCE := p2wp-cartridge.asm
 SIGNER := sign_cartridge.py
 
-.PHONY: all sign verify clean
+.PHONY: all sign verify check-version clean
 
 all: $(ROM)
 
@@ -15,7 +15,10 @@ $(ROM): $(SOURCE) $(SIGNER)
 sign: $(ROM)
 	python3 $(SIGNER) $(ROM)
 
-verify: $(ROM)
+check-version:
+	python3 ../firmware/tests/check_release_version.py
+
+verify: check-version $(ROM)
 	python3 $(SIGNER) --verify $(ROM)
 
 clean:

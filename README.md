@@ -163,3 +163,9 @@ For a saved response, build with `make -C firmware/tools` and run
 `firmware/tools/teletekst-replay PAGE response.json [screen.bin]`. Failures are
 reported as the Pico's `06`/`07` code plus the rejected decoder stage or row,
 which makes captured API responses suitable as regression fixtures.
+
+After Wi-Fi connects, firmware can securely query the repository's latest
+GitHub release. Two rows beneath the post-login source menu show that online
+version beside the installed cartridge and firmware versions. Both cartridge
+and Pico artifacts use the repository's canonical `VERSION` value. The Pico
+generation remains available to hosts through the `DEVICE_INFO` protocol command.

@@ -2,6 +2,7 @@
 #include "version.h"
 #include "teletekst.h"
 #include "wifi_profile.h"
+#include "github_ca.h"
 #include "nos_teletekst_ca.h"
 #include "p2000t_teletekst_ca.h"
 
@@ -63,6 +64,10 @@ enum {
 #define NTP_UNIX_EPOCH_OFFSET 2208988800u
 #define NTP_RETRY_MS 30000u
 #define NTP_RESYNC_MS (6u * 60u * 60u * 1000u)
+#define VERSION_HOST "api.github.com"
+#define VERSION_PORT 443u
+#define VERSION_PATH "/repos/ifilot/p2000t-teletekst-cartridge/releases/latest"
+#define VERSION_HTTP_BODY_MAX 16384u
 
 enum wifi_scan_state {
     WIFI_SCAN_IDLE = 0,
@@ -110,6 +115,16 @@ enum teletekst_error {
     TELETEKST_ERROR_TOO_LARGE = 6,
     TELETEKST_ERROR_INVALID_DATA = 7,
     TELETEKST_ERROR_PAGE_NOT_FOUND = 8,
+};
+
+enum version_check_error {
+    VERSION_CHECK_ERROR_NONE = 0,
+    VERSION_CHECK_ERROR_NOT_CONNECTED = 1,
+    VERSION_CHECK_ERROR_TLS_CONFIG = 2,
+    VERSION_CHECK_ERROR_REQUEST_START = 3,
+    VERSION_CHECK_ERROR_NETWORK = 4,
+    VERSION_CHECK_ERROR_HTTP_STATUS = 5,
+    VERSION_CHECK_ERROR_INVALID_DATA = 6,
 };
 
 enum wifi_profile_state {
@@ -194,6 +209,23 @@ static uint32_t clock_unix_seconds;
 static absolute_time_t clock_reference;
 static absolute_time_t ntp_next_attempt;
 static absolute_time_t ntp_request_deadline;
+static uint8_t version_check_state;
+static uint8_t version_check_error;
+static bool version_check_requested;
+static bool version_http_overflow;
+static bool version_tls_cleanup_pending;
+static size_t version_http_length;
+static char version_http_body[VERSION_HTTP_BODY_MAX + 1u];
+static p2wp_release_version_t latest_release_version;
+static struct altcp_tls_config *version_tls_config;
+static altcp_allocator_t version_tls_allocator;
+static httpc_connection_t version_http_settings;
+
+#if defined(PICO_RP2350) && PICO_RP2350
+static const uint8_t hardware_model = P2WP_HARDWARE_PICO_2_W;
+#else
+static const uint8_t hardware_model = P2WP_HARDWARE_PICO_W;
+#endif
 
 /** Return the synchronized Unix time, or zero until the first NTP reply. */
 static uint32_t clock_now(void) {
@@ -666,6 +698,182 @@ static void teletekst_start_requested_fetch(void) {
     }
 }
 
+/** Publish a terminal firmware-version lookup error. */
+static void version_set_failed(uint8_t error) {
+    mutex_enter_blocking(&wifi_mutex);
+    version_check_state = P2WP_VERSION_CHECK_FAILED;
+    version_check_error = error;
+    mutex_exit(&wifi_mutex);
+}
+
+/** Allocate a GitHub TLS connection with hostname validation enabled. */
+static struct altcp_pcb *version_tls_alloc(void *arg, u8_t ip_type) {
+    struct altcp_pcb *connection = altcp_tls_alloc(arg, ip_type);
+    if (connection == NULL) {
+        return NULL;
+    }
+    mbedtls_ssl_context *context = altcp_tls_context(connection);
+    if (context == NULL ||
+        mbedtls_ssl_set_hostname(context, VERSION_HOST) != 0) {
+        altcp_abort(connection);
+        return NULL;
+    }
+    return connection;
+}
+
+/** Accept GitHub response headers; body storage is bounded in the receiver. */
+static err_t version_headers_done(
+    httpc_state_t *connection,
+    void *argument,
+    struct pbuf *headers,
+    u16_t header_length,
+    u32_t content_length
+) {
+    (void)connection;
+    (void)argument;
+    (void)headers;
+    (void)header_length;
+    (void)content_length;
+    return ERR_OK;
+}
+
+/** Collect a bounded prefix of the GitHub release response. */
+static err_t version_receive(
+    void *argument,
+    struct altcp_pcb *connection,
+    struct pbuf *data,
+    err_t error
+) {
+    (void)argument;
+    (void)error;
+    if (data == NULL) {
+        return ERR_OK;
+    }
+
+    mutex_enter_blocking(&wifi_mutex);
+    if (data->tot_len > VERSION_HTTP_BODY_MAX - version_http_length) {
+        version_http_overflow = true;
+    } else {
+        for (struct pbuf *part = data; part != NULL; part = part->next) {
+            memcpy(
+                version_http_body + version_http_length,
+                part->payload,
+                part->len
+            );
+            version_http_length += part->len;
+        }
+    }
+    mutex_exit(&wifi_mutex);
+
+    altcp_recved(connection, data->tot_len);
+    pbuf_free(data);
+    return ERR_OK;
+}
+
+/** Validate the GitHub response and publish its latest semantic version. */
+static void version_request_done(
+    void *argument,
+    httpc_result_t result,
+    u32_t received_length,
+    u32_t server_status,
+    err_t error
+) {
+    (void)argument;
+    (void)received_length;
+    (void)error;
+    version_tls_cleanup_pending = true;
+    if (result != HTTPC_RESULT_OK) {
+        version_set_failed(VERSION_CHECK_ERROR_NETWORK);
+        return;
+    }
+    if (server_status != 200u) {
+        version_set_failed(VERSION_CHECK_ERROR_HTTP_STATUS);
+        return;
+    }
+
+    mutex_enter_blocking(&wifi_mutex);
+    const size_t body_length = version_http_length;
+    mutex_exit(&wifi_mutex);
+    version_http_body[body_length] = '\0';
+    p2wp_release_version_t parsed;
+    if (!p2wp_parse_latest_release(
+            version_http_body,
+            body_length,
+            &parsed
+        )) {
+        version_set_failed(VERSION_CHECK_ERROR_INVALID_DATA);
+        return;
+    }
+
+    mutex_enter_blocking(&wifi_mutex);
+    latest_release_version = parsed;
+    version_check_error = VERSION_CHECK_ERROR_NONE;
+    version_check_state = P2WP_VERSION_CHECK_COMPLETE;
+    mutex_exit(&wifi_mutex);
+}
+
+/** Free version-check TLS state after lwIP releases its connection. */
+static void version_cleanup_tls(void) {
+    if (!version_tls_cleanup_pending) {
+        return;
+    }
+    version_tls_cleanup_pending = false;
+    if (version_tls_config != NULL) {
+        altcp_tls_free_config(version_tls_config);
+        version_tls_config = NULL;
+    }
+}
+
+/** Start an explicitly queued latest-release lookup. */
+static void version_start_requested_check(void) {
+    mutex_enter_blocking(&wifi_mutex);
+    const bool requested = version_check_requested;
+    version_check_requested = false;
+    const bool connected = wifi_connection_state == WIFI_CONNECTED;
+    mutex_exit(&wifi_mutex);
+    if (!requested) {
+        return;
+    }
+    if (!connected) {
+        version_set_failed(VERSION_CHECK_ERROR_NOT_CONNECTED);
+        return;
+    }
+
+    memset(&version_http_settings, 0, sizeof(version_http_settings));
+    version_tls_config = altcp_tls_create_config_client(
+        github_root_ca,
+        sizeof(github_root_ca)
+    );
+    if (version_tls_config == NULL) {
+        version_set_failed(VERSION_CHECK_ERROR_TLS_CONFIG);
+        return;
+    }
+    version_tls_allocator.alloc = version_tls_alloc;
+    version_tls_allocator.arg = version_tls_config;
+    version_http_settings.altcp_allocator = &version_tls_allocator;
+    version_http_settings.result_fn = version_request_done;
+    version_http_settings.headers_done_fn = version_headers_done;
+
+    mutex_enter_blocking(&wifi_mutex);
+    version_http_length = 0u;
+    version_http_overflow = false;
+    mutex_exit(&wifi_mutex);
+    const err_t result = httpc_get_file_dns(
+        VERSION_HOST,
+        VERSION_PORT,
+        VERSION_PATH,
+        &version_http_settings,
+        version_receive,
+        NULL,
+        NULL
+    );
+    if (result != ERR_OK) {
+        altcp_tls_free_config(version_tls_config);
+        version_tls_config = NULL;
+        version_set_failed(VERSION_CHECK_ERROR_REQUEST_START);
+    }
+}
+
 /**
  * @brief Reduce a CYW43 scan authentication bit mask to the P2WP security enum.
  *
@@ -790,6 +998,7 @@ static void wifi_service(void) {
     // A completed HTTP callback runs inside poll(). The connection has been
     // released when poll returns, so its TLS configuration is now safe to free.
     teletekst_cleanup_tls();
+    version_cleanup_tls();
 
     if (wifi_scan_active && !cyw43_wifi_scan_active(&cyw43_state)) {
         mutex_enter_blocking(&wifi_mutex);
@@ -1050,6 +1259,7 @@ static void wifi_radio_main(void) {
         wifi_scan_requested = false;
         wifi_connect_requested = false;
         teletekst_fetch_requested = false;
+        version_check_requested = false;
     }
     mutex_exit(&wifi_mutex);
 
@@ -1067,6 +1277,7 @@ static void wifi_radio_main(void) {
         wifi_profile_service();
         wifi_start_requested_scan();
         wifi_start_requested_connection();
+        version_start_requested_check();
         teletekst_start_requested_fetch();
         tight_loop_contents();
     }
@@ -1092,6 +1303,7 @@ static void wifi_check_deadlines(void) {
         wifi_scan_requested = false;
         wifi_connect_requested = false;
         teletekst_fetch_requested = false;
+        version_check_requested = false;
     } else if (wifi_scan_state == WIFI_SCAN_RUNNING &&
                time_reached(wifi_scan_deadline)) {
         wifi_scan_state = WIFI_SCAN_FAILED;
@@ -1417,6 +1629,8 @@ static void handle_request(const p2wp_frame_t *frame) {
             const bool wifi_capable = wifi_init_state != WIFI_INIT_FAILED;
             mutex_exit(&wifi_mutex);
             response.payload[5] = P2WP_CAPABILITY_ECHO |
+                P2WP_CAPABILITY_DEVICE_INFO |
+                P2WP_CAPABILITY_VERSION_CHECK |
                 (wifi_capable
                     ? P2WP_CAPABILITY_WIFI | P2WP_CAPABILITY_INTERNET |
                         P2WP_CAPABILITY_WIFI_PROFILE
@@ -1431,6 +1645,50 @@ static void handle_request(const p2wp_frame_t *frame) {
             cache_and_send(frame, &response);
             break;
         }
+
+        case P2WP_TYPE_DEVICE_INFO:
+            if (!empty_request(frame)) {
+                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
+                return;
+            }
+            response.payload[0] = hardware_model;
+            response.payload[1] = P2WP_FIRMWARE_VERSION_MAJOR;
+            response.payload[2] = P2WP_FIRMWARE_VERSION_MINOR;
+            response.payload[3] = P2WP_FIRMWARE_VERSION_PATCH;
+            response.payload_length = 4u;
+            cache_and_send(frame, &response);
+            break;
+
+        case P2WP_TYPE_VERSION_CHECK_START:
+            if (!empty_request(frame)) {
+                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
+                return;
+            }
+            mutex_enter_blocking(&wifi_mutex);
+            version_check_state = P2WP_VERSION_CHECK_RUNNING;
+            version_check_error = VERSION_CHECK_ERROR_NONE;
+            memset(&latest_release_version, 0, sizeof(latest_release_version));
+            version_check_requested = true;
+            mutex_exit(&wifi_mutex);
+            response.payload_length = 0u;
+            cache_and_send(frame, &response);
+            break;
+
+        case P2WP_TYPE_VERSION_CHECK_STATUS:
+            if (!empty_request(frame)) {
+                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
+                return;
+            }
+            mutex_enter_blocking(&wifi_mutex);
+            response.payload[0] = version_check_state;
+            response.payload[1] = version_check_error;
+            response.payload[2] = latest_release_version.major;
+            response.payload[3] = latest_release_version.minor;
+            response.payload[4] = latest_release_version.patch;
+            mutex_exit(&wifi_mutex);
+            response.payload_length = 5u;
+            cache_and_send(frame, &response);
+            break;
 
         case P2WP_TYPE_ECHO:
             response.payload_length = frame->payload_length;
@@ -1857,6 +2115,8 @@ int main(void) {
     mutex_init(&wifi_mutex);
     p2wp_session_valid = false;
     p2wp_session_version = P2WP_BOOTSTRAP_VERSION;
+    version_check_state = P2WP_VERSION_CHECK_IDLE;
+    version_check_error = VERSION_CHECK_ERROR_NONE;
     wifi_init_state = WIFI_INIT_STARTING;
     stored_profile_state = wifi_profile_present()
         ? WIFI_PROFILE_STATE_READY

@@ -1,12 +1,15 @@
 CC ?= cc
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 
-.PHONY: test clean
+.PHONY: test check-version clean
 
-p2wp-test: test_p2wp.c ../src/p2wp.c ../src/p2wp.h ../src/teletekst.c ../src/teletekst.h
-	$(CC) $(CFLAGS) -I../src test_p2wp.c ../src/p2wp.c ../src/teletekst.c -o $@
+p2wp-test: test_p2wp.c ../src/p2wp.c ../src/p2wp.h ../src/teletekst.c ../src/teletekst.h ../src/version.c ../src/version.h
+	$(CC) $(CFLAGS) -I../src test_p2wp.c ../src/p2wp.c ../src/teletekst.c ../src/version.c -o $@
 
-test: p2wp-test
+check-version:
+	python3 check_release_version.py
+
+test: check-version p2wp-test
 	./p2wp-test
 
 clean:

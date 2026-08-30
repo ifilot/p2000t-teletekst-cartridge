@@ -15,9 +15,10 @@ static uint32_t pixels[HEIGHT][WIDTH]; static uint8_t font_data[FONT_BYTES];
 static const uint32_t palette[8]={0xff000000,0xffff0000,0xff00ff00,0xffffff00,
   0xff0000ff,0xffff00ff,0xff00ffff,0xffffffff};
 static int running=1, headless=0, auto_keys=0, auto_source=1;
+static int auto_pause_frame=-1,auto_resume_frame=-1;
 static int protocol_version=0;
 static int status_length=0;
-static const char *dump_path,*dump_frame_path;
+static const char *dump_path,*dump_frame_path,*dump_fetches_path;
 static uint8_t queued_keys[16];static size_t queued_head,queued_tail;
 
 void PicoCard_Out(byte port,byte value){p2wp_device_out(port,value);} byte PicoCard_In(byte port){return p2wp_device_in(port);}
@@ -58,7 +59,8 @@ static void automatic_keyboard(int frame){static int stage,pressed=-1,release_fr
   else if(stage==1&&!legacy_warning_seen&&frame>=30&&screen_has("COMPATIBILITEITSMODUS")){code=17;legacy_warning_seen=1;}
   else if(stage==1&&screen_has("Emulated WiFi")){code=46;stage++;}
   else if(stage==2&&screen_has("WIFI-PROFIEL BEWAREN")){code=25;stage++;}
-  else if(stage==3&&frame>=120&&screen_has("KIES BRON (1-2)")){code=auto_source==2?63:46;stage++;}
+  else if(stage==3&&frame>=150&&screen_has("KIES BRON (1-2)")){code=auto_source==2?63:46;stage++;}
+  else if(stage>=4&&(frame==auto_pause_frame||frame==auto_resume_frame)){code=53;}
   if(code>=0){fprintf(stderr,"auto: frame %d key %d stage %d\n",frame,code,stage);inject_key(code);pressed=code;release_frame=frame+4;}
 }
 static int dump_screen(void){
@@ -69,6 +71,12 @@ static int dump_screen(void){
 }
 static int dump_frame(void){if(!dump_frame_path)return 1;FILE *f=fopen(dump_frame_path,"wb");if(!f)return 0;
   int ok=fwrite(pixels,1,sizeof(pixels),f)==sizeof(pixels);fclose(f);return ok;}
+static int dump_fetches(const struct page_backend *backend){
+  if(!dump_fetches_path)return 1;
+  FILE *f=fopen(dump_fetches_path,"wb");if(!f)return 0;
+  size_t count=backend->request_count<sizeof(backend->requested_subpages)?backend->request_count:sizeof(backend->requested_subpages);
+  int ok=fwrite(backend->requested_subpages,1,count,f)==count;fclose(f);return ok;
+}
 
 static int read_exact(const char *path,uint8_t *dst,size_t size){FILE *f=fopen(path,"rb");if(!f){fprintf(stderr,"%s: %s\n",path,strerror(errno));return 0;}int ok=fread(dst,1,size,f)==size&&fgetc(f)==EOF;fclose(f);return ok;}
 int main(int argc,char **argv){const char *monitor=NULL,*cart=NULL,*font="emulator/assets/Default.fnt",*fixture=NULL;int live=0,frames=0;
@@ -78,16 +86,19 @@ int main(int argc,char **argv){const char *monitor=NULL,*cart=NULL,*font="emulat
     else if(!strcmp(argv[i],"--auto"))auto_keys=1;else if(!strcmp(argv[i],"--auto-source")&&++i<argc)auto_source=atoi(argv[i]);
     else if(!strcmp(argv[i],"--p2wp-version")&&++i<argc)protocol_version=atoi(argv[i]);
     else if(!strcmp(argv[i],"--p2wp-status-length")&&++i<argc)status_length=atoi(argv[i]);
+    else if(!strcmp(argv[i],"--auto-pause-frame")&&++i<argc)auto_pause_frame=atoi(argv[i]);
+    else if(!strcmp(argv[i],"--auto-resume-frame")&&++i<argc)auto_resume_frame=atoi(argv[i]);
     else if(!strcmp(argv[i],"--dump-screen")&&++i<argc)dump_path=argv[i];
-    else if(!strcmp(argv[i],"--dump-frame")&&++i<argc)dump_frame_path=argv[i];else{fprintf(stderr,"bad argument: %s\n",argv[i]);return 2;}}
+    else if(!strcmp(argv[i],"--dump-frame")&&++i<argc)dump_frame_path=argv[i];
+    else if(!strcmp(argv[i],"--dump-fetches")&&++i<argc)dump_fetches_path=argv[i];else{fprintf(stderr,"bad argument: %s\n",argv[i]);return 2;}}
   if(!monitor||!cart||auto_source<1||auto_source>2||protocol_version<0||protocol_version>255||(status_length!=0&&status_length!=5&&status_length!=9&&status_length!=13)){fprintf(stderr,"Usage: p2000t-emulator --monitor ROM --cartridge ROM [--live|--fixture JSON] [--auto-source 1|2] [--p2wp-version N] [--p2wp-status-length 5|9|13]\n");return 2;}
   uint8_t m[4096],c[16384];if(!read_exact(monitor,m,sizeof(m))||!read_exact(cart,c,sizeof(c)))return 1;
   if(SDL_Init(headless?SDL_INIT_TIMER:SDL_INIT_VIDEO))return 1;
   if(!headless){window=SDL_CreateWindow("P2000T Teletekst",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,WIDTH,HEIGHT,0);renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_ACCELERATED);if(!renderer)renderer=SDL_CreateRenderer(window,-1,SDL_RENDERER_SOFTWARE);texture=renderer?SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,WIDTH,HEIGHT):NULL;if(!window||!renderer||!texture)return 1;}
   FontName=font;EightyColumnsCard=0;Z80_IPeriod=2500000/50;UPeriod=1;if(!InitP2000(m,c))return 1;
-  struct page_backend backend={fixture,live};p2wp_device_init(page_backend_fetch,&backend);if(protocol_version)p2wp_device_set_protocol_range((uint8_t)protocol_version,(uint8_t)protocol_version);if(status_length)p2wp_device_set_status_length((uint8_t)status_length);OutputReg|=0x40;
+  struct page_backend backend={.fixture=fixture,.live=live};p2wp_device_init(page_backend_fetch,&backend);if(protocol_version)p2wp_device_set_protocol_range((uint8_t)protocol_version,(uint8_t)protocol_version);if(status_length)p2wp_device_set_status_length((uint8_t)status_length);OutputReg|=0x40;
   Z80_Regs regs;Z80_GetRegs(&regs);regs.PC.D=0x1010;Z80_SetRegs(&regs);
   for(int frame=0;running&&(!frames||frame<frames);frame++){if(auto_keys)automatic_keyboard(frame);Z80_Execute();if(!headless)SDL_Delay(20);}
   RefreshScreen();if(auto_keys)fprintf(stderr,"auto: final PC=0x%04x queue=%zu\n",Z80_GetPC(),queued_tail-queued_head);
-  int ok=dump_screen()&&dump_frame();TrashP2000();SDL_Quit();return ok?0:1;
+  int ok=dump_screen()&&dump_frame()&&dump_fetches(&backend);TrashP2000();SDL_Quit();return ok?0:1;
 }

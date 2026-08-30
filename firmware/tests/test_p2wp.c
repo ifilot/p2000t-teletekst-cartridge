@@ -1,5 +1,6 @@
 #include "p2wp.h"
 #include "teletekst.h"
+#include "version.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -21,6 +22,32 @@ static void test_version_negotiation(void) {
     assert(p2wp_select_version(2u, 3u, 1u, 1u) == 0u);
     assert(p2wp_select_version(2u, 3u, 4u, 4u) == 0u);
     assert(p2wp_select_version(3u, 2u, 2u, 3u) == 0u);
+}
+
+/** Verify bounded GitHub release-tag parsing and malformed input rejection. */
+static void test_release_version_parsing(void) {
+    static const char response[] =
+        "{\n  \"url\":\"ignored\",\n  \"tag_name\" : \"v12.34.5\",\n"
+        "  \"name\":\"Patch\"\n}";
+    p2wp_release_version_t version = {0};
+    assert(p2wp_parse_latest_release(
+        response,
+        sizeof(response) - 1u,
+        &version
+    ));
+    assert(version.major == 12u && version.minor == 34u && version.patch == 5u);
+    static const char short_tag[] = "{\"tag_name\":\"v1.2\"}";
+    assert(!p2wp_parse_latest_release(
+        short_tag,
+        sizeof(short_tag) - 1u,
+        &version
+    ));
+    static const char overflow[] = "{\"tag_name\":\"v256.2.3\"}";
+    assert(!p2wp_parse_latest_release(
+        overflow,
+        sizeof(overflow) - 1u,
+        &version
+    ));
 }
 
 /**
@@ -412,6 +439,7 @@ static void test_exact_binary_display(void) {
 int main(void) {
     test_crc();
     test_version_negotiation();
+    test_release_version_parsing();
     test_round_trip();
     test_corruption();
     test_profile_save_round_trip();

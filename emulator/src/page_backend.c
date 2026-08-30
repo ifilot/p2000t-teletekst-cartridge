@@ -25,6 +25,9 @@ int page_backend_fetch(void *argument,unsigned char source,unsigned short page,
                        unsigned char subpage,unsigned char screen[960],
                        unsigned char *next,unsigned char clock[7]) {
     struct page_backend *backend=argument; struct buffer body={0}; int result=-1;
+    if(backend->request_count<sizeof(backend->requested_subpages))
+        backend->requested_subpages[backend->request_count]=subpage;
+    backend->request_count++;
     if(backend->fixture) result=read_file(backend->fixture,&body);
     else if(backend->live) {
         char url[160]; const char *host=source?"teletekst.philips-p2000t.nl":"teletekst-data.nos.nl";
@@ -36,6 +39,7 @@ int page_backend_fetch(void *argument,unsigned char source,unsigned short page,
         }
     }
     if(!result && !teletekst_decode_nos_json(body.data,body.length,page,screen,next)) result=-1;
+    if(!result && backend->fixture && subpage!=0) *next=0;
     free(body.data);
     time_t now=time(NULL); struct tm local; localtime_r(&now,&local);
     clock[0]=(unsigned char)local.tm_hour; clock[1]=(unsigned char)local.tm_min;
