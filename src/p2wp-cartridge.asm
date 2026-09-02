@@ -1,4 +1,4 @@
-; P2WP/2-3 Wi-Fi and Teletekst client for a Philips P2000T cartridge.
+; P2WP/2-4 Wi-Fi and Teletekst client for a Philips P2000T cartridge.
 ;
 ; The monitor maps this 16 KiB ROM at 1000h and enters it at 1010h. The
 ; sign_cartridge.py fills the checksum length and value after assembly.  The
@@ -28,9 +28,9 @@ STATUS_TX_READY:       equ 002h
 
 P2WP_BOOTSTRAP_VERSION: equ 002h
 P2WP_MIN_VERSION:      equ 002h
-P2WP_MAX_VERSION:      equ 003h
+P2WP_MAX_VERSION:      equ 004h
 CARTRIDGE_VERSION_MAJOR: equ 0
-CARTRIDGE_VERSION_MINOR: equ 4
+CARTRIDGE_VERSION_MINOR: equ 5
 CARTRIDGE_VERSION_PATCH: equ 0
 P2WP_FLAG_RESPONSE:    equ 001h
 P2WP_FLAG_ERROR:       equ 002h
@@ -64,10 +64,12 @@ SAA5050_ALPHA_WHITE:   equ 007h
 SAA5050_ALPHA_YELLOW:  equ 003h
 SAA5050_GRAPHICS_WHITE: equ 017h
 SAA5050_CONTIGUOUS_GRAPHICS: equ 019h
-KEY_STOP_EVENT:        equ 080h
+KEY_START_EVENT:       equ 0fdh
+KEY_STOP_EVENT:        equ 0feh
 HOST_MAX_PAYLOAD:      equ 240
 MAX_LINE_LENGTH:       equ 32
 MAX_PASSWORD_LENGTH:   equ 63
+MAX_CUSTOM_URL_LENGTH: equ 96
 
 WIFI_SCAN_RUNNING:     equ 1
 WIFI_SCAN_COMPLETE:    equ 2
@@ -93,6 +95,7 @@ TELETEKST_BLINK_TICKS:  equ 25
 LINK_TIMEOUT_TICKS:    equ 100 ; 100 monitor ticks at 20 ms = 2 seconds
 TELETEKST_SOURCE_NOS:   equ 0
 TELETEKST_SOURCE_P2000T: equ 1
+TELETEKST_SOURCE_CUSTOM: equ 2
 WIFI_SECURITY_OPEN:    equ 0
 WIFI_SECURITY_PSK:     equ 1
 
@@ -106,6 +109,10 @@ start:
         ei
         xor a
         ld (teletekst_clock_valid),a
+        ld (custom_url_length),a
+        ld (teletekst_reveal_enabled),a
+        ld (teletekst_zoom_state),a
+        ld (teletekst_page_valid),a
         ld (hello_error_kind),a
         ld a,P2WP_BOOTSTRAP_VERSION
         ld (p2wp_session_version),a
@@ -1259,35 +1266,41 @@ teletekst_choose_source:
         ld hl,source_nos_text
         ld de,VIDEO_RAM+400
         call write_string
-        ld hl,source_p2000t_text
+        ld hl,source_white_blank_text
         ld de,VIDEO_RAM+480
         call write_string
-        ld hl,source_white_blank_text
+        ld hl,source_p2000t_text
         ld de,VIDEO_RAM+560
         call write_string
-        ld hl,opening_blue_rule_text
+        ld hl,source_white_blank_text
         ld de,VIDEO_RAM+640
         call write_string
-        ld hl,source_prompt_text
+        ld hl,source_custom_text
         ld de,VIDEO_RAM+720
         call write_string
-        ld hl,source_controls_title_text
+        ld hl,opening_blue_rule_text
+        ld de,VIDEO_RAM+800
+        call write_string
+        ld hl,source_prompt_text
         ld de,VIDEO_RAM+880
         call write_string
-        ld hl,source_control_pause_text
+        ld hl,source_controls_title_text
         ld de,VIDEO_RAM+960
         call write_string
-        ld hl,source_control_subpage_text
+        ld hl,source_control_display_text
         ld de,VIDEO_RAM+1040
         call write_string
-        ld hl,source_control_wifi_text
+        ld hl,source_control_pages_text
         ld de,VIDEO_RAM+1120
         call write_string
-        ld hl,source_control_help_text
+        ld hl,source_control_subpage_text
         ld de,VIDEO_RAM+1200
         call write_string
-        ld hl,source_control_stop_text
+        ld hl,source_control_wifi_text
         ld de,VIDEO_RAM+1280
+        call write_string
+        ld hl,source_control_stop_text
+        ld de,VIDEO_RAM+1360
         call write_string
         ld hl,opening_footer_text
         ld de,VIDEO_RAM+1840
@@ -1307,14 +1320,150 @@ teletekst_choose_source_key:
         jp z,teletekst_change_wifi
         cp '1'
         jr z,teletekst_choose_source_nos
+        cp '0'
+        jr z,teletekst_choose_source_custom
         cp '2'
         jr nz,teletekst_choose_source_key
         ld a,TELETEKST_SOURCE_P2000T
         jr teletekst_choose_source_store
 teletekst_choose_source_nos:
         ld a,TELETEKST_SOURCE_NOS
+        jr teletekst_choose_source_store
+teletekst_choose_source_custom:
+        ld a,(p2wp_session_version)
+        cp 4
+        jr c,teletekst_custom_requires_v4
+        call teletekst_enter_custom_url
+        jp c,teletekst_choose_source
+        ld a,TELETEKST_SOURCE_CUSTOM
 teletekst_choose_source_store:
         ld (teletekst_source),a
+        ret
+
+teletekst_custom_requires_v4:
+        ld hl,source_custom_v4_text
+        ld de,VIDEO_RAM+1520
+        call write_string
+        jr teletekst_choose_source_key
+
+; Enter or edit one session-persistent HTTP(S) base URL. The 96-byte value is
+; transported with every custom page request, so the Pico never needs DNS or
+; certificate details compiled into its firmware.
+teletekst_enter_custom_url:
+        call clear_screen
+        ld hl,custom_title_text
+        ld de,MENU_HEADER_RAM
+        call write_string
+        ld hl,opening_blue_rule_text
+        ld de,MENU_RULE_RAM
+        call write_string
+        ld hl,custom_intro_text
+        ld de,VIDEO_RAM+240
+        call write_string
+        ld hl,custom_example_text
+        ld de,VIDEO_RAM+320
+        call write_string
+        ld hl,custom_security_text
+        ld de,VIDEO_RAM+400
+        call write_string
+        ld hl,custom_input_text
+        ld de,VIDEO_RAM+480
+        call write_string
+        call teletekst_draw_custom_url
+teletekst_custom_url_key:
+        call read_key
+        cp 00dh
+        jr z,teletekst_custom_url_accept
+        cp 008h
+        jr z,teletekst_custom_url_backspace
+        cp 020h
+        jr c,teletekst_custom_url_key
+        cp 07fh
+        jr nc,teletekst_custom_url_key
+        ld c,a
+        ld a,(custom_url_length)
+        cp MAX_CUSTOM_URL_LENGTH
+        jr nc,teletekst_custom_url_key
+        call teletekst_custom_video_pointer
+        ld a,c
+        call ascii_to_display
+        ld (de),a
+        ld a,(custom_url_length)
+        ld e,a
+        ld d,0
+        ld hl,CUSTOM_URL_BUFFER
+        add hl,de
+        ld (hl),c
+        ld a,(custom_url_length)
+        inc a
+        ld (custom_url_length),a
+        jr teletekst_custom_url_key
+teletekst_custom_url_backspace:
+        ld a,(custom_url_length)
+        or a
+        jr z,teletekst_custom_url_key
+        dec a
+        ld (custom_url_length),a
+        call teletekst_custom_video_pointer
+        ld a,020h
+        ld (de),a
+        jr teletekst_custom_url_key
+teletekst_custom_url_accept:
+        ld a,(custom_url_length)
+        or a
+        jr z,teletekst_custom_url_key
+        or a
+        ret
+
+; Display the previously entered value and preserve it while sources change.
+teletekst_draw_custom_url:
+        ld a,(custom_url_length)
+        or a
+        ret z
+        ld b,a
+        ld c,0
+        ld hl,CUSTOM_URL_BUFFER
+        ld de,VIDEO_RAM+560
+teletekst_draw_custom_url_loop:
+        ld a,(hl)
+        call ascii_to_display
+        ld (de),a
+        inc hl
+        inc de
+        inc c
+        ld a,c
+        cp 40
+        jr nz,teletekst_draw_custom_url_next
+        ld c,0
+        push hl
+        ld hl,40
+        add hl,de
+        ex de,hl
+        pop hl
+teletekst_draw_custom_url_next:
+        djnz teletekst_draw_custom_url_loop
+        ret
+
+; Map URL byte index A to its visible cell across three 40-column rows.
+teletekst_custom_video_pointer:
+        cp 40
+        jr c,teletekst_custom_video_first
+        cp 80
+        jr c,teletekst_custom_video_second
+        sub 80
+        ld hl,VIDEO_RAM+720
+        jr teletekst_custom_video_add
+teletekst_custom_video_second:
+        sub 40
+        ld hl,VIDEO_RAM+640
+        jr teletekst_custom_video_add
+teletekst_custom_video_first:
+        ld hl,VIDEO_RAM+560
+teletekst_custom_video_add:
+        ld e,a
+        ld d,0
+        add hl,de
+        ex de,hl
         ret
 
 ; STOP returns to source selection without dropping the Wi-Fi connection.
@@ -1356,9 +1505,33 @@ teletekst_main_loop:
         jp z,teletekst_change_wifi
         cp 'w'
         jp z,teletekst_change_wifi
+        cp KEY_START_EVENT
+        jp z,teletekst_show_index
+        cp 'I'
+        jp z,teletekst_show_index
+        cp 'i'
+        jp z,teletekst_show_index
+        cp 'R'
+        jp z,teletekst_toggle_reveal
+        cp 'r'
+        jp z,teletekst_toggle_reveal
+        cp '?'
+        jp z,teletekst_toggle_reveal
+        cp 'Z'
+        jp z,teletekst_toggle_zoom
+        cp 'z'
+        jp z,teletekst_toggle_zoom
         cp 'P'
-        jp z,teletekst_toggle_rotation
+        jp z,teletekst_previous_page_key
         cp 'p'
+        jp z,teletekst_previous_page_key
+        cp 'N'
+        jp z,teletekst_following_page
+        cp 'n'
+        jp z,teletekst_following_page
+        cp 'A'
+        jp z,teletekst_toggle_rotation
+        cp 'a'
         jp z,teletekst_toggle_rotation
         cp 'S'
         jp z,teletekst_select_subpage
@@ -1382,9 +1555,9 @@ teletekst_main_loop:
         call teletekst_clear_header_input
         ld a,c
         cp '1'
-        jr c,teletekst_main_loop
+        jp c,teletekst_main_loop
         cp '8'+1
-        jr nc,teletekst_main_loop
+        jp nc,teletekst_main_loop
 teletekst_store_digit:
         ld a,(teletekst_input_count)
         ld e,a
@@ -1400,18 +1573,82 @@ teletekst_store_digit:
         inc a
         ld (teletekst_input_count),a
         cp 3
-        jr nz,teletekst_main_loop
+        jp nz,teletekst_main_loop
 
         call teletekst_accept_input
         xor a
         ld (teletekst_input_count),a
         ld (teletekst_subpage),a
         call teletekst_fetch_page
-        jr nc,teletekst_main_loop
+        jp nc,teletekst_main_loop
         call show_teletekst_error
         jp teletekst_main_loop
 
-; P toggles automatic subpage cycling. Resuming starts a fresh ten-second
+teletekst_show_index:
+        ld hl,100
+        jr teletekst_navigate_to_hl
+
+teletekst_previous_page_key:
+        ld hl,(teletekst_previous_page)
+        ld a,h
+        or l
+        jp z,teletekst_main_loop
+        jr teletekst_navigate_to_hl
+
+teletekst_following_page:
+        ld hl,(teletekst_next_page)
+        ld a,h
+        or l
+        jp z,teletekst_main_loop
+teletekst_navigate_to_hl:
+        ld (teletekst_page),hl
+        xor a
+        ld (teletekst_subpage),a
+        ld (teletekst_input_count),a
+        call teletekst_fetch_page
+        jp nc,teletekst_main_loop
+        call show_teletekst_error
+        jp teletekst_main_loop
+
+; R reveals SAA5050 concealed text without modifying the provider's cached
+; bytes. Z cycles normal, enlarged top half, enlarged bottom half, then normal.
+teletekst_toggle_reveal:
+        ld a,(teletekst_page_valid)
+        or a
+        jp z,teletekst_main_loop
+        ld a,(teletekst_reveal_enabled)
+        xor 1
+        ld (teletekst_reveal_enabled),a
+        call teletekst_render_screen
+        ld a,(teletekst_zoom_state)
+        or a
+        jr nz,teletekst_toggle_reveal_commit_screen
+        call teletekst_commit_reveal
+        jp teletekst_restore_pause_and_loop
+teletekst_toggle_reveal_commit_screen:
+        call teletekst_commit_screen
+        jp teletekst_restore_pause_and_loop
+
+teletekst_toggle_zoom:
+        ld a,(teletekst_page_valid)
+        or a
+        jp z,teletekst_main_loop
+        ld a,(teletekst_zoom_state)
+        inc a
+        cp 3
+        jr c,teletekst_zoom_store
+        xor a
+teletekst_zoom_store:
+        ld (teletekst_zoom_state),a
+        call teletekst_render_screen
+        call teletekst_commit_screen
+teletekst_restore_pause_and_loop:
+        ld a,(teletekst_rotation_paused)
+        or a
+        call nz,teletekst_draw_pause_indicator
+        jp teletekst_main_loop
+
+; A toggles automatic subpage cycling. Resuming starts a fresh ten-second
 ; interval; pages without a reported successor remain stationary.
 teletekst_toggle_rotation:
         ld a,(teletekst_rotation_paused)
@@ -1440,7 +1677,7 @@ teletekst_pause_rotation:
 ; S followed by two digits selects subpage 00-99. One digit followed by Enter
 ; selects subpage 0-9. Zero asks the API for its default first subpage. An
 ; explicit choice also pauses automatic cycling so the selected subpage stays
-; on screen until the user presses P.
+; on screen until the user presses A.
 teletekst_select_subpage:
         xor a
         ld (teletekst_rotation_enabled),a
@@ -1540,41 +1777,38 @@ teletekst_help_save_screen:
         ld hl,help_page_entry_text
         ld de,VIDEO_RAM+400
         call write_string
-        ld hl,help_source_text
+        ld hl,help_index_text
         ld de,VIDEO_RAM+480
         call write_string
-        ld hl,help_wifi_text
+        ld hl,help_browse_text
         ld de,VIDEO_RAM+560
         call write_string
-        ld hl,help_subpage_title_text
+        ld hl,help_display_title_text
         ld de,VIDEO_RAM+720
         call write_string
-        ld hl,help_subpage_select_text
+        ld hl,help_reveal_text
         ld de,VIDEO_RAM+800
         call write_string
-        ld hl,help_subpage_input_text
+        ld hl,help_zoom_text
         ld de,VIDEO_RAM+880
         call write_string
-        ld hl,help_pause_text
+        ld hl,help_subpage_title_text
         ld de,VIDEO_RAM+960
         call write_string
-        ld hl,help_pause_mark_text
+        ld hl,help_subpage_select_text
         ld de,VIDEO_RAM+1040
         call write_string
-        ld hl,help_default_subpage_text
+        ld hl,help_pause_text
         ld de,VIDEO_RAM+1120
         call write_string
-        ld hl,help_behavior_title_text
+        ld hl,help_wifi_text
         ld de,VIDEO_RAM+1200
         call write_string
-        ld hl,help_behavior_text
+        ld hl,help_source_text
         ld de,VIDEO_RAM+1280
         call write_string
-        ld hl,help_error_text
+        ld hl,help_help_text
         ld de,VIDEO_RAM+1360
-        call write_string
-        ld hl,help_cycle_text
-        ld de,VIDEO_RAM+1440
         call write_string
         ld hl,opening_blue_rule_text
         ld de,VIDEO_RAM+1600
@@ -1687,10 +1921,32 @@ teletekst_fetch_page:
         ld (FRAME_BUFFER+8),a
         ld a,(teletekst_source)
         ld (FRAME_BUFFER+9),a
+        cp TELETEKST_SOURCE_CUSTOM
+        jr nz,teletekst_fetch_builtin_length
+        ld a,(p2wp_session_version)
+        cp 4
+        jp c,teletekst_fetch_failed
+        ld a,(custom_url_length)
+        ld (FRAME_BUFFER+10),a
+        ld c,a
+        ld b,0
+        ld hl,CUSTOM_URL_BUFFER
+        ld de,FRAME_BUFFER+11
+        ldir
+        ld a,(custom_url_length)
+        add a,5
+        ld (FRAME_BUFFER+4),a
+        add a,6
+        ld l,a
+        ld h,0
+        ld (body_length),hl
+        jr teletekst_fetch_request_ready
+teletekst_fetch_builtin_length:
         ld a,4
         ld (FRAME_BUFFER+4),a
         ld hl,10
         ld (body_length),hl
+teletekst_fetch_request_ready:
         call transact
         jp c,teletekst_fetch_failed
         call validate_empty_response
@@ -1711,6 +1967,10 @@ teletekst_fetch_poll:
         ld (teletekst_status_length),a
         ld b,a
         ld a,(p2wp_session_version)
+        cp 4
+        ld a,b
+        jr z,teletekst_fetch_poll_v4_length
+        ld a,(p2wp_session_version)
         cp 3
         ld a,b
         jr z,teletekst_fetch_poll_v3_length
@@ -1723,6 +1983,10 @@ teletekst_fetch_poll:
         jr teletekst_fetch_poll_length_ok
 teletekst_fetch_poll_v3_length:
         cp 13
+        jp nz,teletekst_fetch_failed
+        jr teletekst_fetch_poll_length_ok
+teletekst_fetch_poll_v4_length:
+        cp 17
         jp nz,teletekst_fetch_failed
 teletekst_fetch_poll_length_ok:
         call next_sequence
@@ -1737,6 +2001,8 @@ teletekst_fetch_poll_length_ok:
         jp nz,teletekst_fetch_failed
         ld a,(RX_BUFFER+7)
         ld (teletekst_error_code),a
+        xor a
+        ld (teletekst_page_valid),a
         call teletekst_indicator_restore
         scf
         ret
@@ -1744,6 +2010,17 @@ teletekst_fetch_poll_length_ok:
 teletekst_fetch_rows:
         ld a,(RX_BUFFER+10)
         ld (teletekst_next_subpage),a
+        ld hl,0
+        ld (teletekst_previous_page),hl
+        ld (teletekst_next_page),hl
+        ld a,(teletekst_status_length)
+        cp 17
+        jr nz,teletekst_fetch_rows_navigation_ready
+        ld hl,(RX_BUFFER+19)
+        ld (teletekst_previous_page),hl
+        ld hl,(RX_BUFFER+21)
+        ld (teletekst_next_page),hl
+teletekst_fetch_rows_navigation_ready:
         xor a
         ld (teletekst_clock_valid),a
         ld (teletekst_clock_has_date),a
@@ -1761,7 +2038,7 @@ teletekst_fetch_rows:
         ld (teletekst_clock_seconds),a
         ld a,(teletekst_status_length)
         cp 13
-        jr nz,teletekst_fetch_rows_clock_ready
+        jr c,teletekst_fetch_rows_clock_ready
         ld a,(RX_BUFFER+15)
         ld (teletekst_clock_day),a
         ld a,(RX_BUFFER+16)
@@ -1780,7 +2057,7 @@ teletekst_fetch_rows_clock_ready:
         xor a
         ld (teletekst_clock_blink_phase),a
 teletekst_fetch_rows_no_clock:
-        ld hl,TELETEXT_SCREEN_BUFFER
+        ld hl,TELETEXT_RAW_SCREEN_BUFFER
         ld (teletekst_screen_pointer),hl
         xor a
         ld (teletekst_chunk),a
@@ -1811,6 +2088,12 @@ teletekst_chunk_loop:
         jr nz,teletekst_chunk_loop
 
         call teletekst_draw_clock_buffer
+        xor a
+        ld (teletekst_reveal_enabled),a
+        ld (teletekst_zoom_state),a
+        inc a
+        ld (teletekst_page_valid),a
+        call teletekst_render_screen
         call teletekst_commit_screen
         ld a,(teletekst_rotation_paused)
         or a
@@ -1841,11 +2124,13 @@ teletekst_fetch_rotation_disabled:
 teletekst_draw_pause_indicator:
         ld a,(VIDEO_RAM+39)
         ld (teletekst_pause_saved_cell),a
-        ld a,'P'
+        ld a,'A'
         ld (VIDEO_RAM+39),a
         ret
 
 teletekst_fetch_failed:
+        xor a
+        ld (teletekst_page_valid),a
         ld a,0ffh
         ld (teletekst_error_code),a
         call teletekst_indicator_restore
@@ -1860,6 +2145,151 @@ teletekst_copy_chunk:
         ld bc,TELETEKST_CHUNK_SIZE
         ldir
         ld (teletekst_screen_pointer),de
+        ret
+
+; Rebuild the display staging buffer from the untouched provider bytes. Reveal
+; replaces conceal controls with the active foreground control. Zoom uses the
+; SAA5050 double-height mode and places twelve source rows in alternate P2000T
+; memory rows, which the hardware expands into 24 visible rows.
+teletekst_render_screen:
+        ld a,(teletekst_zoom_state)
+        or a
+        jr nz,teletekst_render_zoom
+        ld hl,TELETEXT_RAW_SCREEN_BUFFER
+        ld de,TELETEXT_SCREEN_BUFFER
+        ld a,24
+teletekst_render_normal_row:
+        push af
+        ld a,SAA5050_ALPHA_WHITE
+        ld (teletekst_render_colour),a
+        ld b,40
+        call teletekst_render_copy_row
+        pop af
+        dec a
+        jr nz,teletekst_render_normal_row
+        ret
+
+teletekst_render_zoom:
+        push af
+        ld hl,TELETEXT_SCREEN_BUFFER
+        ld (hl),020h
+        ld de,TELETEXT_SCREEN_BUFFER+1
+        ld bc,TELETEKST_CHUNK_SIZE*TELETEKST_CHUNK_COUNT-1
+        ldir
+        pop af
+        ld hl,TELETEXT_RAW_SCREEN_BUFFER
+        cp 2
+        jr nz,teletekst_render_zoom_source_ready
+        ld de,480
+        add hl,de
+teletekst_render_zoom_source_ready:
+        ld de,TELETEXT_SCREEN_BUFFER
+        ld a,12
+teletekst_render_zoom_row:
+        push af
+        ld a,00dh
+        ld (de),a
+        inc de
+        ld a,SAA5050_ALPHA_WHITE
+        ld (teletekst_render_colour),a
+        ld b,39
+        call teletekst_render_copy_row
+        inc hl
+        push hl
+        ld hl,40
+        add hl,de
+        ex de,hl
+        pop hl
+        pop af
+        dec a
+        jr nz,teletekst_render_zoom_row
+        ret
+
+teletekst_render_copy_row:
+        ld a,(hl)
+        inc hl
+        ld c,a
+        and 07fh
+        cp 1
+        jr c,teletekst_render_check_graphics
+        cp 8
+        jr nc,teletekst_render_check_graphics
+        ld (teletekst_render_colour),a
+        jr teletekst_render_store
+teletekst_render_check_graphics:
+        cp 011h
+        jr c,teletekst_render_check_conceal
+        cp 018h
+        jr nc,teletekst_render_check_conceal
+        ld (teletekst_render_colour),a
+        jr teletekst_render_store
+teletekst_render_check_conceal:
+        cp 018h
+        jr nz,teletekst_render_store
+        ld a,(teletekst_reveal_enabled)
+        or a
+        jr z,teletekst_render_store
+        ld a,(teletekst_render_colour)
+        ld c,a
+teletekst_render_store:
+        ld a,c
+        ld (de),a
+        inc de
+        djnz teletekst_render_copy_row
+        ret
+
+; Reveal changes only the conceal controls in a normal-size page. Updating
+; those few video bytes in place avoids blanking and copying the complete
+; screen, so the key has no visible flicker on physical or emulated hardware.
+; The untouched raw buffer remains authoritative when conceal is restored.
+teletekst_commit_reveal:
+        ld hl,TELETEXT_RAW_SCREEN_BUFFER
+        ld de,VIDEO_RAM
+        ld a,24
+teletekst_commit_reveal_row:
+        push af
+        ld c,SAA5050_ALPHA_WHITE
+        ld b,40
+teletekst_commit_reveal_column:
+        ld a,(hl)
+        and 07fh
+        cp 1
+        jr c,teletekst_commit_reveal_check_graphics
+        cp 8
+        jr nc,teletekst_commit_reveal_check_graphics
+        ld c,a
+        jr teletekst_commit_reveal_next
+teletekst_commit_reveal_check_graphics:
+        cp 011h
+        jr c,teletekst_commit_reveal_check_conceal
+        cp 018h
+        jr nc,teletekst_commit_reveal_check_conceal
+        ld c,a
+        jr teletekst_commit_reveal_next
+teletekst_commit_reveal_check_conceal:
+        cp 018h
+        jr nz,teletekst_commit_reveal_next
+        ld a,(teletekst_reveal_enabled)
+        or a
+        jr nz,teletekst_commit_reveal_store_colour
+        ld a,(hl)
+        jr teletekst_commit_reveal_store
+teletekst_commit_reveal_store_colour:
+        ld a,c
+teletekst_commit_reveal_store:
+        ld (de),a
+teletekst_commit_reveal_next:
+        inc hl
+        inc de
+        djnz teletekst_commit_reveal_column
+        push hl
+        ld hl,40
+        add hl,de
+        ex de,hl
+        pop hl
+        pop af
+        dec a
+        jr nz,teletekst_commit_reveal_row
         ret
 
 ; Copy a complete staged page into the visible 40 columns of the P2000T's
@@ -1953,6 +2383,13 @@ teletekst_clock_saved:
         ld a,(teletekst_input_count)
         or a
         ret nz
+        ld a,(teletekst_zoom_state)
+        or a
+        ret nz
+        ld de,TELETEXT_RAW_SCREEN_BUFFER+1
+        call teletekst_write_clock
+        ld de,TELETEXT_SCREEN_BUFFER+1
+        call teletekst_write_clock
         ld de,VIDEO_RAM+1
         jp teletekst_write_clock
 
@@ -2017,7 +2454,7 @@ teletekst_draw_clock_buffer:
         ld a,(teletekst_clock_valid)
         or a
         ret z
-        ld de,TELETEXT_SCREEN_BUFFER+1
+        ld de,TELETEXT_RAW_SCREEN_BUFFER+1
         ; fall through
 teletekst_write_clock:
         ld a,SAA5050_ALPHA_YELLOW
@@ -2787,14 +3224,15 @@ keyboard_shifted_table:
         defb 0,'Y','A','W','E','T','U','R'
         defb 0,')',0,0,008h,'=','!','_'
         defb 0,'O',0,0,00dh,'P','(',0
-        defb 0,0,0,0,0,'?','K','"'
+        defb KEY_START_EVENT,0,0,0,0,'?','K','"'
         defb 0,'L',0,0,0,'+','I','*'
 
 ; ---------------------------------------------------------------------------
 ; Minimal screen output
 
-; A P2WP/2 peripheral remains usable, but lacks the v0.4 P2WP/3 date-status
-; contract. Explain the fallback once, then let the user continue normally.
+; A P2WP/2 peripheral remains usable, but lacks the P2WP/3 date-status and
+; P2WP/4 custom-source/navigation contracts.
+; Explain the fallback once, then let the user continue normally.
 show_protocol_legacy_warning:
         call clear_screen
         ld hl,protocol_legacy_title_text
@@ -3221,6 +3659,10 @@ source_white_blank_text:
         defb 007h,01dh,004h
         defs 37,020h
         defb 0
+source_custom_text:
+        defb 007h,01dh,004h,"  0 - EIGEN SERVER"
+        defs 40-($-source_custom_text),020h
+        defb 0
 source_nos_text:
         defb 007h,01dh,004h,"  1 - NOS TELETEKST"
         defs 40-($-source_nos_text),020h
@@ -3230,29 +3672,43 @@ source_p2000t_text:
         defs 40-($-source_p2000t_text),020h
         defb 0
 source_prompt_text:
-        defb 004h,01dh,007h,"         KIES BRON (1-2)",0
+        defb 004h,01dh,007h,"        KIES BRON (0-2)",0
 source_controls_title_text:
         defb 004h,01dh,007h,"      BEDIENING OP DE PAGINA",0
-source_control_pause_text:
-        defb 007h,01dh,004h,"  P - PAUZE / DOORGAAN"
-        defs 40-($-source_control_pause_text),020h
+source_control_display_text:
+        defb 007h,01dh,004h," START/I INDEX ?/R ONTHUL Z ZOOM"
+        defs 40-($-source_control_display_text),020h
+        defb 0
+source_control_pages_text:
+        defb 007h,01dh,004h,"  P VORIGE PAGINA   N VOLGENDE"
+        defs 40-($-source_control_pages_text),020h
         defb 0
 source_control_subpage_text:
-        defb 007h,01dh,004h,"  S - SUBPAGINA KIEZEN"
+        defb 007h,01dh,004h,"  A PAUZE/DOORGAAN  S SUBPAGINA"
         defs 40-($-source_control_subpage_text),020h
         defb 0
 source_control_wifi_text:
-        defb 007h,01dh,004h,"  W - WIFI-NETWERK WIJZIGEN"
+        defb 007h,01dh,004h,"  W ANDERE WIFI     H HULP"
         defs 40-($-source_control_wifi_text),020h
-        defb 0
-source_control_help_text:
-        defb 007h,01dh,004h,"  H - HULP TONEN"
-        defs 40-($-source_control_help_text),020h
         defb 0
 source_control_stop_text:
         defb 007h,01dh,004h,"  STOP - ANDERE TELETEKSTBRON"
         defs 40-($-source_control_stop_text),020h
         defb 0
+source_custom_v4_text:
+        defb 001h,"       EIGEN SERVER VEREIST P2WP/4",0
+custom_title_text:
+        defb 004h,01dh,007h," P2000T  EIGEN TELETEKSTSERVER"
+        defs 40-($-custom_title_text),020h
+        defb 0
+custom_intro_text:
+        defb 007h,01dh,004h," VOER HTTP(S)-ADRES IN, DAN ENTER",0
+custom_example_text:
+        defb 007h,01dh,004h," BV. http://terra:8080",0
+custom_security_text:
+        defb 003h,01dh,004h," LET OP: HTTPS-CERTIFICAAT ONGETOETST",0
+custom_input_text:
+        defb 004h,01dh,007h," ADRES (MAX. 96 TEKENS):",0
 teletekst_title_text:
         defb 004h,01dh,007h," P2000T  TELETEKST VIA PICO W"
         defs 40-($-teletekst_title_text),020h
@@ -3316,7 +3772,7 @@ opening_footer_text:
         defs 40-($-opening_footer_text),020h
         defb 0
 opening_footer_version_text:
-        defb "v0.4.0",0
+        defb "v0.5.0",0
 
 protocol_legacy_title_text:
         defb 004h,01dh,007h,"        PROTOCOLWAARSCHUWING"
@@ -3329,7 +3785,7 @@ protocol_legacy_found_text:
 protocol_legacy_available_text:
         defb 007h,01dh,004h,"    TELETEKST BLIJFT BESCHIKBAAR",0
 protocol_legacy_update_text:
-        defb 004h,01dh,007h,"     UPDATE CARTRIDGE NAAR v0.4.0",0
+        defb 004h,01dh,007h,"     UPDATE INTERFACE VOOR P2WP/4",0
 protocol_continue_text:
         defb 007h,"   DRUK OP EEN TOETS OM DOOR TE GAAN",0
 
@@ -3340,7 +3796,7 @@ protocol_incompatible_title_text:
 protocol_incompatible_shared_text:
         defb 007h,01dh,004h,"      GEEN GEDEELDE P2WP-VERSIE",0
 protocol_incompatible_range_text:
-        defb 007h,01dh,004h,"    CARTRIDGE: P2WP/2 TOT P2WP/3",0
+        defb 007h,01dh,004h,"    CARTRIDGE: P2WP/2 TOT P2WP/4",0
 protocol_incompatible_update_text:
         defb 004h,01dh,007h,"     UPDATE CARTRIDGE OF INTERFACE",0
 
@@ -3356,6 +3812,16 @@ help_page_title_text:
         defb 004h,01dh,007h," PAGINA EN VERBINDING",0
 help_page_entry_text:
         defb 007h,01dh,004h," 100-899  TYP DRIE CIJFERS",0
+help_index_text:
+        defb 007h,01dh,004h," START/I  INDEXPAGINA 100",0
+help_browse_text:
+        defb 007h,01dh,004h," P / N    VORIGE / VOLGENDE PAGINA",0
+help_display_title_text:
+        defb 004h,01dh,007h," WEERGAVE",0
+help_reveal_text:
+        defb 007h,01dh,004h," ?/R      VERBORGEN TEKST ONTHULLEN",0
+help_zoom_text:
+        defb 007h,01dh,004h," Z        BOVEN / ONDER / NORMAAL",0
 help_source_text:
         defb 007h,01dh,004h," STOP     KIES EEN ANDERE BRON",0
 help_wifi_text:
@@ -3364,22 +3830,10 @@ help_subpage_title_text:
         defb 004h,01dh,007h," SUBPAGINA'S",0
 help_subpage_select_text:
         defb 007h,01dh,004h," S        KIES EEN SUBPAGINA",0
-help_subpage_input_text:
-        defb 007h,01dh,004h," 1 CIJFER + ENTER, OF TWEE CIJFERS",0
 help_pause_text:
-        defb 007h,01dh,004h," P        PAUZE / DOORGAAN",0
-help_pause_mark_text:
-        defb 007h,01dh,004h," BIJ PAUZE STAAT RECHTSBOVEN EEN P",0
-help_default_subpage_text:
-        defb 007h,01dh,004h," 0/00     KIEST DE EERSTE SUBPAGINA",0
-help_behavior_title_text:
-        defb 004h,01dh,007h," WERKING",0
-help_behavior_text:
-        defb 007h,01dh,004h," PAGINA'S WORDEN VIA PICO W GELADEN",0
-help_error_text:
-        defb 007h,01dh,004h," BIJ EEN FOUT KUN JE DIRECT DOORTYPEN",0
-help_cycle_text:
-        defb 007h,01dh,004h," ELKE 10 SECONDEN VOLGT EEN SUBPAGINA",0
+        defb 007h,01dh,004h," A        SUBPAGINA PAUZE / DOOR",0
+help_help_text:
+        defb 007h,01dh,004h," H        DEZE HULPPAGINA",0
 help_return_text:
         defb 004h,01dh,007h,"     DRUK EEN TOETS OM TERUG TE GAAN",0
 
@@ -3480,6 +3934,15 @@ p2wp_session_version:  equ 0748bh
 hello_error_kind:      equ 0748ch
 teletekst_status_length: equ 0748dh
 teletekst_clock_has_date: equ 0748eh
+custom_url_length:       equ 0748fh
+teletekst_previous_page: equ 07490h
+teletekst_next_page:     equ 07492h
+teletekst_reveal_enabled: equ 07494h
+teletekst_zoom_state:    equ 07495h
+teletekst_page_valid:    equ 07496h
+teletekst_render_colour: equ 07497h
 TELETEXT_SCREEN_BUFFER: equ 07500h
+TELETEXT_RAW_SCREEN_BUFFER: equ 07900h
+CUSTOM_URL_BUFFER:      equ 07d00h
 
         defs 05000h-$,0ffh

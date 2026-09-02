@@ -13,17 +13,22 @@
 The P2000T Teletekst Cartridge brings internet-connected teletext to the Philips
 P2000T. A slot-1 ROM provides the native SAA5050 user interface, while a
 Raspberry Pi Pico W or Pico 2 W interface in slot 2 manages Wi-Fi and fetches
-pages from either the NOS service or the P2000T community service. Together,
-they provide wireless network setup, optional encrypted credential storage, and
-direct three-digit page selection on the original computer.
+pages from the NOS service, the P2000T community service, or a user-supplied
+HTTP(S) server. Together, they provide wireless network setup, optional
+encrypted credential storage, and direct three-digit page selection on the
+original computer.
 
 This repository contains the public hardware and client side of the P2000T
 Teletekst project:
 
 - `src/` is the 16 KiB slot-1 cartridge client.
 - `firmware/` is the Raspberry Pi Pico W firmware for the slot-2 interface.
-- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2–3 link protocol
+- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2–4 link protocol
   between them.
+- [`docs/custom-server.md`](docs/custom-server.md) gives the small HTTP/JSON
+  contract needed to host your own pages.
+- [`server/`](server/) contains a dependency-free Python example server and
+  editable test page.
 - `pcb/` contains the KiCad hardware design and manufacturing files.
 - `enclosure/` contains the enclosure and label models.
 
@@ -121,7 +126,17 @@ The printable enclosure and label models are available in [`enclosure/`](enclosu
 
 ## Documentation
 
-[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–3 interface
+Choose **0 - EIGEN SERVER** to enter an `http://` or `https://` URL of up to 96
+characters, including an optional port and base path. The address is retained
+for the current session. See [Hosting a custom Teletekst
+server](docs/custom-server.md) for the required routes and response fields.
+
+> [!WARNING]
+> Certificate and hostname verification is disabled for a custom HTTPS server,
+> so self-signed and private-CA certificates work. Use only a server and network
+> you trust. The two built-in services continue to use verified HTTPS.
+
+[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–4 interface
 specification. The Sphinx documentation adds implementation guides for
 [P2000T BASIC](docs/basic.rst) and
 [Z80 assembly](docs/assembly.rst).

@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Boot SLOT1+SLOT2, join fictitious Wi-Fi, and render NOS page 100."""
 from pathlib import Path
+import base64
+import json
 import subprocess
+import sys
 import tempfile
 
 ROOT=Path(__file__).resolve().parents[2]
 EMU=ROOT/'emulator'
+sys.path.insert(0,str(ROOT/'server'))
+from server import page_response
 with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
-    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'
+    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_screen=temp/'custom-screen.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'
     subprocess.run(['make','-C',str(ROOT/'src')],check=True)
     subprocess.run(['cmake','-S',str(EMU),'-B',str(build),'-G','Ninja'],check=True)
     subprocess.run(['cmake','--build',str(build)],check=True)
@@ -37,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     assert intro[23*40:23*40+3] == bytes((0x04,0x1d,0x07))
     assert intro[23*40+3:23*40+29] == b'P2000T Teletekst Cartridge'
     assert intro[23*40+29:23*40+34] == b'     '
-    assert intro[23*40+34:24*40] == b'v0.4.0'
+    assert intro[23*40+34:24*40] == b'v0.5.0'
     subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
@@ -49,13 +54,16 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
         '--headless','--auto','--frames','119','--dump-screen',str(source_screen)],check=True)
     source=source_screen.read_bytes()
-    assert source[5*40+5:5*40+22] == b'1 - NOS TELETEKST'
-    assert source[6*40+5:6*40+25] == b'2 - P2000T TELETEKST'
-    assert source[12*40+5:12*40+25] == b'P - PAUZE / DOORGAAN'
-    assert source[13*40+5:13*40+25] == b'S - SUBPAGINA KIEZEN'
-    assert source[14*40+5:14*40+30] == b'W - WIFI-NETWERK WIJZIGEN'
-    assert source[15*40+5:15*40+19] == b'H - HULP TONEN'
-    assert source[16*40+5:16*40+32] == b'STOP - ANDERE TELETEKSTBRON'
+    assert b'1 - NOS TELETEKST' in source[5*40:6*40]
+    assert source[6*40:7*40] == bytes((0x07,0x1d,0x04))+b' '*37
+    assert b'2 - P2000T TELETEKST' in source[7*40:8*40]
+    assert source[8*40:9*40] == bytes((0x07,0x1d,0x04))+b' '*37
+    assert b'0 - EIGEN SERVER' in source[9*40:10*40]
+    assert b'START/I INDEX' in source and b'R ONTHUL' in source and b'Z ZOOM' in source
+    assert b'P VORIGE PAGINA' in source and b'N VOLGENDE' in source
+    assert b'A PAUZE/DOORGAAN' in source and b'S SUBPAGINA' in source
+    assert b'W ANDERE WIFI' in source and b'H HULP' in source
+    assert b'STOP - ANDERE TELETEKSTBRON' in source
     subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
@@ -95,6 +103,69 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     assert len(pixels)==720*720*4
     colours={pixels[i:i+4] for i in range(0,len(pixels),4)}
     assert len(colours)>=4, 'SAA5050 renderer produced a blank framebuffer'
+    example_server=subprocess.Popen(
+        ['python3',str(ROOT/'server/server.py'),'--host','127.0.0.1','--port','0'],
+        stdout=subprocess.PIPE,text=True)
+    try:
+        custom_url=example_server.stdout.readline().strip().rsplit(' ',1)[-1]
+        assert custom_url.startswith('http://127.0.0.1:')
+        subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
+            '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--live',
+            '--font',str(EMU/'assets/Default.fnt'),'--headless','--auto',
+            '--auto-source','0','--custom-server',custom_url,
+            '--frames','650','--dump-screen',str(custom_screen)],check=True)
+    finally:
+        example_server.terminate()
+        example_server.wait()
+    custom=custom_screen.read_bytes()
+    assert custom[19:37] == b' '*18 and custom[37:40] == b'100'
+    assert b'Your own Teletekst server' in custom
+    custom_conceal_fixture.write_text(json.dumps(
+        page_response(ROOT/'server/pages',101)),encoding='ascii')
+    custom_conceal_command=[str(build/'p2000t-emulator'),'--monitor',str(monitor),
+        '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
+        str(custom_conceal_fixture),'--font',str(EMU/'assets/Default.fnt'),
+        '--headless','--auto','--auto-source','0','--custom-server',
+        'http://terra:8080','--frames','650']
+    subprocess.run(custom_conceal_command+[
+        '--dump-screen',str(custom_concealed_screen)],check=True)
+    subprocess.run(custom_conceal_command+[
+        '--auto-key','R','--dump-screen',str(custom_revealed_screen)],check=True)
+    custom_concealed=custom_concealed_screen.read_bytes()
+    custom_revealed=custom_revealed_screen.read_bytes()
+    conceal_index=custom_concealed.index(b'\x18A piano!')
+    assert custom_revealed[conceal_index:conceal_index+9] == b'\x03A piano!'
+    expected_revealed=bytearray(custom_concealed)
+    expected_revealed[conceal_index]=0x03
+    assert custom_revealed[40:] == expected_revealed[40:]
+    subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
+        '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
+        str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
+        '--headless','--auto','--auto-key','Z','--frames','650',
+        '--dump-screen',str(zoom_screen)],check=True)
+    zoom=zoom_screen.read_bytes()
+    assert zoom[0] == 0x0d and zoom[40:80] == b' '*40
+    reveal_page=bytearray(b' '*960)
+    reveal_page[80:90]=b'NOS Telet '
+    reveal_page[40:54]=bytes((0x07,))+b'PUBLIC'+bytes((0x18,))+b'SECRET'
+    reveal_fixture.write_text(json.dumps({
+        'nextSubPage':'',
+        'binaryDisplay':base64.b64encode(reveal_page).decode('ascii'),
+    }))
+    subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
+        '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',str(reveal_fixture),
+        '--font',str(EMU/'assets/Default.fnt'),'--headless','--auto','--auto-key','?',
+        '--frames','650','--dump-screen',str(reveal_screen)],check=True)
+    revealed=reveal_screen.read_bytes()
+    assert revealed[47] == 0x07 and revealed[48:54] == b'SECRET'
+    subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
+        '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
+        str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
+        '--headless','--auto','--auto-key','H','--frames','650',
+        '--dump-screen',str(help_screen)],check=True)
+    help_page=help_screen.read_bytes()
+    assert b'VERBORGEN TEKST ONTHULLEN' in help_page
+    assert b'VORIGE / VOLGENDE PAGINA' in help_page
     subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
@@ -127,4 +198,4 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--frames','700','--dump-screen',str(legacy_p2000_screen)],check=True)
     legacy_p2000=legacy_p2000_screen.read_bytes()
     assert b'NOS Telet' in legacy_p2000 and b'Meer bevoegdheden' in legacy_p2000
-print('P2WP/2 compatibility + P2WP/3 NOS/P2000T + incompatible warning: passed')
+print('P2WP/2-4 compatibility + custom endpoint + shortcuts: passed')

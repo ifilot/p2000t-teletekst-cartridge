@@ -28,10 +28,17 @@ In this development workspace the launcher automatically finds the monitor ROM
 in the adjacent `P2000T-IDE` checkout, so simply run `emulator/run`.
 
 The emulator presents one open network named `Emulated WiFi`; select it with
-`1`, decline profile storage with `N`, then choose NOS with `1`. Regular host
+`1`, decline profile storage with `N`, then choose NOS with `1`. Choose `0` to
+type a custom server URL. Regular host
 letter, number, arrow, Enter, Backspace, Shift and keypad-Enter (P2000 STOP)
 keys are mapped to the P2000T keyboard matrix. Press `F11` for a warm reset or
 `F12` for a cold reset.
+
+Page shortcuts are `START`/`I` (page 100), `?`/`R` (reveal), `Z` (top, bottom, and
+normal size), `P`/`N` (previous/next page), `A` (pause subpages), `S` (choose
+subpage), `W` (Wi-Fi), `H` (help), and P2000 `STOP` (source selection). The host
+keypad Enter key maps to `STOP`; `I` is the convenient host equivalent for
+`START`.
 
 The integration test uses a tiny generated monitor shim and a recorded NOS
 response, so it is deterministic and does not need proprietary ROMs or network:
@@ -42,11 +49,31 @@ make -C emulator test
 
 It executes the production cartridge, completes negotiated P2WP HELLO, fictitious Wi-Fi
 scan/connect, source selection, live-code JSON decoding, four chunk transfers,
-and asserts that NOS page content reached emulated video RAM.
+and asserts that built-in and custom page content reached emulated video RAM.
+It also exercises the expanded shortcut/help screens and zoom mode.
+
+For a deterministic custom-source boot from the repository root, run:
+
+```sh
+emulator/build/p2000t-emulator \
+  --monitor /path/to/P2000ROM.bin --cartridge src/p2wp-cartridge.bin \
+  --font emulator/assets/Default.fnt \
+  --fixture emulator/tests/fixtures/nos-100.json \
+  --headless --auto --auto-source 0 --custom-server http://terra:8080 \
+  --frames 650 --dump-screen /tmp/custom-screen.bin
+```
+
+Fixture mode tests URL entry and P2WP/4 without network access. Replace the
+`--fixture` pair with `--live`, change the custom URL to
+`http://127.0.0.1:8080`, and run `python3 server/server.py` in another terminal
+to contact the included example server. Add
+`--auto-key Z`, `--auto-key R`, or `--auto-key H` to inject a page shortcut
+after loading, which keeps new controls quick to test without a physical
+keyboard.
 
 Use `--p2wp-version 2` to emulate legacy firmware and exercise the cartridge's
 compatibility warning, or `--p2wp-version 1` to exercise the no-common-version
-error screen. Without this option the emulator negotiates the current P2WP/3.
+error screen. Without this option the emulator negotiates the current P2WP/4.
 The intermediate pre-release clock firmware can be reproduced with
 `--p2wp-version 2 --p2wp-status-length 9`.
 

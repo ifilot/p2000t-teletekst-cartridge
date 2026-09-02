@@ -1,0 +1,24 @@
+                                     100
+
+        Your own Teletekst server
+
+This page is served by Python's standard
+library. No packages are required.
+
+Edit server/pages/100.txt.
+Lines are padded or clipped to the
+P2000T's 40-column display.
+
+Page 101 demonstrates concealed text.
+Press N to open it, then ? or R to reveal.
+
+Add 100-2.txt to create a subpage.
+It will be loaded automatically.
+
+For SAA5050 control, add a .bin file
+containing exactly 960 display bytes.
+
+
+
+
+                    READY

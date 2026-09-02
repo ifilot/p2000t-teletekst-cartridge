@@ -1,5 +1,6 @@
 #include "p2wp.h"
 #include "teletekst.h"
+#include "custom_endpoint.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -15,12 +16,39 @@ static void test_crc(void) {
 
 /** Verify newest-common-version selection and incompatible ranges. */
 static void test_version_negotiation(void) {
-    assert(p2wp_select_version(2u, 3u, 2u, 3u) == 3u);
-    assert(p2wp_select_version(2u, 2u, 2u, 3u) == 2u);
-    assert(p2wp_select_version(2u, 3u, 2u, 2u) == 2u);
+    assert(p2wp_select_version(2u, 4u, 2u, 4u) == 4u);
+    assert(p2wp_select_version(2u, 3u, 2u, 4u) == 3u);
+    assert(p2wp_select_version(2u, 2u, 2u, 4u) == 2u);
     assert(p2wp_select_version(2u, 3u, 1u, 1u) == 0u);
     assert(p2wp_select_version(2u, 3u, 4u, 4u) == 0u);
     assert(p2wp_select_version(3u, 2u, 2u, 3u) == 0u);
+}
+
+static void test_custom_endpoint(void) {
+    custom_endpoint_t endpoint;
+    assert(custom_endpoint_parse(
+        "http://terra:8080", 17u, &endpoint
+    ));
+    assert(!endpoint.tls);
+    assert(strcmp(endpoint.host, "terra") == 0);
+    assert(endpoint.port == 8080u);
+    assert(strcmp(endpoint.base_path, "") == 0);
+
+    static const char secure[] = "https://192.168.1.20/teletext/";
+    assert(custom_endpoint_parse(secure, sizeof(secure) - 1u, &endpoint));
+    assert(endpoint.tls && endpoint.port == 443u);
+    assert(strcmp(endpoint.host, "192.168.1.20") == 0);
+    assert(strcmp(endpoint.base_path, "/teletext") == 0);
+    char path[CUSTOM_ENDPOINT_REQUEST_PATH_MAX];
+    assert(custom_endpoint_page_path(
+        &endpoint, 200u, 2u, path, sizeof(path)
+    ));
+    assert(strcmp(path, "/teletext/json/200-2") == 0);
+
+    assert(!custom_endpoint_parse("terra:8080", 10u, &endpoint));
+    assert(!custom_endpoint_parse("http://user@terra", 17u, &endpoint));
+    assert(!custom_endpoint_parse("http://terra:0", 14u, &endpoint));
+    assert(!custom_endpoint_parse("http://terra/path?q=1", 21u, &endpoint));
 }
 
 /**
@@ -404,6 +432,39 @@ static void test_exact_binary_display(void) {
     ));
 }
 
+static void test_navigation_metadata(void) {
+    char json[18000];
+    const size_t length = build_teletekst_json(json, sizeof(json));
+    const char needle[] = "{\"nextSubPage\":\"100-2\"";
+    const char replacement[] =
+        "{\"prevPage\":\"099\",\"nextPage\":\"101\","
+        "\"nextSubPage\":\"100-2\"";
+    (void)needle;
+    char enriched[18100];
+    const size_t replacement_length = sizeof(replacement) - 1u;
+    memcpy(enriched, replacement, replacement_length);
+    memcpy(
+        enriched + replacement_length,
+        json + sizeof(needle) - 1u,
+        length - (sizeof(needle) - 1u)
+    );
+    const size_t enriched_length = replacement_length +
+        length - (sizeof(needle) - 1u);
+    uint8_t screen[TELETEKST_SCREEN_SIZE];
+    teletekst_metadata_t metadata;
+    assert(!teletekst_decode_json(
+        enriched, enriched_length, 100u, screen, &metadata
+    )); /* Page 099 is outside the supported range. */
+
+    memcpy(enriched + 13u, "100", 3u);
+    assert(teletekst_decode_json(
+        enriched, enriched_length, 100u, screen, &metadata
+    ));
+    assert(metadata.next_subpage == 2u);
+    assert(metadata.previous_page == 100u);
+    assert(metadata.next_page == 101u);
+}
+
 /**
  * @brief Run all native framing and Teletekst decoder regression tests.
  *
@@ -415,8 +476,10 @@ int main(void) {
     test_round_trip();
     test_corruption();
     test_profile_save_round_trip();
+    test_custom_endpoint();
     test_teletekst_conversion();
     test_exact_binary_display();
+    test_navigation_metadata();
     puts("p2wp tests passed");
     return 0;
 }

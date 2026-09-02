@@ -1,11 +1,11 @@
-# P2000T to Pico W Protocol (P2WP/2–3)
+# P2000T to Pico W Protocol (P2WP/2–4)
 
 P2WP is a reliable, version-negotiated request/response protocol carried by the three
 I/O ports on the P2000T Pico W interface. Multi-byte fields are little-endian.
 
 ## Status and conformance
 
-This document is the normative specification for protocol versions 2 and 3. The key
+This document is the normative specification for protocol versions 2 through 4. The key
 words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and
 **MAY** describe conformance requirements.
 
@@ -219,8 +219,8 @@ responses.
 | `0x21` | `WIFI_PROFILE_CONNECT` | Empty | Empty acknowledgement |
 | `0x22` | `WIFI_PROFILE_SAVE` | Wi-Fi password | Empty acknowledgement |
 | `0x23` | `WIFI_PROFILE_DELETE` | Empty | Empty acknowledgement |
-| `0x30` | `TELETEKST_FETCH_START` | Page, subpage, and source | Empty acknowledgement |
-| `0x31` | `TELETEKST_FETCH_STATUS` | Empty | Fetch state, error, byte count, next subpage, and clock |
+| `0x30` | `TELETEKST_FETCH_START` | Page, subpage, source, and optional custom URL | Empty acknowledgement |
+| `0x31` | `TELETEKST_FETCH_STATUS` | Empty | Fetch state, error, byte count, navigation, and clock |
 | `0x32` | `TELETEKST_FETCH_ROWS` | Chunk index | Six display-ready rows |
 
 `LINK_STATS` reserves its message number for a future statistics format. A
@@ -265,9 +265,10 @@ successful response, both endpoints MUST use the selected version in every
 subsequent frame header. A peripheral selects the newest revision in the
 intersection of its supported range and the host's advertised range. If that
 intersection is empty, it returns `UNSUPPORTED_VERSION` in a bootstrap-version
-error response. Version 3 peripherals MUST retain version 2 operation; this
-allows both a new cartridge with old Pico firmware and an old cartridge with
-new Pico firmware to remain usable.
+error response. Later peripherals MUST retain version 2 operation, and a
+version 4 peripheral MUST retain version 3 operation. This allows both a new
+cartridge with old Pico firmware and an old cartridge with new Pico firmware
+to remain usable.
 
 `HELLO` is independent of Wi-Fi state and MUST work while `WIFI_UP` is zero.
 
@@ -371,13 +372,37 @@ who can dump and analyse the complete device flash.
 Teletekst retrieval is asynchronous. Source `0` uses the public JSON endpoint
 at `teletekst-data.nos.nl` over verified HTTPS; source `1` uses the compatible
 P2000T Teletekst endpoint at `teletekst.philips-p2000t.nl` over verified HTTPS.
-A `TELETEKST_FETCH_START` request contains:
+Source `2`, introduced in P2WP/4, uses a custom base URL supplied by the host.
+
+For a built-in source, a `TELETEKST_FETCH_START` request contains four bytes:
 
 | Offset | Field |
 | ---: | --- |
 | 0-1 | Page number, little-endian (`100`-`899`) |
 | 2 | Subpage (`0` selects the API's default first subpage, otherwise `1`-`99`) |
 | 3 | Source: `0` NOS Teletekst, `1` P2000T Teletekst |
+
+A P2WP/4 custom-source request has this variable-length payload:
+
+| Offset | Field |
+| ---: | --- |
+| 0-1 | Page number, little-endian (`100`-`899`) |
+| 2 | Subpage (`0` selects the API's default first subpage, otherwise `1`-`99`) |
+| 3 | Source: `2` custom server |
+| 4 | URL length (`1`-`96`) |
+| 5... | URL bytes, not zero-terminated |
+
+The URL MUST begin with `http://` or `https://`. The reference firmware accepts
+a DNS name or IPv4 address, an optional port, and an optional base path; it
+rejects credentials, query strings, fragments, and bracketless IPv6 addresses.
+It appends `/json/PAGE` or `/json/PAGE-SUBPAGE` to that base URL. The address is
+provided with every fetch, so the peripheral does not need to persist it.
+
+The reference firmware deliberately disables certificate-chain and hostname
+verification for source `2` HTTPS requests, allowing self-signed and private-CA
+certificates. This exception MUST NOT weaken verification of sources `0` and
+`1`. See [Hosting a custom Teletekst server](custom-server.md) for the HTTP/JSON
+contract and its security implications.
 
 In P2WP/2, `TELETEKST_FETCH_STATUS` returns the original five-byte payload:
 
@@ -404,6 +429,19 @@ P2WP/3 extends that payload to thirteen bytes:
 | 10 | Dutch local month (`1`-`12`) |
 | 11 | Dutch local year minus 2000 |
 | 12 | Dutch local weekday (`0` Sunday through `6` Saturday) |
+
+P2WP/4 extends the same payload to seventeen bytes:
+
+| Offset | Field |
+| ---: | --- |
+| 0-12 | P2WP/3 fetch status and clock fields above |
+| 13-14 | Previous page, little-endian, or zero when none is advertised |
+| 15-16 | Next page, little-endian, or zero when none is advertised |
+
+The page values originate from the optional JSON strings `prevPage` and
+`nextPage`. A present, non-empty value must be exactly three digits in the
+range `100` through `899`. Missing or empty fields yield zero and disable that
+direction's navigation shortcut.
 
 After state `3`, request chunk indexes `0` through `3` from
 `TELETEKST_FETCH_ROWS`. Each successful response is exactly 240 bytes: six
@@ -446,6 +484,7 @@ Before an implementation is considered conforming, verify that it:
 
 ## Client examples
 
+- {doc}`custom-server` defines the HTTP endpoint consumed by custom source `2`.
 - {doc}`basic` implements a portable link diagnostic in P2000T BASIC.
 - {doc}`assembly` explains the production Z80 implementation and reusable
   transport routines.

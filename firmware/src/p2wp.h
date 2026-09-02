@@ -7,7 +7,7 @@
 
 #define P2WP_BOOTSTRAP_VERSION 2u
 #define P2WP_MIN_VERSION 2u
-#define P2WP_MAX_VERSION 3u
+#define P2WP_MAX_VERSION 4u
 #define P2WP_VERSION P2WP_MAX_VERSION
 #define P2WP_MAX_PAYLOAD 512u
 #define P2WP_HEADER_SIZE 6u
@@ -46,6 +46,7 @@ enum p2wp_type {
 enum p2wp_teletekst_source {
     P2WP_TELETEKST_SOURCE_NOS = 0,
     P2WP_TELETEKST_SOURCE_P2000T = 1,
+    P2WP_TELETEKST_SOURCE_CUSTOM = 2,
 };
 
 enum p2wp_capability {

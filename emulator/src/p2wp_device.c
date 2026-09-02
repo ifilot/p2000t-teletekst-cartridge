@@ -13,6 +13,7 @@ static void *fetch_context;
 static uint8_t encoded[P2WP_MAX_ENCODED];
 static size_t encoded_length, encoded_position;
 static uint8_t screen[SCREEN_SIZE], next_subpage, local_clock[7];
+static uint16_t previous_page, next_page;
 static uint8_t fetch_state, fetch_error;
 static uint8_t profile_state;
 static uint8_t protocol_minimum=P2WP_MIN_VERSION;
@@ -78,16 +79,33 @@ static void dispatch(const p2wp_frame_t *request) {
     case P2WP_TYPE_WIFI_STATUS:
         payload[0]=2; respond(request,payload,1); break;
     case P2WP_TYPE_TELETEKST_FETCH_START: {
+        if(request->payload_length<4){respond_error(request,P2WP_ERROR_INVALID_PAYLOAD);break;}
         uint16_t page=request->payload[0]|((uint16_t)request->payload[1]<<8);
-        fetch_error = fetch_page && fetch_page(fetch_context,request->payload[3],
-            page,request->payload[2],screen,&next_subpage,local_clock)==0 ? 0:7;
+        uint8_t source=request->payload[3]; char custom_url[97]={0};
+        bool custom_valid=source==P2WP_TELETEKST_SOURCE_CUSTOM&&session_version>=4&&
+          request->payload_length>=5&&request->payload[4]>0&&request->payload[4]<=96&&
+          request->payload_length==5u+request->payload[4];
+        if(page<100||page>899||request->payload[2]>99||
+           source>P2WP_TELETEKST_SOURCE_CUSTOM||
+           (source==P2WP_TELETEKST_SOURCE_CUSTOM&&!custom_valid)||
+           (source!=P2WP_TELETEKST_SOURCE_CUSTOM&&request->payload_length!=4)){
+          respond_error(request,P2WP_ERROR_INVALID_PAYLOAD);break;}
+        if(custom_valid)memcpy(custom_url,request->payload+5,request->payload[4]);
+        next_subpage=0;previous_page=next_page=0;
+        fetch_error = fetch_page && fetch_page(fetch_context,source,
+            custom_url[0]?custom_url:NULL,page,request->payload[2],screen,
+            &next_subpage,&previous_page,&next_page,local_clock)==0 ? 0:7;
         fetch_state=fetch_error?4:3; respond(request,NULL,0); break;
     }
     case P2WP_TYPE_TELETEKST_FETCH_STATUS:
         payload[0]=fetch_state; payload[1]=fetch_error; payload[4]=next_subpage;
         if(session_version>=3||status_length_override>=9){memcpy(payload+5,local_clock,3);
           payload[8]=fetch_error?0:1;memcpy(payload+9,local_clock+3,4);
-          respond(request,payload,status_length_override?status_length_override:13);
+          if(session_version>=4){payload[13]=(uint8_t)previous_page;
+            payload[14]=(uint8_t)(previous_page>>8);payload[15]=(uint8_t)next_page;
+            payload[16]=(uint8_t)(next_page>>8);}
+          respond(request,payload,status_length_override?status_length_override:
+                  (session_version>=4?17:13));
         }else respond(request,payload,status_length_override?status_length_override:5);break;
     case P2WP_TYPE_TELETEKST_FETCH_ROWS:
         respond(request,screen+(size_t)request->payload[0]*CHUNK_SIZE,CHUNK_SIZE); break;
@@ -105,7 +123,8 @@ void p2wp_device_set_status_length(uint8_t length) { status_length_override=leng
 void p2wp_device_reset(void) {
     p2wp_parser_init(&parser); encoded_length=encoded_position=0;
     session_version=P2WP_BOOTSTRAP_VERSION;
-    fetch_state=fetch_error=next_subpage=profile_state=0; memset(screen,0,sizeof(screen));
+    fetch_state=fetch_error=next_subpage=profile_state=0;
+    previous_page=next_page=0; memset(screen,0,sizeof(screen));
 }
 void p2wp_device_out(uint8_t port, uint8_t value) {
     if (port!=TX_PORT) return;

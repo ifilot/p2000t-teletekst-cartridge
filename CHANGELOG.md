@@ -6,6 +6,25 @@ in this file. The format is based on [Keep a Changelog].
 Entries through version 0.2.0 were reconstructed from the tagged Git history
 and release diffs.
 
+## [Unreleased]
+
+### Added
+
+- Added session-only custom HTTP(S) Teletekst servers, including DNS names,
+  IPv4 addresses, optional ports/base paths, and an intentionally permissive
+  custom-endpoint TLS mode for self-signed and private-CA certificates.
+- Added `START`/`I` index, `?`/`R` reveal, three-state `Z` zoom, and metadata-driven
+  `P`/`N` previous/next page shortcuts, with an expanded on-screen reference.
+- Added P2WP/4 custom URL requests and previous/next page metadata while
+  retaining P2WP/2–3 compatibility.
+- Added deterministic emulator coverage for custom URL entry and shortcuts.
+- Added a dependency-free Python example server with editable text or raw
+  SAA5050 pages and localhost HTTP tests.
+
+### Changed
+
+- Moved pause/resume from `P` to `A` so `P` can mean previous page.
+
 ## [0.4.0] - 2026-08-29
 
 ### Added

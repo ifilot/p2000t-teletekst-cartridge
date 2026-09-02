@@ -1,6 +1,7 @@
 #include "p2wp.h"
 #include "version.h"
 #include "teletekst.h"
+#include "custom_endpoint.h"
 #include "wifi_profile.h"
 #include "nos_teletekst_ca.h"
 #include "p2000t_teletekst_ca.h"
@@ -182,9 +183,15 @@ static uint16_t teletekst_requested_page;
 static uint8_t teletekst_requested_subpage;
 static uint8_t teletekst_requested_source;
 static uint8_t teletekst_next_subpage;
-static char teletekst_path[32];
+static uint16_t teletekst_previous_page;
+static uint16_t teletekst_next_page;
+static char teletekst_custom_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
+static uint8_t teletekst_custom_url_length;
+static char teletekst_host[CUSTOM_ENDPOINT_HOST_MAX + 1u];
+static char teletekst_path[CUSTOM_ENDPOINT_REQUEST_PATH_MAX];
 static struct altcp_tls_config *teletekst_tls_config;
 static const char *teletekst_tls_hostname;
+static bool teletekst_tls_insecure;
 static altcp_allocator_t teletekst_tls_allocator;
 static httpc_connection_t teletekst_http_settings;
 static struct udp_pcb *ntp_pcb;
@@ -415,6 +422,9 @@ static struct altcp_pcb *teletekst_tls_alloc(void *arg, u8_t ip_type) {
         altcp_abort(connection);
         return NULL;
     }
+    if (teletekst_tls_insecure) {
+        mbedtls_ssl_set_hs_authmode(context, MBEDTLS_SSL_VERIFY_NONE);
+    }
     return connection;
 }
 
@@ -540,20 +550,22 @@ static void teletekst_request_done(
     }
 
     teletekst_http_body[body_length] = '\0';
-    uint8_t next_subpage = 0u;
-    if (!teletekst_decode_nos_json(
+    teletekst_metadata_t metadata;
+    if (!teletekst_decode_json(
             teletekst_http_body,
             body_length,
             page,
             teletekst_screen,
-            &next_subpage
+            &metadata
         )) {
         teletekst_set_failed(TELETEKST_ERROR_INVALID_DATA);
         return;
     }
 
     mutex_enter_blocking(&wifi_mutex);
-    teletekst_next_subpage = next_subpage;
+    teletekst_next_subpage = metadata.next_subpage;
+    teletekst_previous_page = metadata.previous_page;
+    teletekst_next_page = metadata.next_page;
     teletekst_error = TELETEKST_ERROR_NONE;
     teletekst_fetch_state = TELETEKST_FETCH_COMPLETE;
     mutex_exit(&wifi_mutex);
@@ -599,48 +611,84 @@ static void teletekst_start_requested_fetch(void) {
         return;
     }
 
-    const int path_length = subpage == 0u
-        ? snprintf(teletekst_path, sizeof(teletekst_path), "/json/%u", page)
-        : snprintf(
-            teletekst_path,
-            sizeof(teletekst_path),
-            "/json/%u-%u",
-            page,
-            subpage
-        );
-    if (path_length < 0 || (size_t)path_length >= sizeof(teletekst_path)) {
-        teletekst_set_failed(TELETEKST_ERROR_INVALID_DATA);
-        return;
-    }
-
     memset(&teletekst_http_settings, 0, sizeof(teletekst_http_settings));
     const char *host;
     uint16_t port;
-    const uint8_t *root_ca;
-    size_t root_ca_size;
+    const uint8_t *root_ca = NULL;
+    size_t root_ca_size = 0u;
+    bool tls = true;
+    custom_endpoint_t custom_endpoint;
     if (source == P2WP_TELETEKST_SOURCE_NOS) {
         host = TELETEKST_NOS_HOST;
         port = TELETEKST_NOS_PORT;
         root_ca = nos_teletekst_root_ca;
         root_ca_size = sizeof(nos_teletekst_root_ca);
-    } else {
+    } else if (source == P2WP_TELETEKST_SOURCE_P2000T) {
         host = TELETEKST_P2000T_HOST;
         port = TELETEKST_P2000T_PORT;
         root_ca = p2000t_teletekst_root_ca;
         root_ca_size = sizeof(p2000t_teletekst_root_ca);
-    }
-    teletekst_tls_hostname = host;
-    teletekst_tls_config = altcp_tls_create_config_client(
-        root_ca,
-        root_ca_size
-    );
-    if (teletekst_tls_config == NULL) {
-        teletekst_set_failed(TELETEKST_ERROR_TLS_CONFIG);
+    } else if (custom_endpoint_parse(
+                   teletekst_custom_url,
+                   teletekst_custom_url_length,
+                   &custom_endpoint
+               )) {
+        memcpy(
+            teletekst_host,
+            custom_endpoint.host,
+            sizeof(custom_endpoint.host)
+        );
+        host = teletekst_host;
+        port = custom_endpoint.port;
+        tls = custom_endpoint.tls;
+    } else {
+        teletekst_set_failed(TELETEKST_ERROR_INVALID_DATA);
         return;
     }
-    teletekst_tls_allocator.alloc = teletekst_tls_alloc;
-    teletekst_tls_allocator.arg = teletekst_tls_config;
-    teletekst_http_settings.altcp_allocator = &teletekst_tls_allocator;
+
+    bool path_valid;
+    if (source == P2WP_TELETEKST_SOURCE_CUSTOM) {
+        path_valid = custom_endpoint_page_path(
+            &custom_endpoint,
+            page,
+            subpage,
+            teletekst_path,
+            sizeof(teletekst_path)
+        );
+    } else {
+        const int path_length = subpage == 0u
+            ? snprintf(teletekst_path, sizeof(teletekst_path), "/json/%u", page)
+            : snprintf(
+                teletekst_path,
+                sizeof(teletekst_path),
+                "/json/%u-%u",
+                page,
+                subpage
+            );
+        path_valid = path_length >= 0 &&
+            (size_t)path_length < sizeof(teletekst_path);
+    }
+    if (!path_valid) {
+        teletekst_set_failed(TELETEKST_ERROR_INVALID_DATA);
+        return;
+    }
+
+    teletekst_tls_hostname = host;
+    teletekst_tls_insecure = source == P2WP_TELETEKST_SOURCE_CUSTOM;
+    teletekst_tls_config = NULL;
+    if (tls) {
+        teletekst_tls_config = altcp_tls_create_config_client(
+            root_ca,
+            root_ca_size
+        );
+        if (teletekst_tls_config == NULL) {
+            teletekst_set_failed(TELETEKST_ERROR_TLS_CONFIG);
+            return;
+        }
+        teletekst_tls_allocator.alloc = teletekst_tls_alloc;
+        teletekst_tls_allocator.arg = teletekst_tls_config;
+        teletekst_http_settings.altcp_allocator = &teletekst_tls_allocator;
+    }
     teletekst_http_settings.result_fn = teletekst_request_done;
     teletekst_http_settings.headers_done_fn = teletekst_headers_done;
 
@@ -1698,7 +1746,7 @@ static void handle_request(const p2wp_frame_t *frame) {
         }
 
         case P2WP_TYPE_TELETEKST_FETCH_START: {
-            if (frame->payload_length != 4u) {
+            if (frame->payload_length < 4u) {
                 send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
                 return;
             }
@@ -1708,7 +1756,24 @@ static void handle_request(const p2wp_frame_t *frame) {
             const uint8_t subpage = frame->payload[2];
             const uint8_t source = frame->payload[3];
             if (page < 100u || page > 899u || subpage > 99u ||
-                source > P2WP_TELETEKST_SOURCE_P2000T) {
+                source > P2WP_TELETEKST_SOURCE_CUSTOM ||
+                (source != P2WP_TELETEKST_SOURCE_CUSTOM &&
+                 frame->payload_length != 4u) ||
+                (source == P2WP_TELETEKST_SOURCE_CUSTOM &&
+                 (p2wp_session_version < 4u || frame->payload_length < 5u ||
+                  frame->payload[4] == 0u ||
+                  frame->payload[4] > CUSTOM_ENDPOINT_URL_MAX ||
+                  frame->payload_length != (uint16_t)(5u + frame->payload[4])))) {
+                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
+                return;
+            }
+            custom_endpoint_t parsed_endpoint;
+            if (source == P2WP_TELETEKST_SOURCE_CUSTOM &&
+                !custom_endpoint_parse(
+                    (const char *)frame->payload + 5u,
+                    frame->payload[4],
+                    &parsed_endpoint
+                )) {
                 send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
                 return;
             }
@@ -1731,6 +1796,17 @@ static void handle_request(const p2wp_frame_t *frame) {
             teletekst_requested_subpage = subpage;
             teletekst_requested_source = source;
             teletekst_next_subpage = 0u;
+            teletekst_previous_page = 0u;
+            teletekst_next_page = 0u;
+            if (source == P2WP_TELETEKST_SOURCE_CUSTOM) {
+                teletekst_custom_url_length = frame->payload[4];
+                memcpy(
+                    teletekst_custom_url,
+                    frame->payload + 5u,
+                    teletekst_custom_url_length
+                );
+                teletekst_custom_url[teletekst_custom_url_length] = '\0';
+            }
             teletekst_http_length = 0u;
             teletekst_http_overflow = false;
             teletekst_error = TELETEKST_ERROR_NONE;
@@ -1756,6 +1832,8 @@ static void handle_request(const p2wp_frame_t *frame) {
             response.payload[2] = (uint8_t)received;
             response.payload[3] = (uint8_t)(received >> 8u);
             response.payload[4] = teletekst_next_subpage;
+            const uint16_t previous_page = teletekst_previous_page;
+            const uint16_t next_page = teletekst_next_page;
             mutex_exit(&wifi_mutex);
             if (p2wp_session_version >= 3u) {
                 uint8_t local_clock[7];
@@ -1765,7 +1843,16 @@ static void handle_request(const p2wp_frame_t *frame) {
                 memcpy(response.payload + 5u, local_clock, 3u);
                 response.payload[8] = clock_is_valid ? 1u : 0u;
                 memcpy(response.payload + 9u, local_clock + 3u, 4u);
-                response.payload_length = 13u;
+                if (p2wp_session_version >= 4u) {
+                    response.payload[13] = (uint8_t)previous_page;
+                    response.payload[14] =
+                        (uint8_t)(previous_page >> 8u);
+                    response.payload[15] = (uint8_t)next_page;
+                    response.payload[16] = (uint8_t)(next_page >> 8u);
+                    response.payload_length = 17u;
+                } else {
+                    response.payload_length = 13u;
+                }
             } else {
                 response.payload_length = 5u;
             }

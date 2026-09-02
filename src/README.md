@@ -9,9 +9,9 @@ with `make -C src`; this requires `z80asm` 1.8 or a compatible assembler.
 The build signs the image with the P2000T additive 16-bit cartridge checksum.
 Use `make -C src verify` to validate it. This is an integrity checksum, not a
 cryptographic signature.
-The cartridge release version is `v0.4.0`.
+The cartridge release version is `v0.5.0`.
 
-At runtime it negotiates P2WP/2 or P2WP/3 with `HELLO`, requests a wireless scan, and
+At runtime it negotiates P2WP/2 through P2WP/4 with `HELLO`, requests a wireless scan, and
 polls while the Pico W performs it asynchronously. Up to nine unique SSIDs are
 shown strongest first using one to four signal bars. `*` marks supported
 WPA/WPA2 networks and `!` marks security modes that this first client cannot
@@ -27,7 +27,7 @@ continuing to Wi-Fi setup. Its first two rows extend the blue background, its
 centered title is a full white-on-blue bar without a page number, and the bold `P2000T` mark is a
 centered blue mosaic badge with a white border matching the Teletekst motif.
 The P2000T contour and upper Teletekst frame share a mosaic row, making them a
-single stacked logo. Its footer identifies cartridge version 0.4.0. All cartridge UI text
+single stacked logo. Its footer identifies cartridge version 0.5.0. All cartridge UI text
 is Dutch. The scan, network
 list, connection state, prompts,
 and errors reserve the first screen row, use full white-on-blue menu headers,
@@ -53,7 +53,7 @@ Initial `HELLO` negotiation and every later local-link transaction have a
 two-second overall timeout. A missing or unresponsive Pico W therefore shows a
 clear error instead of leaving the cartridge waiting indefinitely. Each
 transaction still makes up to three attempts within that deadline.
-The v0.4 cartridge advertises P2WP/2–3 and selects the newest revision shared
+The v0.5 cartridge advertises P2WP/2–4 and selects the newest revision shared
 with the Pico. P2WP/2 remains fully usable, but the cartridge displays a
 one-time compatibility warning recommending a Pico firmware update. A HELLO
 response with no common revision displays a dedicated protocol-incompatibility
@@ -62,9 +62,14 @@ screen instead of being reported as an Internet or server failure.
 The cartridge then starts an asynchronous connection and polls until the Pico
 has either acquired an IP address or reported a specific failure. Open networks
 skip password entry. Once connected, a matching blue, white, and black screen
-offers the NOS API or the P2000T Teletekst API at
-`https://teletekst.philips-p2000t.nl`.
+offers the NOS API, the P2000T Teletekst API at
+`https://teletekst.philips-p2000t.nl`, or a custom HTTP(S) server.
 The selection lasts for the current session and is attached to every request.
+The custom URL is also session-only and may contain a DNS name, IPv4 address,
+port, and base path. Custom HTTPS accepts self-signed or private-CA certificates
+by disabling certificate and hostname verification; built-in endpoints remain
+strictly verified. See [`../docs/custom-server.md`](../docs/custom-server.md)
+for the server-side contract and security warning.
 The cartridge then requests page 100. Enter any page number from 100 through
 899 as three digits; the request starts after the third digit, without Enter.
 If the selected API identifies another subpage, the cartridge retrieves it
@@ -74,11 +79,13 @@ Pressing the dedicated P2000T `STOP` key returns to the source-selection
 screen without reconnecting Wi-Fi. After choosing a new source, the cartridge
 requests the current page from its default subpage on that server.
 The source-selection screen also lists the controls available while viewing a
-page: `W` returns to Wi-Fi scanning and network selection, `P` pauses or resumes
+page: `START` or `I` jumps to page 100, `?` or `R` toggles concealed text, `Z` cycles
+normal/top-half/bottom-half zoom, and `P`/`N` selects the previous/next page
+advertised by the server. `W` returns to Wi-Fi scanning, `A` pauses or resumes
 automatic subpage cycling, and `S` selects a subpage. Enter either two digits,
 or one digit followed by Enter. Subpage `0`/`00` asks the API for its default
 first subpage. A manual subpage choice pauses cycling so it remains visible
-until `P` is pressed. While cycling is paused, a `P` appears in the top-right
+until `A` is pressed. While cycling is paused, an `A` appears in the top-right
 corner; resuming restores the header cell that it covered.
 Pressing `H` opens a cartridge-resident Teletekst-style Dutch help page. It
 explains page entry, source and Wi-Fi selection, manual and automatic subpages,
