@@ -59,7 +59,9 @@ emulator/build/p2000t-emulator \
   --frames 650 --dump-screen /tmp/custom-screen.bin
 ```
 
-Fixture mode tests URL entry and P2WP/4 without network access. Replace the
+Fixture mode tests URL entry and P2WP/5 without network access. Add
+`--flash /path/to/pico-flash.bin` to retain the last custom URL across emulator
+runs; the file is rewritten only when the accepted URL changes. Replace the
 `--fixture` pair with `--live`, change the custom URL to
 `http://127.0.0.1:8080`, and run `python3 server/server.py` in another terminal
 to contact the included example server. Add
@@ -77,7 +79,7 @@ CYW43 radio, GPIO electrical timing, or Pico SDK drivers.
 
 Use `--p2wp-version 2` to emulate legacy firmware and exercise the cartridge's
 compatibility warning, or `--p2wp-version 1` to exercise the no-common-version
-error screen. Without this option the emulator negotiates the current P2WP/4.
+error screen. Without this option the emulator negotiates the current P2WP/5.
 The intermediate pre-release clock firmware can be reproduced with
 `--p2wp-version 2 --p2wp-status-length 9`.
 

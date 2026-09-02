@@ -87,6 +87,10 @@ static p2wp_firmware_command_fn command_for_type(
             return operations->teletekst_fetch_status;
         case P2WP_TYPE_TELETEKST_FETCH_ROWS:
             return operations->teletekst_fetch_rows;
+        case P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD:
+            return operations->teletekst_custom_url_load;
+        case P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE:
+            return operations->teletekst_custom_url_save;
         default:
             return NULL;
     }
@@ -104,6 +108,9 @@ static bool platform_payload_is_valid(const p2wp_frame_t *request) {
         case P2WP_TYPE_WIFI_PROFILE_DELETE:
         case P2WP_TYPE_TELETEKST_FETCH_STATUS:
             return empty_request(request);
+
+        case P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD:
+            return request->version >= 5u && empty_request(request);
 
         case P2WP_TYPE_WIFI_SCAN_RESULT:
             return request->payload_length == 1u;
@@ -145,6 +152,14 @@ static bool platform_payload_is_valid(const p2wp_frame_t *request) {
         case P2WP_TYPE_TELETEKST_FETCH_ROWS:
             return request->payload_length == 1u &&
                 request->payload[0] < TELETEKST_CHUNK_COUNT;
+
+        case P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE:
+            return request->version >= 5u &&
+                request->payload_length >= 2u &&
+                request->payload[0] > 0u &&
+                request->payload[0] <= TELETEKST_CUSTOM_URL_MAX &&
+                request->payload_length ==
+                    (uint16_t)(1u + request->payload[0]);
 
         default:
             return false;

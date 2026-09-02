@@ -18,9 +18,10 @@ static void test_crc(void) {
 
 /** Verify newest-common-version selection and incompatible ranges. */
 static void test_version_negotiation(void) {
-    assert(p2wp_select_version(2u, 4u, 2u, 4u) == 4u);
-    assert(p2wp_select_version(2u, 3u, 2u, 4u) == 3u);
-    assert(p2wp_select_version(2u, 2u, 2u, 4u) == 2u);
+    assert(p2wp_select_version(2u, 5u, 2u, 5u) == 5u);
+    assert(p2wp_select_version(2u, 4u, 2u, 5u) == 4u);
+    assert(p2wp_select_version(2u, 3u, 2u, 5u) == 3u);
+    assert(p2wp_select_version(2u, 2u, 2u, 5u) == 2u);
     assert(p2wp_select_version(2u, 3u, 1u, 1u) == 0u);
     assert(p2wp_select_version(2u, 3u, 4u, 4u) == 0u);
     assert(p2wp_select_version(3u, 2u, 2u, 3u) == 0u);
@@ -541,6 +542,8 @@ static const p2wp_firmware_operations_t fake_operations = {
     .teletekst_fetch_start = fake_command,
     .teletekst_fetch_status = fake_command,
     .teletekst_fetch_rows = fake_command,
+    .teletekst_custom_url_load = fake_command,
+    .teletekst_custom_url_save = fake_command,
     .clear_sensitive = fake_clear_sensitive,
 };
 
@@ -657,6 +660,50 @@ static void test_firmware_core(void) {
     p2wp_firmware_core_handle(&core, &request, &response);
     assert((response.flags & P2WP_FLAG_ERROR) != 0u);
     assert(response.payload[0] == P2WP_ERROR_UNKNOWN_TYPE);
+
+    memset(&platform, 0, sizeof(platform));
+    p2wp_firmware_core_init(
+        &core,
+        &fake_operations,
+        &platform,
+        P2WP_HARDWARE_PICO_2_W
+    );
+    request = (p2wp_frame_t){
+        .version = P2WP_BOOTSTRAP_VERSION,
+        .type = P2WP_TYPE_HELLO,
+        .payload_length = 8u,
+        .payload = {'P', '2', 'W', 'P', 2u, 5u, 240u, 0u},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.payload[4] == 5u);
+
+    request = (p2wp_frame_t){
+        .version = 5u,
+        .type = P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD,
+        .sequence = 1u,
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 1u);
+
+    request = (p2wp_frame_t){
+        .version = 5u,
+        .type = P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE,
+        .sequence = 2u,
+        .payload_length = 18u,
+        .payload = {17u, 'h', 't', 't', 'p', ':', '/', '/', 't', 'e', 'r',
+                    'r', 'a', ':', '8', '0', '8', '0'},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 2u);
+
+    request.sequence = 3u;
+    request.payload_length = 17u;
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+    assert(platform.command_calls == 2u);
 }
 
 /**

@@ -10,7 +10,11 @@ and release diffs.
 
 ### Added
 
-- Added session-only custom HTTP(S) Teletekst servers, including DNS names,
+- Added P2WP/5 retrieval and write-minimizing Pico flash persistence for the
+  last custom server URL, including file-backed emulator flash.
+- Redesigned the custom-server dialog as a three-line highlighted input panel
+  with clearer guidance, controls, persistence information, and footer styling.
+- Added custom HTTP(S) Teletekst servers, including DNS names,
   IPv4 addresses, optional ports/base paths, and an intentionally permissive
   custom-endpoint TLS mode for self-signed and private-CA certificates.
 - Added `START`/`I` index, `?`/`R` reveal, three-state `Z` zoom, and metadata-driven

@@ -1,4 +1,4 @@
-; P2WP/2-4 Wi-Fi and Teletekst client for a Philips P2000T cartridge.
+; P2WP/2-5 Wi-Fi and Teletekst client for a Philips P2000T cartridge.
 ;
 ; The monitor maps this 16 KiB ROM at 1000h and enters it at 1010h. The
 ; sign_cartridge.py fills the checksum length and value after assembly.  The
@@ -28,7 +28,7 @@ STATUS_TX_READY:       equ 002h
 
 P2WP_BOOTSTRAP_VERSION: equ 002h
 P2WP_MIN_VERSION:      equ 002h
-P2WP_MAX_VERSION:      equ 004h
+P2WP_MAX_VERSION:      equ 005h
 CARTRIDGE_VERSION_MAJOR: equ 0
 CARTRIDGE_VERSION_MINOR: equ 5
 CARTRIDGE_VERSION_PATCH: equ 0
@@ -51,6 +51,8 @@ P2WP_TYPE_WIFI_PROFILE_DELETE: equ 023h
 P2WP_TYPE_TELETEKST_FETCH_START:  equ 030h
 P2WP_TYPE_TELETEKST_FETCH_STATUS: equ 031h
 P2WP_TYPE_TELETEKST_FETCH_ROWS:   equ 032h
+P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD: equ 033h
+P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE: equ 034h
 P2WP_CAPABILITY_DEVICE_INFO: equ 010h
 P2WP_CAPABILITY_VERSION_CHECK: equ 020h
 P2WP_DELIMITER:        equ 07eh
@@ -160,7 +162,7 @@ hello_retry:
         call read_device_info
 
         ld a,(p2wp_session_version)
-        cp P2WP_MAX_VERSION
+        cp 4
         call c,show_protocol_legacy_warning
 
         jp wifi_profile_startup
@@ -1476,10 +1478,10 @@ teletekst_custom_requires_v4:
         call write_string
         jr teletekst_choose_source_key
 
-; Enter or edit one session-persistent HTTP(S) base URL. The 96-byte value is
-; transported with every custom page request, so the Pico never needs DNS or
-; certificate details compiled into its firmware.
+; Enter or edit an HTTP(S) base URL. P2WP/5 restores the Pico's persisted value;
+; older P2WP/4 peripherals retain the value only for this cartridge session.
 teletekst_enter_custom_url:
+        call teletekst_load_custom_url
         call clear_screen
         ld hl,custom_title_text
         ld de,MENU_HEADER_RAM
@@ -1490,14 +1492,38 @@ teletekst_enter_custom_url:
         ld hl,custom_intro_text
         ld de,VIDEO_RAM+240
         call write_string
-        ld hl,custom_example_text
+        ld hl,custom_memory_text
         ld de,VIDEO_RAM+320
         call write_string
-        ld hl,custom_security_text
+        ld hl,custom_example_text
         ld de,VIDEO_RAM+400
         call write_string
-        ld hl,custom_input_text
+        ld hl,custom_security_text
         ld de,VIDEO_RAM+480
+        call write_string
+        ld hl,custom_input_text
+        ld de,VIDEO_RAM+640
+        call write_string
+        ld hl,custom_field_text
+        ld de,VIDEO_RAM+720
+        call write_string
+        ld hl,custom_field_text
+        ld de,VIDEO_RAM+800
+        call write_string
+        ld hl,custom_field_text
+        ld de,VIDEO_RAM+880
+        call write_string
+        ld hl,custom_controls_text
+        ld de,VIDEO_RAM+1040
+        call write_string
+        ld hl,opening_blue_rule_text
+        ld de,VIDEO_RAM+1760
+        call write_string
+        ld hl,opening_footer_text
+        ld de,VIDEO_RAM+1840
+        call write_string
+        ld hl,opening_footer_version_text
+        ld de,VIDEO_RAM+1840+34
         call write_string
         call teletekst_draw_custom_url
 teletekst_custom_url_key:
@@ -1542,7 +1568,76 @@ teletekst_custom_url_accept:
         ld a,(custom_url_length)
         or a
         jr z,teletekst_custom_url_key
+        call teletekst_save_custom_url
         or a
+        ret
+
+; P2WP/5 returns one length byte followed by the last valid URL. Missing or
+; invalid storage is represented as a zero length and simply leaves the field
+; empty. Protocol/transport failures preserve the current session value.
+teletekst_load_custom_url:
+        ld a,(p2wp_session_version)
+        cp 5
+        ret c
+        ld a,P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD
+        call prepare_request
+        call transact
+        ret c
+        call next_sequence
+        ld a,(RX_BUFFER+5)
+        or a
+        ret nz
+        ld a,(RX_BUFFER+4)
+        cp 1
+        ret c
+        cp MAX_CUSTOM_URL_LENGTH+2
+        ret nc
+        ld b,a
+        ld a,(RX_BUFFER+6)
+        cp MAX_CUSTOM_URL_LENGTH+1
+        ret nc
+        inc a
+        cp b
+        ret nz
+        dec a
+        or a
+        ret z
+        ld (custom_url_length),a
+        ld c,a
+        ld b,0
+        ld hl,RX_BUFFER+7
+        ld de,CUSTOM_URL_BUFFER
+        ldir
+        ret
+
+; Queue the accepted URL for Pico flash storage. The Pico compares it with the
+; existing record and skips the flash erase/program cycle when it is unchanged.
+teletekst_save_custom_url:
+        ld a,(p2wp_session_version)
+        cp 5
+        ret c
+        ld a,P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE
+        call prepare_request
+        ld a,(custom_url_length)
+        ld (FRAME_BUFFER+6),a
+        ld c,a
+        ld b,0
+        ld hl,CUSTOM_URL_BUFFER
+        ld de,FRAME_BUFFER+7
+        ldir
+        ld a,(custom_url_length)
+        inc a
+        ld (FRAME_BUFFER+4),a
+        add a,6
+        ld l,a
+        ld h,0
+        ld (body_length),hl
+        call transact
+        ret c
+        call validate_empty_response
+        push af
+        call next_sequence
+        pop af
         ret
 
 ; Display the previously entered value and preserve it while sources change.
@@ -1553,7 +1648,7 @@ teletekst_draw_custom_url:
         ld b,a
         ld c,0
         ld hl,CUSTOM_URL_BUFFER
-        ld de,VIDEO_RAM+560
+        ld de,VIDEO_RAM+720+4
 teletekst_draw_custom_url_loop:
         ld a,(hl)
         call ascii_to_display
@@ -1562,11 +1657,11 @@ teletekst_draw_custom_url_loop:
         inc de
         inc c
         ld a,c
-        cp 40
+        cp 32
         jr nz,teletekst_draw_custom_url_next
         ld c,0
         push hl
-        ld hl,40
+        ld hl,48
         add hl,de
         ex de,hl
         pop hl
@@ -1574,21 +1669,21 @@ teletekst_draw_custom_url_next:
         djnz teletekst_draw_custom_url_loop
         ret
 
-; Map URL byte index A to its visible cell across three 40-column rows.
+; Map URL byte index A to its visible cell across three 32-character rows.
 teletekst_custom_video_pointer:
-        cp 40
+        cp 32
         jr c,teletekst_custom_video_first
-        cp 80
+        cp 64
         jr c,teletekst_custom_video_second
-        sub 80
-        ld hl,VIDEO_RAM+720
+        sub 64
+        ld hl,VIDEO_RAM+880+4
         jr teletekst_custom_video_add
 teletekst_custom_video_second:
-        sub 40
-        ld hl,VIDEO_RAM+640
+        sub 32
+        ld hl,VIDEO_RAM+800+4
         jr teletekst_custom_video_add
 teletekst_custom_video_first:
-        ld hl,VIDEO_RAM+560
+        ld hl,VIDEO_RAM+720+4
 teletekst_custom_video_add:
         ld e,a
         ld d,0
@@ -2109,7 +2204,7 @@ teletekst_fetch_poll:
         ld a,(p2wp_session_version)
         cp 4
         ld a,b
-        jr z,teletekst_fetch_poll_v4_length
+        jr nc,teletekst_fetch_poll_v4_length
         ld a,(p2wp_session_version)
         cp 3
         ld a,b
@@ -3379,7 +3474,7 @@ keyboard_shifted_table:
 ; Minimal screen output
 
 ; A P2WP/2 peripheral remains usable, but lacks the P2WP/3 date-status and
-; P2WP/4 custom-source/navigation contracts.
+; P2WP/4 custom-source/navigation contracts and P2WP/5 persisted URL storage.
 ; Explain the fallback once, then let the user continue normally.
 show_protocol_legacy_warning:
         call clear_screen
@@ -3945,13 +4040,21 @@ custom_title_text:
         defs 40-($-custom_title_text),020h
         defb 0
 custom_intro_text:
-        defb 007h,01dh,004h," VOER HTTP(S)-ADRES IN, DAN ENTER",0
+        defb 007h,01dh,004h," BASISADRES VAN UW EIGEN SERVER",0
+custom_memory_text:
+        defb 007h,01dh,004h," PICO ONTHOUDT ALLEEN EEN NIEUW ADRES",0
 custom_example_text:
-        defb 007h,01dh,004h," BV. http://terra:8080",0
+        defb 007h,01dh,004h," VOORBEELD  http://terra:8080",0
 custom_security_text:
-        defb 003h,01dh,004h," LET OP: HTTPS-CERTIFICAAT ONGETOETST",0
+        defb 003h,01dh,004h," HTTPS: CERTIFICAATCONTROLE STAAT UIT",0
 custom_input_text:
-        defb 004h,01dh,007h," ADRES (MAX. 96 TEKENS):",0
+        defb 004h,01dh,007h," SERVERADRES                 MAX. 96",0
+custom_field_text:
+        defb 007h,01dh,004h," "
+        defs 36,020h
+        defb 0
+custom_controls_text:
+        defb 007h,01dh,004h," ENTER OPSLAAN   BACKSPACE CORRIGEREN",0
 source_versions_text:
         defb 007h,01dh,004h,"CARTRIDGE: ",0
 source_pico_separator_text:
@@ -4039,7 +4142,7 @@ protocol_legacy_found_text:
 protocol_legacy_available_text:
         defb 007h,01dh,004h,"    TELETEKST BLIJFT BESCHIKBAAR",0
 protocol_legacy_update_text:
-        defb 004h,01dh,007h,"     UPDATE INTERFACE VOOR P2WP/4",0
+        defb 004h,01dh,007h,"     UPDATE INTERFACE VOOR P2WP/5",0
 protocol_continue_text:
         defb 007h,"   DRUK OP EEN TOETS OM DOOR TE GAAN",0
 
@@ -4050,7 +4153,7 @@ protocol_incompatible_title_text:
 protocol_incompatible_shared_text:
         defb 007h,01dh,004h,"      GEEN GEDEELDE P2WP-VERSIE",0
 protocol_incompatible_range_text:
-        defb 007h,01dh,004h,"    CARTRIDGE: P2WP/2 TOT P2WP/4",0
+        defb 007h,01dh,004h,"    CARTRIDGE: P2WP/2 TOT P2WP/5",0
 protocol_incompatible_update_text:
         defb 004h,01dh,007h,"     UPDATE CARTRIDGE OF INTERFACE",0
 

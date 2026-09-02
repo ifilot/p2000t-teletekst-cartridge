@@ -4,7 +4,10 @@ Choose **0 - EIGEN SERVER** and enter the server's complete base URL, for
 example `http://terra:8080`, `http://192.168.1.20:8080`, or
 `https://example.test/teletekst`. The maximum is 96 characters. HTTP and HTTPS,
 DNS names, IPv4 addresses, ports, and a base path are supported. The cartridge
-keeps the address only for the current session.
+asks a P2WP/5 Pico to retain the last accepted address. It is restored whenever
+the dialog is opened again, including after power cycling. Re-entering the same
+address does not rewrite flash. With P2WP/4 firmware the address remains
+available for the current cartridge session only.
 
 For immediate testing, [`server/server.py`](../server/server.py) implements
 this contract using only Python's standard library. Its page files are designed

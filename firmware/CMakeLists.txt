@@ -17,6 +17,7 @@ pico_sdk_init()
 add_executable(p2wp-pico
     src/main.c
     src/custom_endpoint.c
+    src/custom_url_store.c
     src/firmware_core.c
     src/p2wp.c
     src/teletekst.c
@@ -30,13 +31,14 @@ pico_set_program_name(p2wp-pico "P2000T Teletekst Pico")
 pico_set_program_version(p2wp-pico "${PROJECT_VERSION}")
 pico_set_program_description(
     p2wp-pico
-    "P2WP/2-4 Wi-Fi and Teletekst firmware"
+    "P2WP/2-5 Wi-Fi and Teletekst firmware"
 )
 
 target_include_directories(p2wp-pico PRIVATE src)
 set_source_files_properties(
     src/main.c
     src/custom_endpoint.c
+    src/custom_url_store.c
     src/firmware_core.c
     src/p2wp.c
     src/teletekst.c

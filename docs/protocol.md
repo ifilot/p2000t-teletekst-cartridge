@@ -1,11 +1,11 @@
-# P2000T to Pico W Protocol (P2WP/2–4)
+# P2000T to Pico W Protocol (P2WP/2–5)
 
 P2WP is a reliable, version-negotiated request/response protocol carried by the three
 I/O ports on the P2000T Pico W interface. Multi-byte fields are little-endian.
 
 ## Status and conformance
 
-This document is the normative specification for protocol versions 2 through 4. The key
+This document is the normative specification for protocol versions 2 through 5. The key
 words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and
 **MAY** describe conformance requirements.
 
@@ -225,6 +225,8 @@ responses.
 | `0x30` | `TELETEKST_FETCH_START` | Page, subpage, source, and optional custom URL | Empty acknowledgement |
 | `0x31` | `TELETEKST_FETCH_STATUS` | Empty | Fetch state, error, byte count, navigation, and clock |
 | `0x32` | `TELETEKST_FETCH_ROWS` | Chunk index | Six display-ready rows |
+| `0x33` | `TELETEKST_CUSTOM_URL_LOAD` | Empty | URL length and URL bytes |
+| `0x34` | `TELETEKST_CUSTOM_URL_SAVE` | URL length and URL bytes | Empty acknowledgement |
 
 `LINK_STATS` reserves its message number for a future statistics format. A
 host MUST NOT depend on this message until a payload format is specified. A
@@ -271,7 +273,7 @@ subsequent frame header. A peripheral selects the newest revision in the
 intersection of its supported range and the host's advertised range. If that
 intersection is empty, it returns `UNSUPPORTED_VERSION` in a bootstrap-version
 error response. Later peripherals MUST retain version 2 operation, and a
-version 4 peripheral MUST retain version 3 operation. This allows both a new
+version 5 peripheral MUST retain version 4 operation. This allows both a new
 cartridge with old Pico firmware and an old cartridge with new Pico firmware
 to remain usable.
 
@@ -434,7 +436,23 @@ The URL MUST begin with `http://` or `https://`. The reference firmware accepts
 a DNS name or IPv4 address, an optional port, and an optional base path; it
 rejects credentials, query strings, fragments, and bracketless IPv6 addresses.
 It appends `/json/PAGE` or `/json/PAGE-SUBPAGE` to that base URL. The address is
-provided with every fetch, so the peripheral does not need to persist it.
+provided with every fetch; persistence is a separate P2WP/5 service.
+
+### Persisted custom URL
+
+P2WP/5 adds two commands for retaining the last accepted custom-server URL.
+`TELETEKST_CUSTOM_URL_LOAD` has an empty request. Its response starts with a
+length byte (`0` when no valid value is stored), followed by that many URL
+bytes. `TELETEKST_CUSTOM_URL_SAVE` uses the same length-plus-bytes shape in its
+request, requires a length of `1` through `96`, and returns an empty response.
+Both commands use the same URL validation rules as a custom fetch.
+
+The reference Pico implementation uses the penultimate flash sector; the final
+sector remains reserved for the encrypted Wi-Fi profile. Before erasing or
+programming, it validates and compares the existing URL record. An identical
+URL is acknowledged without a flash write. The record includes a format marker,
+explicit length, and checksum so incomplete or corrupt data is returned as an
+empty result rather than copied into host memory.
 
 The reference firmware deliberately disables certificate-chain and hostname
 verification for source `2` HTTPS requests, allowing self-signed and private-CA

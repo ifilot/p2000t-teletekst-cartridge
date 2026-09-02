@@ -38,6 +38,8 @@ typedef struct {
     p2wp_firmware_command_fn teletekst_fetch_start;
     p2wp_firmware_command_fn teletekst_fetch_status;
     p2wp_firmware_command_fn teletekst_fetch_rows;
+    p2wp_firmware_command_fn teletekst_custom_url_load;
+    p2wp_firmware_command_fn teletekst_custom_url_save;
     void (*clear_sensitive)(void *context);
 } p2wp_firmware_operations_t;
 

@@ -3,6 +3,7 @@
 #include "version.h"
 #include "teletekst.h"
 #include "custom_endpoint.h"
+#include "custom_url_store.h"
 #include "wifi_profile.h"
 #include "github_ca.h"
 #include "nos_teletekst_ca.h"
@@ -142,6 +143,11 @@ enum wifi_profile_operation {
     WIFI_PROFILE_OPERATION_DELETE = 3,
 };
 
+enum custom_url_operation {
+    CUSTOM_URL_OPERATION_NONE = 0,
+    CUSTOM_URL_OPERATION_SAVE = 1,
+};
+
 typedef struct {
     uint8_t ssid_length;
     uint8_t ssid[32];
@@ -177,6 +183,9 @@ static uint8_t stored_profile_ssid_length;
 static uint8_t stored_profile_password[WIFI_PROFILE_MAX_PASSWORD];
 static uint8_t stored_profile_password_length;
 static uint32_t stored_profile_auth;
+static uint8_t stored_custom_url_operation;
+static uint8_t stored_custom_url_length;
+static char stored_custom_url[CUSTOM_ENDPOINT_URL_MAX];
 static bool wifi_scan_active;
 static bool wifi_connection_active;
 static int wifi_pending_failure_status;
@@ -1266,6 +1275,25 @@ static void wifi_profile_service(void) {
     mutex_exit(&wifi_mutex);
 }
 
+/** Execute a queued URL save on core 0, where flash operations are safe. */
+static void custom_url_store_service(void) {
+    char url[CUSTOM_ENDPOINT_URL_MAX];
+    uint8_t url_length = 0u;
+
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_custom_url_operation == CUSTOM_URL_OPERATION_SAVE) {
+        url_length = stored_custom_url_length;
+        memcpy(url, stored_custom_url, url_length);
+        stored_custom_url_operation = CUSTOM_URL_OPERATION_NONE;
+    }
+    mutex_exit(&wifi_mutex);
+
+    if (url_length != 0u) {
+        (void)custom_url_store_save(url, url_length);
+        memset(url, 0, sizeof(url));
+    }
+}
+
 /**
  * @brief Initialize CYW43 and run the permanent core-0 network service loop.
  *
@@ -1317,6 +1345,7 @@ static void wifi_radio_main(void) {
         // configuration before a newly queued fetch can allocate another one.
         wifi_service();
         wifi_profile_service();
+        custom_url_store_service();
         wifi_start_requested_scan();
         wifi_start_requested_connection();
         version_start_requested_check();
@@ -1895,6 +1924,63 @@ static uint8_t pico_teletekst_fetch_rows(
     return P2WP_FIRMWARE_COMMAND_OK;
 }
 
+static uint8_t pico_teletekst_custom_url_load(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    char url[CUSTOM_ENDPOINT_URL_MAX + 1u];
+    uint8_t url_length;
+    const custom_url_store_result_t result = custom_url_store_load(
+        url,
+        &url_length
+    );
+    if (result == CUSTOM_URL_STORE_NOT_FOUND ||
+        result == CUSTOM_URL_STORE_CORRUPT) {
+        response->payload[0] = 0u;
+        response->payload_length = 1u;
+        return P2WP_FIRMWARE_COMMAND_OK;
+    }
+    if (result != CUSTOM_URL_STORE_OK) {
+        return P2WP_ERROR_INTERNAL;
+    }
+    response->payload[0] = url_length;
+    memcpy(response->payload + 1u, url, url_length);
+    response->payload_length = (uint16_t)(1u + url_length);
+    memset(url, 0, sizeof(url));
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_custom_url_save(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    const uint8_t url_length = frame->payload[0];
+    custom_endpoint_t endpoint;
+    if (!custom_endpoint_parse(
+            (const char *)frame->payload + 1u,
+            url_length,
+            &endpoint
+        )) {
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_custom_url_operation != CUSTOM_URL_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    stored_custom_url_length = url_length;
+    memcpy(stored_custom_url, frame->payload + 1u, url_length);
+    stored_custom_url_operation = CUSTOM_URL_OPERATION_SAVE;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
 static void pico_clear_sensitive(void *context) {
     (void)context;
     mbedtls_platform_zeroize(parser.body, sizeof(parser.body));
@@ -1916,6 +2002,8 @@ static const p2wp_firmware_operations_t pico_firmware_operations = {
     .teletekst_fetch_start = pico_teletekst_fetch_start,
     .teletekst_fetch_status = pico_teletekst_fetch_status,
     .teletekst_fetch_rows = pico_teletekst_fetch_rows,
+    .teletekst_custom_url_load = pico_teletekst_custom_url_load,
+    .teletekst_custom_url_save = pico_teletekst_custom_url_save,
     .clear_sensitive = pico_clear_sensitive,
 };
 

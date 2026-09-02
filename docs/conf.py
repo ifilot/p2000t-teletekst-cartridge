@@ -1,8 +1,8 @@
 project = "P2000T Teletekst Cartridge Interface"
 author = "Ivo Filot"
 copyright = "2026, Ivo Filot"
-version = "P2WP/4"
-release = "P2WP/4"
+version = "P2WP/5"
+release = "P2WP/5"
 
 extensions = ["myst_parser", "sphinx_rtd_theme"]
 
@@ -18,7 +18,7 @@ nitpicky = True
 myst_heading_anchors = 3
 
 html_theme = "sphinx_rtd_theme"
-html_title = "P2WP/2–4 Interface Protocol"
+html_title = "P2WP/2–5 Interface Protocol"
 html_show_sourcelink = False
 
 html_theme_options = {

@@ -7,13 +7,14 @@ import hashlib
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT=Path(__file__).resolve().parents[2]
 EMU=ROOT/'emulator'
 sys.path.insert(0,str(ROOT/'server'))
 from server import page_response
 with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
-    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_screen=temp/'custom-screen.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'
+    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_dialog_screen=temp/'custom-dialog-screen.bin'; custom_screen=temp/'custom-screen.bin'; restored_custom_screen=temp/'restored-custom-screen.bin'; emulated_flash=temp/'pico-flash.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'
     bundled_monitor=EMU/'assets/P2000ROM.bin'
     assert bundled_monitor.stat().st_size == 4096
     assert hashlib.sha256(bundled_monitor.read_bytes()).hexdigest() == \
@@ -125,6 +126,14 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     assert len(pixels)==720*720*4
     colours={pixels[i:i+4] for i in range(0,len(pixels),4)}
     assert len(colours)>=4, 'SAA5050 renderer produced a blank framebuffer'
+    subprocess.run(common+['--auto-source','0','--custom-server',
+        'http://terra:8080','--frames','170',
+        '--dump-screen',str(custom_dialog_screen)],check=True)
+    custom_dialog=custom_dialog_screen.read_bytes()
+    assert b'BASISADRES VAN UW EIGEN SERVER' in custom_dialog
+    assert b'PICO ONTHOUDT ALLEEN EEN NIEUW ADRES' in custom_dialog
+    assert b'SERVERADRES' in custom_dialog and b'ENTER OPSLAAN' in custom_dialog
+    assert custom_dialog[9*40:9*40+4] == bytes((0x07,0x1d,0x04,0x20))
     example_server=subprocess.Popen(
         ['python3',str(ROOT/'server/server.py'),'--host','127.0.0.1','--port','0'],
         stdout=subprocess.PIPE,text=True)
@@ -135,6 +144,7 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
             '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--live',
             '--font',str(EMU/'assets/Default.fnt'),'--headless','--auto',
             '--auto-source','0','--custom-server',custom_url,
+            '--flash',str(emulated_flash),
             '--frames','650','--dump-screen',str(custom_screen)],check=True)
     finally:
         example_server.terminate()
@@ -142,6 +152,17 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     custom=custom_screen.read_bytes()
     assert custom[19:37] == b' '*18 and custom[37:40] == b'100'
     assert b'Your own Teletekst server' in custom
+    assert emulated_flash.read_bytes()[0:8] == b'P2WPURL1'
+    flash_timestamp=emulated_flash.stat().st_mtime_ns
+    time.sleep(0.02)
+    subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
+        '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
+        str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
+        '--headless','--auto','--auto-source','0','--flash',str(emulated_flash),
+        '--frames','650','--dump-screen',str(restored_custom_screen)],check=True)
+    assert b'Meer bevoegdheden' in restored_custom_screen.read_bytes()
+    assert emulated_flash.stat().st_mtime_ns == flash_timestamp, \
+        'unchanged custom URL rewrote emulated flash'
     custom_conceal_fixture.write_text(json.dumps(
         page_response(ROOT/'server/pages',101)),encoding='ascii')
     custom_conceal_command=[str(build/'p2000t-emulator'),'--monitor',str(monitor),
@@ -220,4 +241,4 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--frames','700','--dump-screen',str(legacy_p2000_screen)],check=True)
     legacy_p2000=legacy_p2000_screen.read_bytes()
     assert b'NOS Telet' in legacy_p2000 and b'Meer bevoegdheden' in legacy_p2000
-print('P2WP/2-4 compatibility + custom endpoint + shortcuts: passed')
+print('P2WP/2-5 compatibility + persistent custom endpoint + shortcuts: passed')

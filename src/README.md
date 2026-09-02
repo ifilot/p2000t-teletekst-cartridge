@@ -13,7 +13,7 @@ The cartridge release version is `v0.5.0`. `../VERSION`, the cartridge
 constants, and the Pico firmware constants are checked together during tests
 so both release artifacts always identify the same version.
 
-At runtime it negotiates P2WP/2 through P2WP/4 with `HELLO`, requests a wireless scan, and
+At runtime it negotiates P2WP/2 through P2WP/5 with `HELLO`, requests a wireless scan, and
 polls while the Pico W performs it asynchronously. Up to nine unique SSIDs are
 shown strongest first using one to four signal bars. `*` marks supported
 WPA/WPA2 networks and `!` marks security modes that this first client cannot
@@ -58,7 +58,7 @@ Initial `HELLO` negotiation and every later local-link transaction have a
 two-second overall timeout. A missing or unresponsive Pico W therefore shows a
 clear error instead of leaving the cartridge waiting indefinitely. Each
 transaction still makes up to three attempts within that deadline.
-The v0.5 cartridge advertises P2WP/2–4 and selects the newest revision shared
+The v0.5 cartridge advertises P2WP/2–5 and selects the newest revision shared
 with the Pico. P2WP/2 remains fully usable, but the cartridge displays a
 one-time compatibility warning recommending a Pico firmware update. A HELLO
 response with no common revision displays a dedicated protocol-incompatibility
@@ -70,8 +70,10 @@ skip password entry. Once connected, a matching blue, white, and black screen
 offers the NOS API, the P2000T Teletekst API at
 `https://teletekst.philips-p2000t.nl`, or a custom HTTP(S) server.
 The selection lasts for the current session and is attached to every request.
-The custom URL is also session-only and may contain a DNS name, IPv4 address,
-port, and base path. Custom HTTPS accepts self-signed or private-CA certificates
+The custom URL may contain a DNS name, IPv4 address, port, and base path. With
+P2WP/5 it is restored from Pico flash when the dialog opens and saved only if
+the accepted value changed. P2WP/4 keeps it for the cartridge session. Custom
+HTTPS accepts self-signed or private-CA certificates
 by disabling certificate and hostname verification; built-in endpoints remain
 strictly verified. See [`../docs/custom-server.md`](../docs/custom-server.md)
 for the server-side contract and security warning.

@@ -10,7 +10,7 @@ interface; a Raspberry Pi Pico W or Pico 2 W handles Wi-Fi and retrieves the
 requested pages. The slot-2 cartridge connects these two very different
 computers.
 
-They communicate using **P2WP/2–4**, a small protocol designed specifically for
+They communicate using **P2WP/2–5**, a small protocol designed specifically for
 this interface. In simple terms, the P2000T asks the Pico to do something---for
 example, connect to Wi-Fi or fetch a page---and the Pico sends a reply. P2WP
 adds the checks, acknowledgements, and retry rules needed to make that exchange
@@ -36,7 +36,7 @@ How the pieces fit together
        P2000T I/O ports.
    * - Pico W firmware
      - Responds to requests, manages Wi-Fi, and retrieves teletext pages.
-   * - P2WP/2–4
+   * - P2WP/2–5
      - Defines how bytes become validated requests and matching responses.
 
 Choose a starting point

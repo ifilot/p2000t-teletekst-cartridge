@@ -1,8 +1,10 @@
 #include "p2wp_device.h"
 #include "../../firmware/src/firmware_core.h"
+#include "../../firmware/src/custom_endpoint.h"
 #include "../../firmware/src/version.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 enum {
@@ -29,6 +31,13 @@ static uint8_t fetch_error;
 static uint8_t profile_state;
 static uint8_t protocol_maximum = P2WP_MAX_VERSION;
 static uint8_t status_length_override;
+static const char *flash_path;
+static char stored_custom_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
+static uint8_t stored_custom_url_length;
+
+static const uint8_t flash_magic[8] = {
+    'P', '2', 'W', 'P', 'U', 'R', 'L', '1',
+};
 
 static uint8_t emulator_capabilities(void *context) {
     (void)context;
@@ -258,6 +267,68 @@ static uint8_t teletekst_fetch_rows(
     return P2WP_FIRMWARE_COMMAND_OK;
 }
 
+static uint8_t teletekst_custom_url_load(
+    void *context,
+    const p2wp_frame_t *request,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)request;
+    response->payload[0] = stored_custom_url_length;
+    memcpy(
+        response->payload + 1u,
+        stored_custom_url,
+        stored_custom_url_length
+    );
+    response->payload_length = (uint16_t)(1u + stored_custom_url_length);
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static bool write_flash_url(const char *url, uint8_t url_length) {
+    if (flash_path == NULL) {
+        return true;
+    }
+    FILE *file = fopen(flash_path, "wb");
+    if (file == NULL) {
+        return false;
+    }
+    const bool wrote = fwrite(flash_magic, 1u, sizeof(flash_magic), file) ==
+            sizeof(flash_magic) &&
+        fwrite(&url_length, 1u, 1u, file) == 1u &&
+        fwrite(url, 1u, url_length, file) == url_length;
+    return fclose(file) == 0 && wrote;
+}
+
+static uint8_t teletekst_custom_url_save(
+    void *context,
+    const p2wp_frame_t *request,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    const uint8_t url_length = request->payload[0];
+    custom_endpoint_t endpoint;
+    if (!custom_endpoint_parse(
+            (const char *)request->payload + 1u,
+            url_length,
+            &endpoint
+        )) {
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    if (stored_custom_url_length == url_length &&
+        memcmp(stored_custom_url, request->payload + 1u, url_length) == 0) {
+        response->payload_length = 0u;
+        return P2WP_FIRMWARE_COMMAND_OK;
+    }
+    if (!write_flash_url((const char *)request->payload + 1u, url_length)) {
+        return P2WP_ERROR_INTERNAL;
+    }
+    memcpy(stored_custom_url, request->payload + 1u, url_length);
+    stored_custom_url[url_length] = '\0';
+    stored_custom_url_length = url_length;
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
 static const p2wp_firmware_operations_t emulator_operations = {
     .capabilities = emulator_capabilities,
     .version_check_start = version_check_start,
@@ -274,6 +345,8 @@ static const p2wp_firmware_operations_t emulator_operations = {
     .teletekst_fetch_start = teletekst_fetch_start,
     .teletekst_fetch_status = teletekst_fetch_status,
     .teletekst_fetch_rows = teletekst_fetch_rows,
+    .teletekst_custom_url_load = teletekst_custom_url_load,
+    .teletekst_custom_url_save = teletekst_custom_url_save,
 };
 
 void p2wp_device_init(p2wp_fetch_fn fetch, void *context) {
@@ -300,6 +373,40 @@ void p2wp_device_set_protocol_range(uint8_t minimum, uint8_t maximum) {
 
 void p2wp_device_set_status_length(uint8_t length) {
     status_length_override = length;
+}
+
+void p2wp_device_set_flash_path(const char *path) {
+    flash_path = path;
+    stored_custom_url_length = 0u;
+    stored_custom_url[0] = '\0';
+    if (path == NULL) {
+        return;
+    }
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        return;
+    }
+    uint8_t magic[sizeof(flash_magic)];
+    uint8_t url_length;
+    const bool header_ok =
+        fread(magic, 1u, sizeof(magic), file) == sizeof(magic) &&
+        memcmp(magic, flash_magic, sizeof(magic)) == 0 &&
+        fread(&url_length, 1u, 1u, file) == 1u &&
+        url_length > 0u && url_length <= CUSTOM_ENDPOINT_URL_MAX &&
+        fread(stored_custom_url, 1u, url_length, file) == url_length &&
+        fgetc(file) == EOF;
+    fclose(file);
+    custom_endpoint_t endpoint;
+    if (!header_ok || !custom_endpoint_parse(
+            stored_custom_url,
+            url_length,
+            &endpoint
+        )) {
+        stored_custom_url[0] = '\0';
+        return;
+    }
+    stored_custom_url[url_length] = '\0';
+    stored_custom_url_length = url_length;
 }
 
 void p2wp_device_reset(void) {
