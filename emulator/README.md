@@ -17,15 +17,11 @@ make -C src
 make -C emulator
 ```
 
-M2000 requires a 4096-byte P2000T monitor ROM, which is not redistributed here.
-Start the real cartridge with live NOS/P2000T Internet access using:
+and run it via
 
 ```sh
-P2000_MONITOR_ROM=/path/to/P2000ROM.bin emulator/run
+emulator/run
 ```
-
-In this development workspace the launcher automatically finds the monitor ROM
-in the adjacent `P2000T-IDE` checkout, so simply run `emulator/run`.
 
 The emulator presents one open network named `Emulated WiFi`; select it with
 `1`, decline profile storage with `N`, then choose NOS with `1`. Choose `0` to
@@ -70,6 +66,14 @@ to contact the included example server. Add
 `--auto-key Z`, `--auto-key R`, or `--auto-key H` to inject a page shortcut
 after loading, which keeps new controls quick to test without a physical
 keyboard.
+
+The Pico side is a native simulation built around the production
+`firmware/src/firmware_core.c` command processor. Consequently, negotiation,
+payload validation, device/version replies, retry caching, sequence-conflict
+handling, sensitive-payload erasure, and command dispatch are identical to the
+real Pico firmware. The emulator supplies deterministic platform operations for
+Wi-Fi, HTTP and storage; it does not simulate the RP2040/RP2350 processor,
+CYW43 radio, GPIO electrical timing, or Pico SDK drivers.
 
 Use `--p2wp-version 2` to emulate legacy firmware and exercise the cartridge's
 compatibility warning, or `--p2wp-version 1` to exercise the no-common-version

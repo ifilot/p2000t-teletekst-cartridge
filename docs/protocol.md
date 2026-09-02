@@ -210,6 +210,9 @@ responses.
 | `0x01` | `HELLO` | Hello request below | Hello response below |
 | `0x02` | `ECHO` | Arbitrary bytes | Identical bytes |
 | `0x03` | `LINK_STATS` | Empty | Implementation counters; format reserved |
+| `0x04` | `DEVICE_INFO` | Empty | Pico generation and installed firmware version |
+| `0x05` | `VERSION_CHECK_START` | Empty | Empty acknowledgement |
+| `0x06` | `VERSION_CHECK_STATUS` | Empty | Lookup state, error, and latest release version |
 | `0x10` | `WIFI_SCAN_START` | Empty | Empty acknowledgement |
 | `0x11` | `WIFI_SCAN_STATUS` | Empty | Scan state, result count, and radio state |
 | `0x12` | `WIFI_SCAN_RESULT` | One-byte result index | Indexed network record |
@@ -242,7 +245,7 @@ The eight-byte `HELLO` response is:
 | ---: | --- |
 | 0-3 | ASCII `P2WP` |
 | 4 | Selected version |
-| 5 | Capability bits (`bit 0`: `ECHO`, `bit 1`: Wi-Fi provisioning, `bit 2`: Internet fetch, `bit 3`: encrypted Wi-Fi profile) |
+| 5 | Capability bits (defined below) |
 | 6-7 | Negotiated maximum payload |
 
 The capability byte is defined as follows:
@@ -253,7 +256,9 @@ The capability byte is defined as follows:
 | 1 | `WIFI` | Wi-Fi scan, connect, and status support |
 | 2 | `INTERNET` | Teletekst Internet-fetch support |
 | 3 | `WIFI_PROFILE` | Encrypted Wi-Fi profile support |
-| 4-7 | reserved | Sent as zero and ignored on receipt |
+| 4 | `DEVICE_INFO` | Pico generation and installed firmware query support |
+| 5 | `VERSION_CHECK` | Internet-backed latest-release lookup support |
+| 6-7 | reserved | Sent as zero and ignored on receipt |
 
 The selected version MUST fall within the host's advertised range. The
 negotiated maximum payload is the smaller of the host and peripheral limits and
@@ -271,6 +276,39 @@ cartridge with old Pico firmware and an old cartridge with new Pico firmware
 to remain usable.
 
 `HELLO` is independent of Wi-Fi state and MUST work while `WIFI_UP` is zero.
+
+### Device and release information
+
+`DEVICE_INFO` is independent of Wi-Fi state. Its four-byte response is:
+
+| Offset | Field |
+| ---: | --- |
+| 0 | Hardware (`1`: Pico W/RP2040, `2`: Pico 2 W/RP2350) |
+| 1 | Installed firmware major version |
+| 2 | Installed firmware minor version |
+| 3 | Installed firmware patch version |
+
+Cartridge and Pico artifacts built from one repository release carry the same
+three-component version. The hardware field describes the module for which the
+running firmware was compiled; zero and unrecognized values are reserved.
+
+`VERSION_CHECK_START` starts an asynchronous HTTPS lookup of the repository's
+latest GitHub release. It requires a working Internet connection and returns an
+empty acknowledgement once queued. `VERSION_CHECK_STATUS` has a five-byte
+response:
+
+| Offset | Field |
+| ---: | --- |
+| 0 | State (`0`: idle, `1`: running, `2`: complete, `3`: failed) |
+| 1 | Error (`0`: none, `1`: not connected, `2`: TLS setup, `3`: request start, `4`: network, `5`: HTTP status, `6`: invalid response) |
+| 2 | Latest release major version (zero unless complete) |
+| 3 | Latest release minor version (zero unless complete) |
+| 4 | Latest release patch version (zero unless complete) |
+
+The peripheral validates the GitHub TLS hostname and certificate chain, parses
+the release `tag_name`, and never treats failure to check for an update as a
+Teletekst fetch failure. Hosts poll while state is `running`; the peripheral
+does not send an unsolicited completion frame.
 
 If the `ERROR` flag is set, the first payload byte is one of:
 
@@ -411,7 +449,7 @@ In P2WP/2, `TELETEKST_FETCH_STATUS` returns the original five-byte payload:
 | 0 | State: `0` idle, `1` connecting/requesting, `2` receiving, `3` complete, `4` failed |
 | 1 | Error: `0` none, `1` not connected, `2` TLS setup, `3` request start, `4` network, `5` HTTP status, `6` response too large, `7` invalid data, `8` page not found |
 | 2-3 | HTTP response bytes received so far, little-endian |
-| 4 | Next subpage number, or zero when the API supplies none |
+| 4 | Next subpage number, or zero when the API supplies none or the sequence ended |
 
 P2WP/3 extends that payload to thirteen bytes:
 
@@ -420,7 +458,7 @@ P2WP/3 extends that payload to thirteen bytes:
 | 0 | State: `0` idle, `1` connecting/requesting, `2` receiving, `3` complete, `4` failed |
 | 1 | Error: `0` none, `1` not connected, `2` TLS setup, `3` request start, `4` network, `5` HTTP status, `6` response too large, `7` invalid data, `8` page not found |
 | 2-3 | HTTP response bytes received so far, little-endian |
-| 4 | Next subpage number, or zero when the API supplies none |
+| 4 | Next subpage number, or zero when the API supplies none or the sequence ended |
 | 5 | Dutch local hour (`0`-`23`) from NTP |
 | 6 | Dutch local minute (`0`-`59`) from NTP |
 | 7 | Dutch local second (`0`-`59`) from NTP |
@@ -465,6 +503,11 @@ positions against the desired visual cells rather than inserting bytes and
 shifting text. Background controls and inverse video are considered as
 additional ways to reproduce the requested colours. A new successful fetch
 replaces the cached screen and subpage metadata.
+
+After a host has observed a non-zero successor for a page, a later zero marks
+the end of that page's subpage sequence. An active automatic loop MAY request
+subpage zero at its next interval to return to the API's default first
+subpage. It MUST NOT do so while the user has paused automatic rotation.
 
 ## Implementation requirements
 

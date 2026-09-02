@@ -25,6 +25,27 @@ and release diffs.
 
 - Moved pause/resume from `P` to `A` so `P` can mean previous page.
 
+## [0.5.0] - 2026-08-30
+
+### Added
+
+- Added backward-compatible protocol commands for Pico W/Pico 2 W generation,
+  installed firmware version, and an asynchronous TLS-verified GitHub latest
+  release lookup.
+- Added post-login source-menu rows for cartridge, Pico, and online release
+  versions, plus a build/test guard that keeps cartridge and
+  firmware release numbers synchronized.
+- Bundled the 4096-byte P2000T monitor ROM with the emulator and made it the
+  launcher's default.
+- Added a portable production firmware core shared by the Pico builds and
+  emulator, with native tests for negotiation, retries, sequence conflicts,
+  command validation, dispatch, and sensitive-payload erasure.
+
+### Fixed
+
+- Wrapped an active automatic subpage loop from its final subpage back to the
+  API's default first subpage, while preserving pause and resume behavior.
+
 ## [0.4.0] - 2026-08-29
 
 ### Added

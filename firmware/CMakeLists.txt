@@ -7,7 +7,8 @@ endif()
 set(PICO_BOARD pico_w CACHE STRING "Target board")
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
-project(p2wp_pico VERSION 0.5.0 LANGUAGES C CXX ASM)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" P2WP_RELEASE_VERSION LIMIT_COUNT 1)
+project(p2wp_pico VERSION "${P2WP_RELEASE_VERSION}" LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -16,8 +17,10 @@ pico_sdk_init()
 add_executable(p2wp-pico
     src/main.c
     src/custom_endpoint.c
+    src/firmware_core.c
     src/p2wp.c
     src/teletekst.c
+    src/version.c
     src/wifi_profile.c
 )
 
@@ -34,8 +37,10 @@ target_include_directories(p2wp-pico PRIVATE src)
 set_source_files_properties(
     src/main.c
     src/custom_endpoint.c
+    src/firmware_core.c
     src/p2wp.c
     src/teletekst.c
+    src/version.c
     src/wifi_profile.c
     PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror"
 )

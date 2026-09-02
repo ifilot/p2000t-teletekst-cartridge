@@ -48,6 +48,9 @@ int page_backend_fetch(void *argument,unsigned char source,const char *custom_ur
                             base,page,subpage);
         if(length<0||(size_t)length>=sizeof(url))return -1;
     }
+    if(backend->request_count<sizeof(backend->requested_subpages))
+        backend->requested_subpages[backend->request_count]=subpage;
+    backend->request_count++;
     if(backend->fixture) result=read_file(backend->fixture,&body);
     else if(backend->live) {
         CURL *curl=curl_easy_init(); if(curl) {
@@ -62,6 +65,7 @@ int page_backend_fetch(void *argument,unsigned char source,const char *custom_ur
       if(!teletekst_decode_json(body.data,body.length,page,screen,&metadata)) result=-1;
       else{*next=metadata.next_subpage;*previous=metadata.previous_page;
         *following=metadata.next_page;}}
+    if(!result && backend->fixture && subpage!=0) *next=0;
     free(body.data);
     time_t now=time(NULL); struct tm local; localtime_r(&now,&local);
     clock[0]=(unsigned char)local.tm_hour; clock[1]=(unsigned char)local.tm_min;

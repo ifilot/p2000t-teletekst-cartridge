@@ -36,6 +36,9 @@ P2WP_FLAG_RESPONSE:    equ 001h
 P2WP_FLAG_ERROR:       equ 002h
 P2WP_TYPE_HELLO:       equ 001h
 P2WP_TYPE_ECHO:        equ 002h
+P2WP_TYPE_DEVICE_INFO: equ 004h
+P2WP_TYPE_VERSION_CHECK_START: equ 005h
+P2WP_TYPE_VERSION_CHECK_STATUS: equ 006h
 P2WP_TYPE_WIFI_SCAN_START:  equ 010h
 P2WP_TYPE_WIFI_SCAN_STATUS: equ 011h
 P2WP_TYPE_WIFI_SCAN_RESULT: equ 012h
@@ -48,6 +51,8 @@ P2WP_TYPE_WIFI_PROFILE_DELETE: equ 023h
 P2WP_TYPE_TELETEKST_FETCH_START:  equ 030h
 P2WP_TYPE_TELETEKST_FETCH_STATUS: equ 031h
 P2WP_TYPE_TELETEKST_FETCH_ROWS:   equ 032h
+P2WP_CAPABILITY_DEVICE_INFO: equ 010h
+P2WP_CAPABILITY_VERSION_CHECK: equ 020h
 P2WP_DELIMITER:        equ 07eh
 P2WP_ESCAPE:           equ 07dh
 P2WP_ESCAPE_XOR:       equ 020h
@@ -98,6 +103,9 @@ TELETEKST_SOURCE_P2000T: equ 1
 TELETEKST_SOURCE_CUSTOM: equ 2
 WIFI_SECURITY_OPEN:    equ 0
 WIFI_SECURITY_PSK:     equ 1
+VERSION_CHECK_RUNNING: equ 1
+VERSION_CHECK_COMPLETE: equ 2
+VERSION_CHECK_FAILED:  equ 3
 
 ; ---------------------------------------------------------------------------
 ; Cartridge entry point (1010h)
@@ -114,6 +122,10 @@ start:
         ld (teletekst_zoom_state),a
         ld (teletekst_page_valid),a
         ld (hello_error_kind),a
+        ld (p2wp_capabilities),a
+        ld (device_info_valid),a
+        ld (latest_version_valid),a
+        ld (latest_version_checked),a
         ld a,P2WP_BOOTSTRAP_VERSION
         ld (p2wp_session_version),a
         call show_opening_screen
@@ -143,6 +155,9 @@ hello_retry:
         jr c,hello_check_failure
         call validate_hello
         jr c,hello_check_failure
+
+        call next_sequence
+        call read_device_info
 
         ld a,(p2wp_session_version)
         cp P2WP_MAX_VERSION
@@ -617,17 +632,17 @@ crc_no_polynomial:
 validate_hello:
         ld a,(RX_BUFFER+4)
         cp 8
-        jr nz,payload_bad
+        jp nz,payload_bad
         ld a,(RX_BUFFER+5)
         or a
-        jr nz,payload_bad
+        jp nz,payload_bad
         ld hl,RX_BUFFER+6
         ld de,hello_response_prefix
         ld b,4
 validate_hello_loop:
         ld a,(de)
         cp (hl)
-        jr nz,payload_bad
+        jp nz,payload_bad
         inc de
         inc hl
         djnz validate_hello_loop
@@ -638,12 +653,13 @@ validate_hello_loop:
         jr nc,hello_payload_incompatible
         ld (p2wp_session_version),a
         ld a,(RX_BUFFER+11)
+        ld (p2wp_capabilities),a
         and 00eh
         cp 00eh
-        jr nz,payload_bad
+        jp nz,payload_bad
         ld a,(RX_BUFFER+12)
         cp HOST_MAX_PAYLOAD
-        jr c,payload_bad
+        jp c,payload_bad
         or a
         ret
 
@@ -655,6 +671,43 @@ hello_payload_incompatible:
 
 hello_response_prefix:
         defb "P2WP"
+
+; Read the compile-time Pico generation and installed firmware version when
+; the negotiated peripheral advertises the optional information command.
+read_device_info:
+        ld a,(p2wp_capabilities)
+        and P2WP_CAPABILITY_DEVICE_INFO
+        ret z
+        ld a,P2WP_TYPE_DEVICE_INFO
+        call prepare_request
+        call transact
+        jr c,read_device_info_failed
+        ld a,(RX_BUFFER+4)
+        cp 4
+        jr nz,read_device_info_bad_payload
+        ld a,(RX_BUFFER+5)
+        or a
+        jr nz,read_device_info_bad_payload
+        ld a,(RX_BUFFER+6)
+        cp 1
+        jr c,read_device_info_bad_payload
+        cp 3
+        jr nc,read_device_info_bad_payload
+        ld (pico_hardware_model),a
+        ld hl,RX_BUFFER+7
+        ld de,pico_current_version
+        ld bc,3
+        ldir
+        ld a,1
+        ld (device_info_valid),a
+        call next_sequence
+        ret
+read_device_info_bad_payload:
+        call next_sequence
+read_device_info_failed:
+        xor a
+        ld (device_info_valid),a
+        ret
 
 validate_echo:
         ld a,(RX_BUFFER+4)
@@ -697,8 +750,6 @@ wifi_profile_startup:
         ld (password_length),a
         ld (wifi_profile_mode),a
         call erase_password
-        ld a,1
-        ld (sequence),a
         call wifi_profile_read_status
         jp c,wifi_protocol_failed
         ld a,(wifi_profile_state)
@@ -1127,6 +1178,7 @@ wifi_connected:
         or a
         call z,wifi_profile_offer_save
         call erase_password
+        call firmware_check_latest
         call teletekst_choose_source
         ld hl,100
         ld (teletekst_page),hl
@@ -1134,6 +1186,7 @@ wifi_connected:
         ld (teletekst_subpage),a
         ld (teletekst_input_count),a
         ld (teletekst_rotation_paused),a
+        ld (teletekst_cycle_started),a
         call teletekst_fetch_page
         jp nc,teletekst_main_loop
         call show_teletekst_error
@@ -1244,6 +1297,82 @@ wifi_profile_show_saving:
         call write_string
         ret
 
+; Ask the Pico to retrieve the newest GitHub release after Wi-Fi is up. This
+; optional exchange never prevents normal Teletekst use: old firmware or an
+; Internet/API error simply leaves the latest version marked unavailable.
+firmware_check_latest:
+        xor a
+        ld (latest_version_valid),a
+        ld (latest_version_error),a
+        inc a
+        ld (latest_version_checked),a
+        ld a,(p2wp_capabilities)
+        and P2WP_CAPABILITY_VERSION_CHECK
+        ret z
+
+        ld a,P2WP_TYPE_VERSION_CHECK_START
+        call prepare_request
+        call transact
+        ret c
+        call validate_empty_response
+        jr c,firmware_check_start_bad
+        call next_sequence
+        ld hl,(MONITOR_CLOCK)
+        ld de,1500             ; 30-second overall Internet lookup limit
+        add hl,de
+        ld (version_check_deadline),hl
+        jr firmware_check_poll
+
+firmware_check_start_bad:
+        call next_sequence
+        ret
+
+firmware_check_poll:
+        call poll_delay
+        ld a,P2WP_TYPE_VERSION_CHECK_STATUS
+        call prepare_request
+        call transact
+        ret c
+        ld a,(RX_BUFFER+4)
+        cp 5
+        jr nz,firmware_check_bad_payload
+        ld a,(RX_BUFFER+5)
+        or a
+        jr nz,firmware_check_bad_payload
+        call next_sequence
+        ld a,(RX_BUFFER+6)
+        cp VERSION_CHECK_RUNNING
+        jr z,firmware_check_running
+        cp VERSION_CHECK_COMPLETE
+        jr z,firmware_check_complete
+        cp VERSION_CHECK_FAILED
+        ret nz
+        ld a,(RX_BUFFER+7)
+        ld (latest_version_error),a
+        ret
+
+firmware_check_bad_payload:
+        call next_sequence
+        ret
+
+firmware_check_running:
+        ld hl,(MONITOR_CLOCK)
+        ld de,(version_check_deadline)
+        or a
+        sbc hl,de
+        bit 7,h
+        jr nz,firmware_check_poll
+        ret
+
+firmware_check_complete:
+        ld hl,RX_BUFFER+8
+        ld de,latest_release_version
+        ld bc,3
+        ldir
+        ld a,1
+        ld (latest_version_valid),a
+        ret
+
 ; Choose the page API once per session, immediately after Wi-Fi has acquired
 ; an address. The selected source accompanies every subsequent page request.
 teletekst_choose_source:
@@ -1302,6 +1431,7 @@ teletekst_choose_source:
         ld hl,source_control_stop_text
         ld de,VIDEO_RAM+1360
         call write_string
+        call show_source_runtime_info
         ld hl,opening_footer_text
         ld de,VIDEO_RAM+1840
         call write_string
@@ -1474,6 +1604,7 @@ teletekst_change_source:
         ld (teletekst_rotation_enabled),a
         ld (teletekst_input_count),a
         ld (teletekst_subpage),a
+        ld (teletekst_cycle_started),a
         call MONITOR_CLEAR_KEY
         call teletekst_choose_source
         call teletekst_fetch_page
@@ -1579,6 +1710,7 @@ teletekst_store_digit:
         xor a
         ld (teletekst_input_count),a
         ld (teletekst_subpage),a
+        ld (teletekst_cycle_started),a
         call teletekst_fetch_page
         jp nc,teletekst_main_loop
         call show_teletekst_error
@@ -1658,8 +1790,7 @@ teletekst_toggle_rotation:
         jr nz,teletekst_pause_rotation
         ld a,(teletekst_pause_saved_cell)
         ld (VIDEO_RAM+39),a
-        ld a,(teletekst_next_subpage)
-        or a
+        call teletekst_can_rotate
         jp z,teletekst_main_loop
         ld hl,(MONITOR_CLOCK)
         ld de,TELETEKST_ROTATE_TICKS
@@ -1673,6 +1804,16 @@ teletekst_pause_rotation:
         ld (teletekst_rotation_enabled),a
         call teletekst_draw_pause_indicator
         jp teletekst_main_loop
+
+; NZ means that a successor is known, or that a known sequence just reached
+; its final sentinel and the next automatic request must wrap to subpage zero.
+teletekst_can_rotate:
+        ld a,(teletekst_next_subpage)
+        or a
+        ret nz
+        ld a,(teletekst_cycle_started)
+        or a
+        ret
 
 ; S followed by two digits selects subpage 00-99. One digit followed by Enter
 ; selects subpage 0-9. Zero asks the API for its default first subpage. An
@@ -1829,8 +1970,7 @@ teletekst_help_save_screen:
         call teletekst_draw_pause_indicator
         jp teletekst_main_loop
 teletekst_help_resume_rotation:
-        ld a,(teletekst_next_subpage)
-        or a
+        call teletekst_can_rotate
         jp z,teletekst_main_loop
         ld hl,(MONITOR_CLOCK)
         ld de,TELETEKST_ROTATE_TICKS
@@ -2100,7 +2240,15 @@ teletekst_chunk_loop:
         jr nz,teletekst_fetch_rotation_disabled
         ld a,(teletekst_next_subpage)
         or a
+        jr z,teletekst_fetch_check_wrap
+        ld a,1
+        ld (teletekst_cycle_started),a
+        jr teletekst_fetch_schedule_rotation
+teletekst_fetch_check_wrap:
+        ld a,(teletekst_cycle_started)
+        or a
         jr z,teletekst_fetch_rotation_disabled
+teletekst_fetch_schedule_rotation:
         ld hl,(MONITOR_CLOCK)
         ld de,TELETEKST_ROTATE_TICKS
         add hl,de
@@ -3327,7 +3475,6 @@ show_opening_screen:
         ld hl,opening_hardware_text
         ld de,VIDEO_RAM+1440
         call write_string
-
         ld hl,opening_service_text
         ld de,VIDEO_RAM+1520
         call write_string
@@ -3348,6 +3495,102 @@ show_opening_screen:
         ld hl,opening_footer_version_text
         ld de,VIDEO_RAM+1840+34
         jp write_string
+
+; Once Wi-Fi is connected, use the two spare source-menu rows below the
+; function-key list for the installed/latest versions and Pico generation.
+show_source_runtime_info:
+        ld hl,source_versions_text
+        ld de,VIDEO_RAM+1440
+        call write_string
+        ld hl,cartridge_release_version
+        call write_release_version
+        ld hl,source_pico_separator_text
+        call write_string
+        ld a,(device_info_valid)
+        or a
+        jr z,show_source_pico_unknown
+        ld hl,pico_current_version
+        call write_release_version
+        jr show_source_latest
+show_source_pico_unknown:
+        ld hl,opening_unknown_text
+        call write_string
+
+show_source_latest:
+        ld hl,source_latest_text
+        ld de,VIDEO_RAM+1520
+        call write_string
+        ld a,(latest_version_valid)
+        or a
+        jr z,show_source_latest_unavailable
+        ld hl,latest_release_version
+        call write_release_version
+        ret
+show_source_latest_unavailable:
+        ld hl,opening_unavailable_text
+        jp write_string
+
+; Render vMAJOR.MINOR.PATCH from three consecutive uint8 values at HL.
+write_release_version:
+        ld a,'v'
+        ld (de),a
+        inc de
+        ld a,(hl)
+        inc hl
+        call write_decimal_byte
+        ld a,'.'
+        ld (de),a
+        inc de
+        ld a,(hl)
+        inc hl
+        call write_decimal_byte
+        ld a,'.'
+        ld (de),a
+        inc de
+        ld a,(hl)
+        ; fall through
+
+; Write an unsigned byte in decimal without leading zeroes.
+write_decimal_byte:
+        push bc
+        ld b,0
+write_decimal_hundreds:
+        cp 100
+        jr c,write_decimal_tens_begin
+        sub 100
+        inc b
+        jr write_decimal_hundreds
+write_decimal_tens_begin:
+        ld c,0
+write_decimal_tens:
+        cp 10
+        jr c,write_decimal_ready
+        sub 10
+        inc c
+        jr write_decimal_tens
+write_decimal_ready:
+        push af
+        ld a,b
+        or a
+        jr z,write_decimal_no_hundreds
+        add a,'0'
+        ld (de),a
+        inc de
+write_decimal_no_hundreds:
+        ld a,b
+        or c
+        jr z,write_decimal_no_tens
+        ld a,c
+        add a,'0'
+        ld (de),a
+        inc de
+write_decimal_no_tens:
+        pop af
+        add a,'0'
+        ld (de),a
+        inc de
+        pop bc
+        ret
 
 ; Wait nonblockingly so the start prompt can blink every 500 ms using the
 ; monitor's interrupt-driven 20 ms clock. Any regular key or STOP continues.
@@ -3709,6 +3952,12 @@ custom_security_text:
         defb 003h,01dh,004h," LET OP: HTTPS-CERTIFICAAT ONGETOETST",0
 custom_input_text:
         defb 004h,01dh,007h," ADRES (MAX. 96 TEKENS):",0
+source_versions_text:
+        defb 007h,01dh,004h,"CARTRIDGE: ",0
+source_pico_separator_text:
+        defb " / PICO ",0
+source_latest_text:
+        defb 004h,01dh,007h,"LAATSTE VERSIE ONLINE: ",0
 teletekst_title_text:
         defb 004h,01dh,007h," P2000T  TELETEKST VIA PICO W"
         defs 40-($-teletekst_title_text),020h
@@ -3773,7 +4022,12 @@ opening_footer_text:
         defb 0
 opening_footer_version_text:
         defb "v0.5.0",0
-
+cartridge_release_version:
+        defb CARTRIDGE_VERSION_MAJOR,CARTRIDGE_VERSION_MINOR,CARTRIDGE_VERSION_PATCH
+opening_unknown_text:
+        defb "ONBEKEND",0
+opening_unavailable_text:
+        defb "NIET BESCHIKBAAR",0
 protocol_legacy_title_text:
         defb 004h,01dh,007h,"        PROTOCOLWAARSCHUWING"
         defs 40-($-protocol_legacy_title_text),020h
@@ -3934,14 +4188,24 @@ p2wp_session_version:  equ 0748bh
 hello_error_kind:      equ 0748ch
 teletekst_status_length: equ 0748dh
 teletekst_clock_has_date: equ 0748eh
-custom_url_length:       equ 0748fh
-teletekst_previous_page: equ 07490h
-teletekst_next_page:     equ 07492h
-teletekst_reveal_enabled: equ 07494h
-teletekst_zoom_state:    equ 07495h
-teletekst_page_valid:    equ 07496h
-teletekst_render_colour: equ 07497h
+p2wp_capabilities:       equ 0748fh
+device_info_valid:       equ 07490h
+pico_hardware_model:     equ 07491h
+pico_current_version:    equ 07492h
+latest_version_checked:  equ 07495h
+latest_version_valid:    equ 07496h
+latest_version_error:    equ 07497h
+latest_release_version:  equ 07498h
+version_check_deadline:  equ 0749bh
+teletekst_cycle_started: equ 0749dh
 TELETEXT_SCREEN_BUFFER: equ 07500h
+custom_url_length:       equ 078c0h
+teletekst_previous_page: equ 078c1h
+teletekst_next_page:     equ 078c3h
+teletekst_reveal_enabled: equ 078c5h
+teletekst_zoom_state:    equ 078c6h
+teletekst_page_valid:    equ 078c7h
+teletekst_render_colour: equ 078c8h
 TELETEXT_RAW_SCREEN_BUFFER: equ 07900h
 CUSTOM_URL_BUFFER:      equ 07d00h
 
