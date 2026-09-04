@@ -15,7 +15,8 @@ and release diffs.
   aliases for previous/next page navigation.
 - Added Shift-STOP cancellation to Wi-Fi and custom-server input.
 - Added a persistent P2WP/6 60-second auto-start source setting and automatic
-  next-page mode, enabled automatically after a timed start.
+  next-page mode, enabled automatically after a timed start, plus a visible
+  opening-screen countdown.
 - Added a right-aligned live clock to the missing-page screen without allowing
   it to overwrite the error header.
 - Added P2WP/5 retrieval and write-minimizing Pico flash persistence for the

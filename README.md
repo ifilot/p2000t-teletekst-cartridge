@@ -130,7 +130,8 @@ The printable enclosure and label models are available in [`enclosure/`](enclosu
 The source menu offers NOS, P2000T Teletekst, TeletekstArchief.nl, and a custom
 server. Press `A` on that menu to choose which source should start after the
 opening screen has been left untouched for 60 seconds; cycle to `UIT` to disable
-auto-start. An automatic start also enables automatic next-page mode.
+auto-start. The opening prompt shows the remaining `AUTO-MODE` seconds beside
+`DRUK OP EEN TOETS`. An automatic start also enables automatic next-page mode.
 
 While viewing a page, the main controls are `START`/`I` for page 100, arrow
 left/`P` and arrow right/`N` for the previous and next server-advertised page,

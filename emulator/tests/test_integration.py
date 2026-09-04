@@ -14,7 +14,7 @@ EMU=ROOT/'emulator'
 sys.path.insert(0,str(ROOT/'server'))
 from server import page_response
 with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
-    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_dialog_screen=temp/'custom-dialog-screen.bin'; custom_screen=temp/'custom-screen.bin'; restored_custom_screen=temp/'restored-custom-screen.bin'; emulated_flash=temp/'pico-flash.bin'; auto_flash=temp/'auto-flash.bin'; auto_screen=temp/'auto-screen.bin'; archive_screen=temp/'archive-screen.bin'; cancel_screen=temp/'cancel-screen.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'; keypad_pages=temp/'keypad-pages.txt'; arrow_pages=temp/'arrow-pages.txt'; auto_pages=temp/'auto-pages.txt'
+    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; intro_countdown_screen=temp/'intro-countdown-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_dialog_screen=temp/'custom-dialog-screen.bin'; custom_screen=temp/'custom-screen.bin'; restored_custom_screen=temp/'restored-custom-screen.bin'; emulated_flash=temp/'pico-flash.bin'; auto_flash=temp/'auto-flash.bin'; auto_screen=temp/'auto-screen.bin'; archive_screen=temp/'archive-screen.bin'; cancel_screen=temp/'cancel-screen.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'; keypad_pages=temp/'keypad-pages.txt'; arrow_pages=temp/'arrow-pages.txt'; auto_pages=temp/'auto-pages.txt'
     bundled_monitor=EMU/'assets/P2000ROM.bin'
     assert bundled_monitor.stat().st_size == 4096
     assert hashlib.sha256(bundled_monitor.read_bytes()).hexdigest() == \
@@ -44,7 +44,8 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     assert b'NOS EN P2000T TELETEKST' in intro[18*40:19*40]
     assert b'ORIGINEEL SAA5050-MOZAIEKBEELD' in intro[19*40:20*40]
     assert b'KLASSIEK BEELD, ACTUEEL NIEUWS' in intro[20*40:21*40]
-    assert intro[22*40+11:22*40+28] == b'DRUK OP EEN TOETS'
+    assert intro[22*40+4:22*40+21] == b'DRUK OP EEN TOETS'
+    assert intro[22*40+23:22*40+35] == b'AUTO-MODE 60'
     assert intro[23*40:23*40+3] == bytes((0x04,0x1d,0x07))
     assert intro[23*40+3:23*40+29] == b'P2000T Teletekst Cartridge'
     assert intro[23*40+29:23*40+34] == b'     '
@@ -54,7 +55,14 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
         '--headless','--frames','30','--dump-screen',str(intro_hidden_screen)],check=True)
     intro_hidden=intro_hidden_screen.read_bytes()
-    assert intro_hidden[22*40:23*40] == b' '*40
+    assert intro_hidden[22*40+4:22*40+21] == b' '*17
+    assert intro_hidden[22*40+23:22*40+35] == b'AUTO-MODE 60'
+    subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
+        '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
+        str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
+        '--headless','--frames','60','--dump-screen',str(intro_countdown_screen)],check=True)
+    intro_countdown=intro_countdown_screen.read_bytes()
+    assert intro_countdown[22*40+23:22*40+35] == b'AUTO-MODE 59'
     subprocess.run([str(build/'p2000t-emulator'),'--monitor',str(monitor),
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),

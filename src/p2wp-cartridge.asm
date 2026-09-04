@@ -4064,9 +4064,13 @@ wait_for_opening_key:
         xor a
         ld (opening_timed_out),a
         ld hl,(MONITOR_CLOCK)
+        ld (opening_countdown_last_tick),hl
         ld de,TELETEKST_AUTOSTART_TICKS
         add hl,de
         ld (opening_timeout_deadline),hl
+        ld a,60
+        ld (opening_countdown_seconds),a
+        call opening_draw_countdown
         ld a,1
         ld (opening_blink_visible),a
         ld a,(MONITOR_CLOCK)
@@ -4084,10 +4088,35 @@ opening_blink_update:
         sbc hl,de
         bit 7,h
         jr nz,opening_blink_continue
+        xor a
+        ld (opening_countdown_seconds),a
+        call opening_draw_countdown
         ld a,1
         ld (opening_timed_out),a
         ret
 opening_blink_continue:
+        ld hl,(MONITOR_CLOCK)
+        ld de,(opening_countdown_last_tick)
+        or a
+        sbc hl,de
+        ld a,h
+        or a
+        jr nz,opening_countdown_tick
+        ld a,l
+        cp TELETEKST_CLOCK_TICKS
+        jr c,opening_blink_check
+opening_countdown_tick:
+        ld hl,(opening_countdown_last_tick)
+        ld de,TELETEKST_CLOCK_TICKS
+        add hl,de
+        ld (opening_countdown_last_tick),hl
+        ld a,(opening_countdown_seconds)
+        or a
+        jr z,opening_blink_check
+        dec a
+        ld (opening_countdown_seconds),a
+        call opening_draw_countdown
+opening_blink_check:
         ld a,(MONITOR_CLOCK)
         ld b,a
         ld a,(opening_blink_last_tick)
@@ -4101,15 +4130,26 @@ opening_blink_continue:
         ld a,(opening_blink_visible)
         xor 1
         ld (opening_blink_visible),a
-        ld de,VIDEO_RAM+1760
         or a
         jr z,opening_blink_hide
-        ld hl,opening_start_text
+        ld hl,opening_prompt_text
+        ld de,VIDEO_RAM+1760+4
         call write_string
         jr opening_wait_key
 opening_blink_hide:
-        call clear_line
-        jr opening_wait_key
+        ld hl,VIDEO_RAM+1760+4
+        ld b,17
+        ld a,020h
+opening_blink_hide_loop:
+        ld (hl),a
+        inc hl
+        djnz opening_blink_hide_loop
+        jp opening_wait_key
+
+opening_draw_countdown:
+        ld a,(opening_countdown_seconds)
+        ld de,VIDEO_RAM+1760+33
+        jp teletekst_write_two_digits
 
 ; Establish a blue background and white separated-graphics foreground, then
 ; turn the readable '#' ROM patterns into full SAA5050 mosaic cells.
@@ -4521,7 +4561,9 @@ opening_service_text:
 opening_service_detail_text:
         defb 004h,01dh,007h,"  KLASSIEK BEELD, ACTUEEL NIEUWS",0
 opening_start_text:
-        defb 007h,"          DRUK OP EEN TOETS",0
+        defb 007h,"   DRUK OP EEN TOETS  AUTO-MODE 60",0
+opening_prompt_text:
+        defb "DRUK OP EEN TOETS",0
 opening_footer_text:
         defb 004h,01dh,007h,"P2000T Teletekst Cartridge"
         defs 40-($-opening_footer_text),020h
@@ -4715,6 +4757,8 @@ opening_timeout_deadline: equ 0749fh
 teletekst_auto_start_source: equ 074a1h
 teletekst_auto_page_enabled: equ 074a2h
 wifi_cancel_enabled:     equ 074a3h
+opening_countdown_last_tick: equ 074a4h
+opening_countdown_seconds: equ 074a6h
 TELETEXT_SCREEN_BUFFER: equ 07500h
 custom_url_length:       equ 078c0h
 teletekst_previous_page: equ 078c1h
