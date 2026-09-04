@@ -8,7 +8,10 @@
 #include "hardware/regs/addressmap.h"
 #include "pico/flash.h"
 
-#define CUSTOM_URL_FORMAT_VERSION 1u
+#define CUSTOM_URL_FORMAT_VERSION 2u
+#define CUSTOM_URL_LEGACY_FORMAT_VERSION 1u
+#define CUSTOM_URL_AUTOSTART_DISABLED 0xffu
+#define CUSTOM_URL_AUTOSTART_MAX_SOURCE 3u
 #define CUSTOM_URL_FLASH_OFFSET \
     (PICO_FLASH_SIZE_BYTES - (2u * FLASH_SECTOR_SIZE))
 #define CUSTOM_URL_FLASH_TIMEOUT_MS 1000u
@@ -17,7 +20,8 @@ typedef struct __attribute__((packed)) {
     uint8_t magic[8];
     uint8_t format_version;
     uint8_t url_length;
-    uint8_t reserved[2];
+    uint8_t auto_start_source;
+    uint8_t reserved;
     uint32_t checksum;
     char url[CUSTOM_ENDPOINT_URL_MAX];
 } custom_url_record_t;
@@ -71,15 +75,26 @@ static custom_url_store_result_t custom_url_read_record(
     if (memcmp(record->magic, custom_url_magic, sizeof(custom_url_magic)) != 0) {
         return CUSTOM_URL_STORE_NOT_FOUND;
     }
-    if (record->format_version != CUSTOM_URL_FORMAT_VERSION ||
-        record->url_length == 0u ||
+    if ((record->format_version != CUSTOM_URL_FORMAT_VERSION &&
+         record->format_version != CUSTOM_URL_LEGACY_FORMAT_VERSION) ||
         record->url_length > CUSTOM_ENDPOINT_URL_MAX ||
         record->checksum != custom_url_checksum(record)) {
         return CUSTOM_URL_STORE_CORRUPT;
     }
-    custom_endpoint_t endpoint;
-    if (!custom_endpoint_parse(record->url, record->url_length, &endpoint)) {
+    if (record->format_version == CUSTOM_URL_LEGACY_FORMAT_VERSION &&
+        record->url_length == 0u) {
         return CUSTOM_URL_STORE_CORRUPT;
+    }
+    if (record->format_version == CUSTOM_URL_FORMAT_VERSION &&
+        record->auto_start_source != CUSTOM_URL_AUTOSTART_DISABLED &&
+        record->auto_start_source > CUSTOM_URL_AUTOSTART_MAX_SOURCE) {
+        return CUSTOM_URL_STORE_CORRUPT;
+    }
+    if (record->url_length != 0u) {
+        custom_endpoint_t endpoint;
+        if (!custom_endpoint_parse(record->url, record->url_length, &endpoint)) {
+            return CUSTOM_URL_STORE_CORRUPT;
+        }
     }
     return CUSTOM_URL_STORE_OK;
 }
@@ -97,6 +112,9 @@ custom_url_store_result_t custom_url_store_load(
     const custom_url_store_result_t result = custom_url_read_record(&record);
     if (result != CUSTOM_URL_STORE_OK) {
         return result;
+    }
+    if (record.url_length == 0u) {
+        return CUSTOM_URL_STORE_NOT_FOUND;
     }
     memcpy(url, record.url, record.url_length);
     url[record.url_length] = '\0';
@@ -120,38 +138,20 @@ static void custom_url_flash_update(void *argument) {
     }
 }
 
-custom_url_store_result_t custom_url_store_save(
-    const char *url,
-    size_t url_length
+static custom_url_store_result_t custom_url_write_record(
+    const custom_url_record_t *record,
+    const custom_url_record_t *existing,
+    custom_url_store_result_t existing_result
 ) {
-    custom_endpoint_t endpoint;
-    if (url == NULL || url_length == 0u ||
-        url_length > CUSTOM_ENDPOINT_URL_MAX ||
-        !custom_endpoint_parse(url, url_length, &endpoint)) {
-        return CUSTOM_URL_STORE_INVALID_DATA;
-    }
-
-    custom_url_record_t existing;
-    const custom_url_store_result_t existing_result =
-        custom_url_read_record(&existing);
     if (existing_result == CUSTOM_URL_STORE_OK &&
-        existing.url_length == url_length &&
-        memcmp(existing.url, url, url_length) == 0) {
+        memcmp(existing, record, sizeof(*record)) == 0) {
         return CUSTOM_URL_STORE_UNCHANGED;
     }
     if (!custom_url_flash_region_available()) {
         return CUSTOM_URL_STORE_FAILED;
     }
-
-    custom_url_record_t record;
-    memset(&record, 0, sizeof(record));
-    memcpy(record.magic, custom_url_magic, sizeof(record.magic));
-    record.format_version = CUSTOM_URL_FORMAT_VERSION;
-    record.url_length = (uint8_t)url_length;
-    memcpy(record.url, url, url_length);
-    record.checksum = custom_url_checksum(&record);
     memset(custom_url_flash_page, 0xff, sizeof(custom_url_flash_page));
-    memcpy(custom_url_flash_page, &record, sizeof(record));
+    memcpy(custom_url_flash_page, record, sizeof(*record));
 
     const custom_url_flash_operation_t operation = {.program = true};
     const int result = flash_safe_execute(
@@ -163,4 +163,82 @@ custom_url_store_result_t custom_url_store_save(
     return result == PICO_OK
         ? CUSTOM_URL_STORE_OK
         : CUSTOM_URL_STORE_FAILED;
+}
+
+static void custom_url_new_record(
+    custom_url_record_t *record,
+    const custom_url_record_t *existing,
+    custom_url_store_result_t existing_result
+) {
+    memset(record, 0, sizeof(*record));
+    memcpy(record->magic, custom_url_magic, sizeof(record->magic));
+    record->format_version = CUSTOM_URL_FORMAT_VERSION;
+    record->auto_start_source = CUSTOM_URL_AUTOSTART_DISABLED;
+    if (existing_result == CUSTOM_URL_STORE_OK) {
+        record->url_length = existing->url_length;
+        memcpy(record->url, existing->url, existing->url_length);
+        if (existing->format_version == CUSTOM_URL_FORMAT_VERSION) {
+            record->auto_start_source = existing->auto_start_source;
+        }
+    }
+}
+
+custom_url_store_result_t custom_url_store_save(
+    const char *url,
+    size_t url_length
+) {
+    custom_endpoint_t endpoint;
+    if (url == NULL || url_length == 0u ||
+        url_length > CUSTOM_ENDPOINT_URL_MAX ||
+        !custom_endpoint_parse(url, url_length, &endpoint)) {
+        return CUSTOM_URL_STORE_INVALID_DATA;
+    }
+    custom_url_record_t existing;
+    const custom_url_store_result_t existing_result =
+        custom_url_read_record(&existing);
+    custom_url_record_t record;
+    custom_url_new_record(&record, &existing, existing_result);
+    record.url_length = (uint8_t)url_length;
+    memset(record.url, 0, sizeof(record.url));
+    memcpy(record.url, url, url_length);
+    record.checksum = custom_url_checksum(&record);
+    return custom_url_write_record(&record, &existing, existing_result);
+}
+
+custom_url_store_result_t custom_url_store_settings_load(
+    uint8_t *auto_start_source
+) {
+    if (auto_start_source == NULL) {
+        return CUSTOM_URL_STORE_INVALID_DATA;
+    }
+    *auto_start_source = CUSTOM_URL_AUTOSTART_DISABLED;
+    custom_url_record_t record;
+    const custom_url_store_result_t result = custom_url_read_record(&record);
+    if (result == CUSTOM_URL_STORE_NOT_FOUND) {
+        return result;
+    }
+    if (result != CUSTOM_URL_STORE_OK) {
+        return result;
+    }
+    if (record.format_version == CUSTOM_URL_FORMAT_VERSION) {
+        *auto_start_source = record.auto_start_source;
+    }
+    return CUSTOM_URL_STORE_OK;
+}
+
+custom_url_store_result_t custom_url_store_settings_save(
+    uint8_t auto_start_source
+) {
+    if (auto_start_source != CUSTOM_URL_AUTOSTART_DISABLED &&
+        auto_start_source > CUSTOM_URL_AUTOSTART_MAX_SOURCE) {
+        return CUSTOM_URL_STORE_INVALID_DATA;
+    }
+    custom_url_record_t existing;
+    const custom_url_store_result_t existing_result =
+        custom_url_read_record(&existing);
+    custom_url_record_t record;
+    custom_url_new_record(&record, &existing, existing_result);
+    record.auto_start_source = auto_start_source;
+    record.checksum = custom_url_checksum(&record);
+    return custom_url_write_record(&record, &existing, existing_result);
 }

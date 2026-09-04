@@ -91,6 +91,10 @@ static p2wp_firmware_command_fn command_for_type(
             return operations->teletekst_custom_url_load;
         case P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE:
             return operations->teletekst_custom_url_save;
+        case P2WP_TYPE_TELETEKST_SETTINGS_LOAD:
+            return operations->teletekst_settings_load;
+        case P2WP_TYPE_TELETEKST_SETTINGS_SAVE:
+            return operations->teletekst_settings_save;
         default:
             return NULL;
     }
@@ -111,6 +115,14 @@ static bool platform_payload_is_valid(const p2wp_frame_t *request) {
 
         case P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD:
             return request->version >= 5u && empty_request(request);
+
+        case P2WP_TYPE_TELETEKST_SETTINGS_LOAD:
+            return request->version >= 6u && empty_request(request);
+
+        case P2WP_TYPE_TELETEKST_SETTINGS_SAVE:
+            return request->version >= 6u && request->payload_length == 1u &&
+                (request->payload[0] == P2WP_TELETEKST_AUTOSTART_DISABLED ||
+                 request->payload[0] <= P2WP_TELETEKST_MENU_SOURCE_ARCHIVE);
 
         case P2WP_TYPE_WIFI_SCAN_RESULT:
             return request->payload_length == 1u;

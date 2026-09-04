@@ -13,8 +13,9 @@
 The P2000T Teletekst Cartridge brings internet-connected teletext to the Philips
 P2000T. A slot-1 ROM provides the native SAA5050 user interface, while a
 Raspberry Pi Pico W or Pico 2 W interface in slot 2 manages Wi-Fi and fetches
-pages from the NOS service, the P2000T community service, or a user-supplied
-HTTP(S) server. Together, they provide wireless network setup, optional
+pages from the NOS service, the P2000T community service,
+[TeletekstArchief.nl](https://teletekstarchief.nl), or a user-supplied HTTP(S)
+server. Together, they provide wireless network setup, optional
 encrypted credential storage, and direct three-digit page selection on the
 original computer.
 
@@ -23,7 +24,7 @@ Teletekst project:
 
 - `src/` is the 16 KiB slot-1 cartridge client.
 - `firmware/` is the Raspberry Pi Pico W firmware for the slot-2 interface.
-- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2–5 link protocol
+- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2–6 link protocol
   between them.
 - [`docs/custom-server.md`](docs/custom-server.md) gives the small HTTP/JSON
   contract needed to host your own pages.
@@ -126,6 +127,18 @@ The printable enclosure and label models are available in [`enclosure/`](enclosu
 
 ## Documentation
 
+The source menu offers NOS, P2000T Teletekst, TeletekstArchief.nl, and a custom
+server. Press `A` on that menu to choose which source should start after the
+opening screen has been left untouched for 60 seconds; cycle to `UIT` to disable
+auto-start. An automatic start also enables automatic next-page mode.
+
+While viewing a page, the main controls are `START`/`I` for page 100, arrow
+left/`P` and arrow right/`N` for the previous and next server-advertised page,
+`V` for automatic next-page mode, `?`/`R` to reveal concealed text, and `Z` to
+cycle zoom. Page numbers can be typed on either the main number row or numeric
+keypad, and Backspace corrects the current three-digit entry. `W` reopens Wi-Fi
+setup; Shift-`STOP` cancels Wi-Fi or custom-server input.
+
 Choose **0 - EIGEN SERVER** to enter an `http://` or `https://` URL of up to 96
 characters, including an optional port and base path. The address is retained
 in Pico flash and is filled in the next time this dialog opens. Flash is only
@@ -137,7 +150,7 @@ server](docs/custom-server.md) for the required routes and response fields.
 > so self-signed and private-CA certificates work. Use only a server and network
 > you trust. The two built-in services continue to use verified HTTPS.
 
-[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–5 interface
+[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–6 interface
 specification. The Sphinx documentation adds implementation guides for
 [P2000T BASIC](docs/basic.rst) and
 [Z80 assembly](docs/assembly.rst).

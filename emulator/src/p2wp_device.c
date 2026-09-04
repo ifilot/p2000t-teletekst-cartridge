@@ -34,6 +34,7 @@ static uint8_t status_length_override;
 static const char *flash_path;
 static char stored_custom_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
 static uint8_t stored_custom_url_length;
+static uint8_t stored_auto_start_source = P2WP_TELETEKST_AUTOSTART_DISABLED;
 
 static const uint8_t flash_magic[8] = {
     'P', '2', 'W', 'P', 'U', 'R', 'L', '1',
@@ -284,7 +285,7 @@ static uint8_t teletekst_custom_url_load(
     return P2WP_FIRMWARE_COMMAND_OK;
 }
 
-static bool write_flash_url(const char *url, uint8_t url_length) {
+static bool write_flash_settings(void) {
     if (flash_path == NULL) {
         return true;
     }
@@ -292,10 +293,14 @@ static bool write_flash_url(const char *url, uint8_t url_length) {
     if (file == NULL) {
         return false;
     }
+    const uint8_t format_marker = 0xfeu;
     const bool wrote = fwrite(flash_magic, 1u, sizeof(flash_magic), file) ==
             sizeof(flash_magic) &&
-        fwrite(&url_length, 1u, 1u, file) == 1u &&
-        fwrite(url, 1u, url_length, file) == url_length;
+        fwrite(&format_marker, 1u, 1u, file) == 1u &&
+        fwrite(&stored_auto_start_source, 1u, 1u, file) == 1u &&
+        fwrite(&stored_custom_url_length, 1u, 1u, file) == 1u &&
+        fwrite(stored_custom_url, 1u, stored_custom_url_length, file) ==
+            stored_custom_url_length;
     return fclose(file) == 0 && wrote;
 }
 
@@ -319,12 +324,45 @@ static uint8_t teletekst_custom_url_save(
         response->payload_length = 0u;
         return P2WP_FIRMWARE_COMMAND_OK;
     }
-    if (!write_flash_url((const char *)request->payload + 1u, url_length)) {
-        return P2WP_ERROR_INTERNAL;
-    }
+    char previous_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
+    const uint8_t previous_length = stored_custom_url_length;
+    memcpy(previous_url, stored_custom_url, sizeof(previous_url));
     memcpy(stored_custom_url, request->payload + 1u, url_length);
     stored_custom_url[url_length] = '\0';
     stored_custom_url_length = url_length;
+    if (!write_flash_settings()) {
+        memcpy(stored_custom_url, previous_url, sizeof(previous_url));
+        stored_custom_url_length = previous_length;
+        return P2WP_ERROR_INTERNAL;
+    }
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t teletekst_settings_load(
+    void *context,
+    const p2wp_frame_t *request,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)request;
+    response->payload[0] = stored_auto_start_source;
+    response->payload_length = 1u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t teletekst_settings_save(
+    void *context,
+    const p2wp_frame_t *request,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    const uint8_t previous = stored_auto_start_source;
+    stored_auto_start_source = request->payload[0];
+    if (!write_flash_settings()) {
+        stored_auto_start_source = previous;
+        return P2WP_ERROR_INTERNAL;
+    }
     response->payload_length = 0u;
     return P2WP_FIRMWARE_COMMAND_OK;
 }
@@ -347,6 +385,8 @@ static const p2wp_firmware_operations_t emulator_operations = {
     .teletekst_fetch_rows = teletekst_fetch_rows,
     .teletekst_custom_url_load = teletekst_custom_url_load,
     .teletekst_custom_url_save = teletekst_custom_url_save,
+    .teletekst_settings_load = teletekst_settings_load,
+    .teletekst_settings_save = teletekst_settings_save,
 };
 
 void p2wp_device_init(p2wp_fetch_fn fetch, void *context) {
@@ -379,6 +419,7 @@ void p2wp_device_set_flash_path(const char *path) {
     flash_path = path;
     stored_custom_url_length = 0u;
     stored_custom_url[0] = '\0';
+    stored_auto_start_source = P2WP_TELETEKST_AUTOSTART_DISABLED;
     if (path == NULL) {
         return;
     }
@@ -387,26 +428,44 @@ void p2wp_device_set_flash_path(const char *path) {
         return;
     }
     uint8_t magic[sizeof(flash_magic)];
-    uint8_t url_length;
+    uint8_t first_byte = 0u;
     const bool header_ok =
         fread(magic, 1u, sizeof(magic), file) == sizeof(magic) &&
         memcmp(magic, flash_magic, sizeof(magic)) == 0 &&
-        fread(&url_length, 1u, 1u, file) == 1u &&
+        fread(&first_byte, 1u, 1u, file) == 1u;
+    uint8_t url_length = first_byte;
+    uint8_t auto_start_source = P2WP_TELETEKST_AUTOSTART_DISABLED;
+    const bool current_format = header_ok && first_byte == 0xfeu;
+    bool settings_ok = header_ok;
+    if (current_format) {
+        settings_ok = fread(&auto_start_source, 1u, 1u, file) == 1u &&
+            (auto_start_source == P2WP_TELETEKST_AUTOSTART_DISABLED ||
+             auto_start_source <= P2WP_TELETEKST_MENU_SOURCE_ARCHIVE) &&
+            fread(&url_length, 1u, 1u, file) == 1u;
+    }
+    if (settings_ok && current_format && url_length == 0u && fgetc(file) == EOF) {
+        stored_auto_start_source = auto_start_source;
+        fclose(file);
+        return;
+    }
+    const bool url_ok = settings_ok &&
         url_length > 0u && url_length <= CUSTOM_ENDPOINT_URL_MAX &&
         fread(stored_custom_url, 1u, url_length, file) == url_length &&
         fgetc(file) == EOF;
     fclose(file);
     custom_endpoint_t endpoint;
-    if (!header_ok || !custom_endpoint_parse(
+    if (!url_ok || !custom_endpoint_parse(
             stored_custom_url,
             url_length,
             &endpoint
         )) {
         stored_custom_url[0] = '\0';
+        stored_custom_url_length = 0u;
         return;
     }
     stored_custom_url[url_length] = '\0';
     stored_custom_url_length = url_length;
+    stored_auto_start_source = auto_start_source;
 }
 
 void p2wp_device_reset(void) {

@@ -24,15 +24,17 @@ emulator/run
 ```
 
 The emulator presents one open network named `Emulated WiFi`; select it with
-`1`, decline profile storage with `N`, then choose NOS with `1`. Choose `0` to
-type a custom server URL. Regular host
+`1`, decline profile storage with `N`, then choose NOS with `1`. Choose `2` for
+P2000T Teletekst, `3` for TeletekstArchief.nl, or `0` to type a custom server
+URL. Regular host
 letter, number, arrow, Enter, Backspace, Shift and keypad-Enter (P2000 STOP)
 keys are mapped to the P2000T keyboard matrix. Press `F11` for a warm reset or
 `F12` for a cold reset.
 
 Page shortcuts are `START`/`I` (page 100), `?`/`R` (reveal), `Z` (top, bottom, and
-normal size), `P`/`N` (previous/next page), `A` (pause subpages), `S` (choose
-subpage), `W` (Wi-Fi), `H` (help), and P2000 `STOP` (source selection). The host
+normal size), arrow left/`P` and arrow right/`N` (previous/next page), `V`
+(automatic next page), `A` (pause subpages), `S` (choose subpage), `W` (Wi-Fi),
+`H` (help), and P2000 `STOP` (source selection). The host
 keypad Enter key maps to `STOP`; `I` is the convenient host equivalent for
 `START`.
 
@@ -46,7 +48,8 @@ make -C emulator test
 It executes the production cartridge, completes negotiated P2WP HELLO, fictitious Wi-Fi
 scan/connect, source selection, live-code JSON decoding, four chunk transfers,
 and asserts that built-in and custom page content reached emulated video RAM.
-It also exercises the expanded shortcut/help screens and zoom mode.
+It also exercises keypad entry, Backspace, arrows, Shift-STOP cancellation,
+persisted auto-start, auto-page mode, the expanded help screen, and zoom mode.
 
 For a deterministic custom-source boot from the repository root, run:
 
@@ -65,7 +68,8 @@ runs; the file is rewritten only when the accepted URL changes. Replace the
 `--fixture` pair with `--live`, change the custom URL to
 `http://127.0.0.1:8080`, and run `python3 server/server.py` in another terminal
 to contact the included example server. Add
-`--auto-key Z`, `--auto-key R`, or `--auto-key H` to inject a page shortcut
+`--auto-key Z`, `--auto-key RIGHT`, or `--auto-keys KP1,KP0,BACKSPACE,KP0,KP1`
+to inject one or more page controls
 after loading, which keeps new controls quick to test without a physical
 keyboard.
 
@@ -79,7 +83,7 @@ CYW43 radio, GPIO electrical timing, or Pico SDK drivers.
 
 Use `--p2wp-version 2` to emulate legacy firmware and exercise the cartridge's
 compatibility warning, or `--p2wp-version 1` to exercise the no-common-version
-error screen. Without this option the emulator negotiates the current P2WP/5.
+error screen. Without this option the emulator negotiates the current P2WP/6.
 The intermediate pre-release clock firmware can be reproduced with
 `--p2wp-version 2 --p2wp-status-length 9`.
 

@@ -1,4 +1,4 @@
-# P2000T to Pico W Protocol (P2WP/2–5)
+# P2000T to Pico W Protocol (P2WP/2–6)
 
 P2WP is a reliable, version-negotiated request/response protocol carried by the three
 I/O ports on the P2000T Pico W interface. Multi-byte fields are little-endian.
@@ -227,6 +227,8 @@ responses.
 | `0x32` | `TELETEKST_FETCH_ROWS` | Chunk index | Six display-ready rows |
 | `0x33` | `TELETEKST_CUSTOM_URL_LOAD` | Empty | URL length and URL bytes |
 | `0x34` | `TELETEKST_CUSTOM_URL_SAVE` | URL length and URL bytes | Empty acknowledgement |
+| `0x35` | `TELETEKST_SETTINGS_LOAD` | Empty | Auto-start source |
+| `0x36` | `TELETEKST_SETTINGS_SAVE` | Auto-start source | Empty acknowledgement |
 
 `LINK_STATS` reserves its message number for a future statistics format. A
 host MUST NOT depend on this message until a payload format is specified. A
@@ -273,7 +275,7 @@ subsequent frame header. A peripheral selects the newest revision in the
 intersection of its supported range and the host's advertised range. If that
 intersection is empty, it returns `UNSUPPORTED_VERSION` in a bootstrap-version
 error response. Later peripherals MUST retain version 2 operation, and a
-version 5 peripheral MUST retain version 4 operation. This allows both a new
+version 6 peripheral MUST retain version 5 operation. This allows both a new
 cartridge with old Pico firmware and an old cartridge with new Pico firmware
 to remain usable.
 
@@ -453,6 +455,29 @@ programming, it validates and compares the existing URL record. An identical
 URL is acknowledged without a flash write. The record includes a format marker,
 explicit length, and checksum so incomplete or corrupt data is returned as an
 empty result rather than copied into host memory.
+
+### Persisted cartridge settings
+
+P2WP/6 adds two commands for settings which must survive a power cycle.
+`TELETEKST_SETTINGS_LOAD` has an empty request and returns one byte.
+`TELETEKST_SETTINGS_SAVE` takes that same one-byte value and returns an empty
+response. The auto-start source values are the cartridge menu identifiers:
+
+| Value | Source selected after 60 seconds of opening-screen inactivity |
+| ---: | --- |
+| `0x00` | Custom server URL retained through P2WP/5 |
+| `0x01` | NOS Teletekst |
+| `0x02` | P2000T Teletekst |
+| `0x03` | TeletekstArchief.nl (`https://teletekstarchief.nl`) |
+| `0xff` | Auto-start disabled |
+
+All other values are invalid. These menu identifiers are deliberately separate
+from the `TELETEKST_FETCH_START` source field: the archive entry is implemented
+by the cartridge as custom source `2` with its fixed base URL. The reference
+Pico stores the setting in the versioned custom-URL record in the penultimate
+flash sector, preserving the URL when only the setting changes and avoiding a
+flash write when the complete record is unchanged. A P2WP/5 record is accepted
+and migrated when it is next updated.
 
 The reference firmware deliberately disables certificate-chain and hostname
 verification for source `2` HTTPS requests, allowing self-signed and private-CA

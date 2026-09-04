@@ -10,6 +10,14 @@ and release diffs.
 
 ### Added
 
+- Added TeletekstArchief.nl as a predefined source.
+- Added numeric-keypad page entry, Backspace correction, and left/right arrow
+  aliases for previous/next page navigation.
+- Added Shift-STOP cancellation to Wi-Fi and custom-server input.
+- Added a persistent P2WP/6 60-second auto-start source setting and automatic
+  next-page mode, enabled automatically after a timed start.
+- Added a right-aligned live clock to the missing-page screen without allowing
+  it to overwrite the error header.
 - Added P2WP/5 retrieval and write-minimizing Pico flash persistence for the
   last custom server URL, including file-backed emulator flash.
 - Redesigned the custom-server dialog as a three-line highlighted input panel

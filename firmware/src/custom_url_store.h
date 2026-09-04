@@ -31,4 +31,14 @@ custom_url_store_result_t custom_url_store_save(
     size_t url_length
 );
 
+/** Load the persisted auto-start menu source, or 0xff when disabled. */
+custom_url_store_result_t custom_url_store_settings_load(
+    uint8_t *auto_start_source
+);
+
+/** Persist an auto-start menu source (0-3), or 0xff to disable it. */
+custom_url_store_result_t custom_url_store_settings_save(
+    uint8_t auto_start_source
+);
+
 #endif

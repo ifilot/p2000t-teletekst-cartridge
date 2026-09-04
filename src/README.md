@@ -13,7 +13,7 @@ The cartridge release version is `v0.5.0`. `../VERSION`, the cartridge
 constants, and the Pico firmware constants are checked together during tests
 so both release artifacts always identify the same version.
 
-At runtime it negotiates P2WP/2 through P2WP/5 with `HELLO`, requests a wireless scan, and
+At runtime it negotiates P2WP/2 through P2WP/6 with `HELLO`, requests a wireless scan, and
 polls while the Pico W performs it asynchronously. Up to nine unique SSIDs are
 shown strongest first using one to four signal bars. `*` marks supported
 WPA/WPA2 networks and `!` marks security modes that this first client cannot
@@ -58,7 +58,7 @@ Initial `HELLO` negotiation and every later local-link transaction have a
 two-second overall timeout. A missing or unresponsive Pico W therefore shows a
 clear error instead of leaving the cartridge waiting indefinitely. Each
 transaction still makes up to three attempts within that deadline.
-The v0.5 cartridge advertises P2WP/2–5 and selects the newest revision shared
+The v0.5 cartridge advertises P2WP/2–6 and selects the newest revision shared
 with the Pico. P2WP/2 remains fully usable, but the cartridge displays a
 one-time compatibility warning recommending a Pico firmware update. A HELLO
 response with no common revision displays a dedicated protocol-incompatibility
@@ -68,7 +68,8 @@ The cartridge then starts an asynchronous connection and polls until the Pico
 has either acquired an IP address or reported a specific failure. Open networks
 skip password entry. Once connected, a matching blue, white, and black screen
 offers the NOS API, the P2000T Teletekst API at
-`https://teletekst.philips-p2000t.nl`, or a custom HTTP(S) server.
+`https://teletekst.philips-p2000t.nl`, TeletekstArchief.nl at
+`https://teletekstarchief.nl`, or a custom HTTP(S) server.
 The selection lasts for the current session and is attached to every request.
 The custom URL may contain a DNS name, IPv4 address, port, and base path. With
 P2WP/5 it is restored from Pico flash when the dialog opens and saved only if
@@ -78,7 +79,8 @@ by disabling certificate and hostname verification; built-in endpoints remain
 strictly verified. See [`../docs/custom-server.md`](../docs/custom-server.md)
 for the server-side contract and security warning.
 The cartridge then requests page 100. Enter any page number from 100 through
-899 as three digits; the request starts after the third digit, without Enter.
+899 as three digits using the number row or numeric keypad; the request starts
+after the third digit, without Enter. Backspace corrects an unfinished entry.
 If the selected API identifies another subpage, the cartridge retrieves it
 automatically after ten seconds and continues following the subpage sequence.
 After the last subpage reports no successor, an active loop requests subpage
@@ -88,15 +90,22 @@ A newly entered page always starts at its default first subpage.
 Pressing the dedicated P2000T `STOP` key returns to the source-selection
 screen without reconnecting Wi-Fi. After choosing a new source, the cartridge
 requests the current page from its default subpage on that server.
+Shift-`STOP` also cancels custom-server entry and Wi-Fi selection, returning to
+the source menu without accepting partial input.
 The source-selection screen also lists the controls available while viewing a
 page: `START` or `I` jumps to page 100, `?` or `R` toggles concealed text, `Z` cycles
-normal/top-half/bottom-half zoom, and `P`/`N` selects the previous/next page
-advertised by the server. `W` returns to Wi-Fi scanning, `A` pauses or resumes
+normal/top-half/bottom-half zoom, and arrow left/`P` or arrow right/`N` selects
+the previous/next page advertised by the server. `V` toggles automatic
+next-page mode: every ten seconds it follows subpages first, then advances to
+the advertised next page (or page 100 when none exists). `W` returns to Wi-Fi scanning, `A` pauses or resumes
 automatic subpage cycling, and `S` selects a subpage. Enter either two digits,
 or one digit followed by Enter. Subpage `0`/`00` asks the API for its default
 first subpage. A manual subpage choice pauses cycling so it remains visible
 until `A` is pressed. While cycling is paused, an `A` appears in the top-right
 corner; resuming restores the header cell that it covered.
+On the source menu, `A` cycles the persistent 60-second auto-start setting
+through off, NOS, P2000T, TeletekstArchief.nl, and the custom server. Auto-start
+also enables automatic next-page mode.
 Pressing `H` opens a cartridge-resident Teletekst-style Dutch help page. It
 explains page entry, source and Wi-Fi selection, manual and automatic subpages,
 the pause marker, and error recovery. Any key restores the exact prior display
@@ -105,7 +114,8 @@ If either API returns HTTP 404, the cartridge replaces the generic error view
 with the blue-and-white P2000T masthead above a centered red panel containing
 the missing page number and a prompt to type a new three-digit page number.
 Other HTTP, network, and protocol failures retain their diagnostic error screen
-and code. Error-screen headers leave the top-right navigation cells blank.
+and code. A missing-page clock is right-aligned so it does not overwrite the
+error masthead or page-entry area.
 
 The P2000T service may additionally return `binaryDisplay`, a base64 encoding
 of the exact 960 SAA5050 display-memory bytes. Firmware prefers this field so

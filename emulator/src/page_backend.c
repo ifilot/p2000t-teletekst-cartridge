@@ -48,8 +48,10 @@ int page_backend_fetch(void *argument,unsigned char source,const char *custom_ur
                             base,page,subpage);
         if(length<0||(size_t)length>=sizeof(url))return -1;
     }
-    if(backend->request_count<sizeof(backend->requested_subpages))
+    if(backend->request_count<sizeof(backend->requested_subpages)) {
         backend->requested_subpages[backend->request_count]=subpage;
+        backend->requested_pages[backend->request_count]=page;
+    }
     backend->request_count++;
     if(backend->fixture) result=read_file(backend->fixture,&body);
     else if(backend->live) {

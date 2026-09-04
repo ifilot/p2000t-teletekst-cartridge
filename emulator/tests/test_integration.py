@@ -14,7 +14,7 @@ EMU=ROOT/'emulator'
 sys.path.insert(0,str(ROOT/'server'))
 from server import page_response
 with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
-    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_dialog_screen=temp/'custom-dialog-screen.bin'; custom_screen=temp/'custom-screen.bin'; restored_custom_screen=temp/'restored-custom-screen.bin'; emulated_flash=temp/'pico-flash.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'
+    temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_dialog_screen=temp/'custom-dialog-screen.bin'; custom_screen=temp/'custom-screen.bin'; restored_custom_screen=temp/'restored-custom-screen.bin'; emulated_flash=temp/'pico-flash.bin'; auto_flash=temp/'auto-flash.bin'; auto_screen=temp/'auto-screen.bin'; archive_screen=temp/'archive-screen.bin'; cancel_screen=temp/'cancel-screen.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'; keypad_pages=temp/'keypad-pages.txt'; arrow_pages=temp/'arrow-pages.txt'; auto_pages=temp/'auto-pages.txt'
     bundled_monitor=EMU/'assets/P2000ROM.bin'
     assert bundled_monitor.stat().st_size == 4096
     assert hashlib.sha256(bundled_monitor.read_bytes()).hexdigest() == \
@@ -61,14 +61,14 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--headless','--auto','--frames','149','--dump-screen',str(source_screen)],check=True)
     source=source_screen.read_bytes()
     assert b'1 - NOS TELETEKST' in source[5*40:6*40]
-    assert source[6*40:7*40] == bytes((0x07,0x1d,0x04))+b' '*37
-    assert b'2 - P2000T TELETEKST' in source[7*40:8*40]
-    assert source[8*40:9*40] == bytes((0x07,0x1d,0x04))+b' '*37
-    assert b'0 - EIGEN SERVER' in source[9*40:10*40]
+    assert b'2 - P2000T TELETEKST' in source[6*40:7*40]
+    assert b'3 - TELETEKSTARCHIEF.NL' in source[7*40:8*40]
+    assert b'0 - EIGEN SERVER' in source[8*40:9*40]
+    assert b'A AUTOSTART NA 60S: UIT' in source[11*40:12*40]
     assert b'START/I INDEX' in source and b'R ONTHUL' in source and b'Z ZOOM' in source
-    assert b'P VORIGE PAGINA' in source and b'N VOLGENDE' in source
+    assert b'<-/P VORIGE' in source and b'->/N VOLGENDE' in source
     assert b'A PAUZE/DOORGAAN' in source and b'S SUBPAGINA' in source
-    assert b'W ANDERE WIFI' in source and b'H HULP' in source
+    assert b'V AUTO-PAGINA' in source and b'W WIFI' in source and b'H HULP' in source
     assert b'STOP - ANDERE TELETEKSTBRON' in source
     assert b'CARTRIDGE: v0.5.0 / PICO v0.5.0' in source[18*40:19*40]
     assert b'LAATSTE VERSIE ONLINE: v0.5.0' in source[19*40:20*40]
@@ -76,6 +76,32 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
         '--headless','--auto']
+    subprocess.run(common+['--auto-source','3','--frames','650',
+        '--dump-screen',str(archive_screen)],check=True)
+    assert b'Meer bevoegdheden' in archive_screen.read_bytes(), \
+        'teletekstarchief.nl source did not use its compatible /json endpoint'
+    subprocess.run(common+['--auto-keys','KP1,KP0,BACKSPACE,KP0,KP1',
+        '--frames','850','--dump-pages',str(keypad_pages)],check=True)
+    assert keypad_pages.read_text().splitlines()[:2] == ['100','101'], \
+        'numeric keypad entry or Backspace editing did not select page 101'
+    subprocess.run(common+['--auto-key','RIGHT','--frames','750',
+        '--dump-pages',str(arrow_pages)],check=True)
+    assert arrow_pages.read_text().splitlines()[:2] == ['100','101'], \
+        'right arrow did not follow nextPage'
+    subprocess.run(common+['--auto-key','V','--frames','1450',
+        '--dump-pages',str(auto_pages)],check=True)
+    assert auto_pages.read_text().splitlines()[:3] == ['100','100','101'], \
+        'automatic next-page mode did not advance after the last subpage'
+    subprocess.run(common+['--auto-keys','W,STOP','--frames','650',
+        '--dump-screen',str(cancel_screen)],check=True)
+    assert b'KIES BRON (0-3)' in cancel_screen.read_bytes(), \
+        'Shift-STOP did not cancel Wi-Fi setup and return to source selection'
+    auto_flash.write_bytes(b'P2WPURL1'+bytes((0xfe,1,0)))
+    subprocess.run(common+['--auto-wait-opening','--flash',str(auto_flash),
+        '--frames','3900','--dump-screen',str(auto_screen)],check=True)
+    auto_display=auto_screen.read_bytes()
+    assert b'Meer bevoegdheden' in auto_display and auto_display[35] == ord('V'), \
+        'one-minute auto-start did not open source 1 with auto-page enabled'
     subprocess.run(common+['--frames','1300','--dump-fetches',str(loop_fetches)],check=True)
     assert loop_fetches.read_bytes()[:3] == bytes((0,2,0)), \
         'automatic subpage rotation did not wrap from the last subpage to the first'
@@ -241,4 +267,4 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--frames','700','--dump-screen',str(legacy_p2000_screen)],check=True)
     legacy_p2000=legacy_p2000_screen.read_bytes()
     assert b'NOS Telet' in legacy_p2000 and b'Meer bevoegdheden' in legacy_p2000
-print('P2WP/2-5 compatibility + persistent custom endpoint + shortcuts: passed')
+print('P2WP/2-6 compatibility + persistent settings + navigation: passed')
