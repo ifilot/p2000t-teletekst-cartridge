@@ -152,6 +152,10 @@ static bool platform_payload_is_valid(const p2wp_frame_t *request) {
             if (request->payload[3] <= P2WP_TELETEKST_SOURCE_P2000T) {
                 return request->payload_length == 4u;
             }
+            if (request->payload[3] == P2WP_TELETEKST_SOURCE_ARCHIVE) {
+                return request->version >= 7u &&
+                    request->payload_length == 4u;
+            }
             if (request->payload[3] != P2WP_TELETEKST_SOURCE_CUSTOM ||
                 request->version < 4u || request->payload_length < 5u) {
                 return false;

@@ -31,7 +31,7 @@ pico_set_program_name(p2wp-pico "P2000T Teletekst Pico")
 pico_set_program_version(p2wp-pico "${PROJECT_VERSION}")
 pico_set_program_description(
     p2wp-pico
-    "P2WP/2-6 Wi-Fi and Teletekst firmware"
+    "P2WP/2-7 Wi-Fi and Teletekst firmware"
 )
 
 target_include_directories(p2wp-pico PRIVATE src)

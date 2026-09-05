@@ -15,6 +15,7 @@ sys.path.insert(0,str(ROOT/'server'))
 from server import page_response
 with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; intro_countdown_screen=temp/'intro-countdown-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_dialog_screen=temp/'custom-dialog-screen.bin'; custom_screen=temp/'custom-screen.bin'; restored_custom_screen=temp/'restored-custom-screen.bin'; emulated_flash=temp/'pico-flash.bin'; auto_flash=temp/'auto-flash.bin'; auto_screen=temp/'auto-screen.bin'; archive_screen=temp/'archive-screen.bin'; cancel_screen=temp/'cancel-screen.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'; keypad_pages=temp/'keypad-pages.txt'; arrow_pages=temp/'arrow-pages.txt'; auto_pages=temp/'auto-pages.txt'
+    cycle_screen=temp/'cycle-screen.bin'; archive_sources=temp/'archive-sources.bin'; legacy_archive_sources=temp/'legacy-archive-sources.bin'; auto_skip_pages=temp/'auto-skip-pages.txt'; timeout_screen=temp/'timeout-screen.bin'; legacy_timeout_screen=temp/'legacy-timeout-screen.bin'
     bundled_monitor=EMU/'assets/P2000ROM.bin'
     assert bundled_monitor.stat().st_size == 4096
     assert hashlib.sha256(bundled_monitor.read_bytes()).hexdigest() == \
@@ -84,10 +85,22 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
         '--headless','--auto']
+    subprocess.run(common+['--auto-source-cycles','4','--frames','198',
+        '--dump-screen',str(cycle_screen)],check=True)
+    cycle=cycle_screen.read_bytes()
+    assert b'A AUTOSTART NA 60S: EIGEN' in cycle[11*40:12*40]
+    assert b'EIGENEF' not in cycle and b'UITENEF' not in cycle, \
+        'shorter auto-start labels left characters from the previous value'
     subprocess.run(common+['--auto-source','3','--frames','650',
-        '--dump-screen',str(archive_screen)],check=True)
+        '--dump-screen',str(archive_screen),'--dump-sources',str(archive_sources)],check=True)
     assert b'Meer bevoegdheden' in archive_screen.read_bytes(), \
         'teletekstarchief.nl source did not use its compatible /json endpoint'
+    assert archive_sources.read_bytes()[0] == 3, \
+        'P2WP/7 archive selection did not use the verified built-in source'
+    subprocess.run(common+['--auto-source','3','--p2wp-version','6','--frames','650',
+        '--dump-sources',str(legacy_archive_sources)],check=True)
+    assert legacy_archive_sources.read_bytes()[0] == 2, \
+        'P2WP/6 archive compatibility did not use the custom-source fallback'
     subprocess.run(common+['--auto-keys','KP1,KP0,BACKSPACE,KP0,KP1',
         '--frames','850','--dump-pages',str(keypad_pages)],check=True)
     assert keypad_pages.read_text().splitlines()[:2] == ['100','101'], \
@@ -100,6 +113,24 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--dump-pages',str(auto_pages)],check=True)
     assert auto_pages.read_text().splitlines()[:3] == ['100','100','101'], \
         'automatic next-page mode did not advance after the last subpage'
+    subprocess.run(common+['--auto-key','V','--fail-page','101','--fail-error','7',
+        '--frames','1900','--dump-pages',str(auto_skip_pages)],check=True)
+    assert auto_skip_pages.read_text().splitlines()[:4] == ['100','100','101','102'], \
+        'automatic next-page mode did not skip invalid page content'
+    subprocess.run(common+['--auto-keys','1,0,1','--fail-page','101',
+        '--fail-error','12','--frames','450','--dump-screen',str(timeout_screen)],check=True)
+    timeout=timeout_screen.read_bytes()
+    assert b'FOUTCODE: 0C' in timeout and b'FOUT: SERVER REAGEERT NIET' in timeout, \
+        'specific P2WP/7 transport error was not explained on screen'
+    assert b'DETAIL: HTTP 000 LWIP 00 NET 00' in timeout
+    subprocess.run(common+['--p2wp-version','6','--auto-keys','1,0,1',
+        '--fail-page','101','--fail-error','12','--frames','450',
+        '--dump-screen',str(legacy_timeout_screen)],check=True)
+    legacy_timeout=legacy_timeout_screen.read_bytes()
+    assert b'FOUTCODE: 04' in legacy_timeout and \
+        b'FOUT: ONBEKENDE NETWERKFOUT' in legacy_timeout
+    assert b'DETAIL:' not in legacy_timeout, \
+        'P2WP/6 exposed P2WP/7-only error diagnostics'
     subprocess.run(common+['--auto-keys','W,STOP','--frames','650',
         '--dump-screen',str(cancel_screen)],check=True)
     assert b'KIES BRON (0-3)' in cancel_screen.read_bytes(), \
@@ -275,4 +306,4 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--frames','700','--dump-screen',str(legacy_p2000_screen)],check=True)
     legacy_p2000=legacy_p2000_screen.read_bytes()
     assert b'NOS Telet' in legacy_p2000 and b'Meer bevoegdheden' in legacy_p2000
-print('P2WP/2-6 compatibility + persistent settings + navigation: passed')
+print('P2WP/2-7 compatibility + robust errors + navigation: passed')

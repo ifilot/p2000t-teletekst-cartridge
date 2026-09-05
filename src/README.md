@@ -13,7 +13,7 @@ The cartridge release version is `v0.5.0`. `../VERSION`, the cartridge
 constants, and the Pico firmware constants are checked together during tests
 so both release artifacts always identify the same version.
 
-At runtime it negotiates P2WP/2 through P2WP/6 with `HELLO`, requests a wireless scan, and
+At runtime it negotiates P2WP/2 through P2WP/7 with `HELLO`, requests a wireless scan, and
 polls while the Pico W performs it asynchronously. Up to nine unique SSIDs are
 shown strongest first using one to four signal bars. `*` marks supported
 WPA/WPA2 networks and `!` marks security modes that this first client cannot
@@ -58,7 +58,7 @@ Initial `HELLO` negotiation and every later local-link transaction have a
 two-second overall timeout. A missing or unresponsive Pico W therefore shows a
 clear error instead of leaving the cartridge waiting indefinitely. Each
 transaction still makes up to three attempts within that deadline.
-The v0.5 cartridge advertises P2WP/2–6 and selects the newest revision shared
+The v0.5 cartridge advertises P2WP/2–7 and selects the newest revision shared
 with the Pico. P2WP/2 remains fully usable, but the cartridge displays a
 one-time compatibility warning recommending a Pico firmware update. A HELLO
 response with no common revision displays a dedicated protocol-incompatibility
@@ -75,8 +75,10 @@ The custom URL may contain a DNS name, IPv4 address, port, and base path. With
 P2WP/5 it is restored from Pico flash when the dialog opens and saved only if
 the accepted value changed. P2WP/4 keeps it for the cartridge session. Custom
 HTTPS accepts self-signed or private-CA certificates
-by disabling certificate and hostname verification; built-in endpoints remain
-strictly verified. See [`../docs/custom-server.md`](../docs/custom-server.md)
+by disabling certificate and hostname verification. P2WP/7 treats the archive
+as a dedicated built-in source with strict certificate and hostname checks;
+P2WP/4–6 uses the custom-source compatibility path for it. See
+[`../docs/custom-server.md`](../docs/custom-server.md)
 for the server-side contract and security warning.
 The cartridge then requests page 100. Enter any page number from 100 through
 899 as three digits using the number row or numeric keypad; the request starts
@@ -97,7 +99,10 @@ page: `START` or `I` jumps to page 100, `?` or `R` toggles concealed text, `Z` c
 normal/top-half/bottom-half zoom, and arrow left/`P` or arrow right/`N` selects
 the previous/next page advertised by the server. `V` toggles automatic
 next-page mode: every ten seconds it follows subpages first, then advances to
-the advertised next page (or page 100 when none exists). `W` returns to Wi-Fi scanning, `A` pauses or resumes
+the advertised next page (or page 100 when none exists). Invalid, oversized,
+missing, or HTTP-error pages are skipped numerically; network failures retry
+the same page. A failure on page 100 remains visible and stops auto-page mode.
+`W` returns to Wi-Fi scanning, `A` pauses or resumes
 automatic subpage cycling, and `S` selects a subpage. Enter either two digits,
 or one digit followed by Enter. Subpage `0`/`00` asks the API for its default
 first subpage. A manual subpage choice pauses cycling so it remains visible

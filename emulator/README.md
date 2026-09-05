@@ -49,7 +49,8 @@ It executes the production cartridge, completes negotiated P2WP HELLO, fictitiou
 scan/connect, source selection, live-code JSON decoding, four chunk transfers,
 and asserts that built-in and custom page content reached emulated video RAM.
 It also exercises keypad entry, Backspace, arrows, Shift-STOP cancellation,
-persisted auto-start, auto-page mode, the expanded help screen, and zoom mode.
+persisted auto-start, stale-label cleanup, archive compatibility, auto-page
+error recovery, detailed P2WP/7 errors, the expanded help screen, and zoom mode.
 
 For a deterministic custom-source boot from the repository root, run:
 
@@ -83,7 +84,7 @@ CYW43 radio, GPIO electrical timing, or Pico SDK drivers.
 
 Use `--p2wp-version 2` to emulate legacy firmware and exercise the cartridge's
 compatibility warning, or `--p2wp-version 1` to exercise the no-common-version
-error screen. Without this option the emulator negotiates the current P2WP/6.
+error screen. Without this option the emulator negotiates the current P2WP/7.
 The intermediate pre-release clock firmware can be reproduced with
 `--p2wp-version 2 --p2wp-status-length 9`.
 

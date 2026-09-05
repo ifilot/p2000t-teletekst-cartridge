@@ -206,7 +206,7 @@ static uint8_t teletekst_fetch_start(
     }
     previous_page = 0u;
     next_page = 0u;
-    fetch_error = fetch_page != NULL && fetch_page(
+    fetch_error = fetch_page != NULL ? fetch_page(
         fetch_context,
         request->payload[3],
         custom_url[0] != '\0' ? custom_url : NULL,
@@ -217,7 +217,7 @@ static uint8_t teletekst_fetch_start(
         &previous_page,
         &next_page,
         local_clock
-    ) == 0 ? 0u : 7u;
+    ) : P2WP_TELETEKST_ERROR_INVALID_DATA;
     fetch_state = fetch_error != 0u ? 4u : 3u;
     response->payload_length = 0u;
     return P2WP_FIRMWARE_COMMAND_OK;
@@ -230,7 +230,10 @@ static uint8_t teletekst_fetch_status(
 ) {
     (void)context;
     response->payload[0] = fetch_state;
-    response->payload[1] = fetch_error;
+    response->payload[1] = request->version < 7u &&
+        fetch_error >= P2WP_TELETEKST_ERROR_DNS
+            ? P2WP_TELETEKST_ERROR_NETWORK
+            : fetch_error;
     response->payload[4] = next_subpage;
     if (request->version >= 3u || status_length_override >= 9u) {
         memcpy(response->payload + 5u, local_clock, 3u);
@@ -241,10 +244,18 @@ static uint8_t teletekst_fetch_status(
             response->payload[14] = (uint8_t)(previous_page >> 8u);
             response->payload[15] = (uint8_t)next_page;
             response->payload[16] = (uint8_t)(next_page >> 8u);
+            if (request->version >= 7u) {
+                response->payload[17] = 0u;
+                response->payload[18] = 0u;
+                response->payload[19] = 0u;
+                response->payload[20] = 0u;
+            }
         }
         response->payload_length = status_length_override != 0u
             ? status_length_override
-            : (request->version >= 4u ? 17u : 13u);
+            : (request->version >= 7u
+                ? 21u
+                : (request->version >= 4u ? 17u : 13u));
     } else {
         response->payload_length = status_length_override != 0u
             ? status_length_override

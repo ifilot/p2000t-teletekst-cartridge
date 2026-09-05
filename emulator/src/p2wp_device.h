@@ -4,9 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef int (*p2wp_fetch_fn)(void *, uint8_t, const char *, uint16_t, uint8_t,
-                            uint8_t screen[960], uint8_t *, uint16_t *,
-                            uint16_t *, uint8_t[7]);
+typedef uint8_t (*p2wp_fetch_fn)(void *, uint8_t, const char *, uint16_t,
+                                uint8_t, uint8_t screen[960], uint8_t *,
+                                uint16_t *, uint16_t *, uint8_t[7]);
 
 void p2wp_device_init(p2wp_fetch_fn fetch, void *context);
 void p2wp_device_set_protocol_range(uint8_t minimum, uint8_t maximum);

@@ -1,11 +1,11 @@
-# P2000T to Pico W Protocol (P2WP/2–6)
+# P2000T to Pico W Protocol (P2WP/2–7)
 
 P2WP is a reliable, version-negotiated request/response protocol carried by the three
 I/O ports on the P2000T Pico W interface. Multi-byte fields are little-endian.
 
 ## Status and conformance
 
-This document is the normative specification for protocol versions 2 through 5. The key
+This document is the normative specification for protocol versions 2 through 7. The key
 words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and
 **MAY** describe conformance requirements.
 
@@ -113,7 +113,7 @@ The unescaped body is:
 
 | Offset | Size | Field |
 | ---: | ---: | --- |
-| 0 | 1 | Negotiated protocol version (`0x02` or `0x03`) |
+| 0 | 1 | Negotiated protocol version (`0x02` through `0x07`) |
 | 1 | 1 | Flags |
 | 2 | 1 | Message type |
 | 3 | 1 | Sequence number |
@@ -275,7 +275,7 @@ subsequent frame header. A peripheral selects the newest revision in the
 intersection of its supported range and the host's advertised range. If that
 intersection is empty, it returns `UNSUPPORTED_VERSION` in a bootstrap-version
 error response. Later peripherals MUST retain version 2 operation, and a
-version 6 peripheral MUST retain version 5 operation. This allows both a new
+version 7 peripheral MUST retain earlier operation. This allows both a new
 cartridge with old Pico firmware and an old cartridge with new Pico firmware
 to remain usable.
 
@@ -415,6 +415,9 @@ Teletekst retrieval is asynchronous. Source `0` uses the public JSON endpoint
 at `teletekst-data.nos.nl` over verified HTTPS; source `1` uses the compatible
 P2000T Teletekst endpoint at `teletekst.philips-p2000t.nl` over verified HTTPS.
 Source `2`, introduced in P2WP/4, uses a custom base URL supplied by the host.
+Source `3`, introduced in P2WP/7, uses `teletekstarchief.nl` over verified
+HTTPS. Its trust store includes both ISRG Root X1 and X2 because the service can
+present either its RSA or ECDSA Let's Encrypt chain.
 
 For a built-in source, a `TELETEKST_FETCH_START` request contains four bytes:
 
@@ -422,7 +425,7 @@ For a built-in source, a `TELETEKST_FETCH_START` request contains four bytes:
 | ---: | --- |
 | 0-1 | Page number, little-endian (`100`-`899`) |
 | 2 | Subpage (`0` selects the API's default first subpage, otherwise `1`-`99`) |
-| 3 | Source: `0` NOS Teletekst, `1` P2000T Teletekst |
+| 3 | Source: `0` NOS Teletekst, `1` P2000T Teletekst, or (P2WP/7) `3` TeletekstArchief.nl |
 
 A P2WP/4 custom-source request has this variable-length payload:
 
@@ -472,8 +475,9 @@ response. The auto-start source values are the cartridge menu identifiers:
 | `0xff` | Auto-start disabled |
 
 All other values are invalid. These menu identifiers are deliberately separate
-from the `TELETEKST_FETCH_START` source field: the archive entry is implemented
-by the cartridge as custom source `2` with its fixed base URL. The reference
+from the `TELETEKST_FETCH_START` source field. In a P2WP/7 session the archive
+entry uses dedicated source `3`; with P2WP/4–6 firmware the cartridge retains
+compatibility by sending its fixed base URL as custom source `2`. The reference
 Pico stores the setting in the versioned custom-URL record in the penultimate
 flash sector, preserving the URL when only the setting changes and avoiding a
 flash write when the complete record is unchanged. A P2WP/5 record is accepted
@@ -481,9 +485,11 @@ and migrated when it is next updated.
 
 The reference firmware deliberately disables certificate-chain and hostname
 verification for source `2` HTTPS requests, allowing self-signed and private-CA
-certificates. This exception MUST NOT weaken verification of sources `0` and
-`1`. See [Hosting a custom Teletekst server](custom-server.md) for the HTTP/JSON
-contract and its security implications.
+certificates. This exception MUST NOT weaken verification of sources `0`, `1`,
+or `3`. Consequently, the P2WP/4–6 archive fallback has custom-source security
+semantics, while its P2WP/7 transport is verified. See
+[Hosting a custom Teletekst server](custom-server.md) for the HTTP/JSON contract
+and its security implications.
 
 In P2WP/2, `TELETEKST_FETCH_STATUS` returns the original five-byte payload:
 
@@ -518,6 +524,42 @@ P2WP/4 extends the same payload to seventeen bytes:
 | 0-12 | P2WP/3 fetch status and clock fields above |
 | 13-14 | Previous page, little-endian, or zero when none is advertised |
 | 15-16 | Next page, little-endian, or zero when none is advertised |
+
+P2WP/7 extends the payload to twenty-one bytes and distinguishes transport
+failures that earlier sessions report as generic network error `0x04`:
+
+| Offset | Field |
+| ---: | --- |
+| 0-16 | P2WP/4 fetch status, clock, and navigation fields above |
+| 17 | Raw lwIP `httpc_result_t` completion value, or zero when unavailable |
+| 18 | Raw signed lwIP `err_t`, encoded as one byte, or zero when unavailable |
+| 19-20 | HTTP response status, little-endian, or zero when unavailable |
+
+The stable error field at offset 1 is:
+
+| Code | Name | Meaning |
+| ---: | --- | --- |
+| `0x00` | `NONE` | No failure |
+| `0x01` | `NOT_CONNECTED` | Wi-Fi has no usable connection |
+| `0x02` | `TLS_CONFIG` | TLS context allocation or setup failed |
+| `0x03` | `REQUEST_START` | The HTTP request could not be queued |
+| `0x04` | `NETWORK` | Unspecified network failure (and the compatibility value in P2WP/2–6) |
+| `0x05` | `HTTP_STATUS` | The server returned an unusable status or response |
+| `0x06` | `TOO_LARGE` | The response exceeded the receive buffer |
+| `0x07` | `INVALID_DATA` | The response body was not valid compatible JSON |
+| `0x08` | `PAGE_NOT_FOUND` | The server returned HTTP 404 |
+| `0x09` | `DNS` | Hostname resolution failed |
+| `0x0a` | `CONNECT` | TCP or TLS connection establishment failed |
+| `0x0b` | `CONNECTION_CLOSED` | The peer closed the connection prematurely |
+| `0x0c` | `TIMEOUT` | The server did not respond before the deadline |
+| `0x0d` | `OUT_OF_MEMORY` | The network stack could not allocate memory |
+| `0x0e` | `CONTENT_LENGTH` | The received body length did not match the response framing |
+| `0x0f` | `LOCAL_ABORT` | The local HTTP client aborted the request |
+
+Codes `0x09` through `0x0f` are emitted only in P2WP/7 sessions. A peripheral
+MUST map them to `NETWORK` in P2WP/2–6 sessions. Raw diagnostic fields expose
+implementation values for troubleshooting and are not stable classifications;
+hosts MUST base behavior on the stable error field.
 
 The page values originate from the optional JSON strings `prevPage` and
 `nextPage`. A present, non-empty value must be exactly three digits in the

@@ -24,7 +24,7 @@ Teletekst project:
 
 - `src/` is the 16 KiB slot-1 cartridge client.
 - `firmware/` is the Raspberry Pi Pico W firmware for the slot-2 interface.
-- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2–6 link protocol
+- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2–7 link protocol
   between them.
 - [`docs/custom-server.md`](docs/custom-server.md) gives the small HTTP/JSON
   contract needed to host your own pages.
@@ -149,9 +149,11 @@ server](docs/custom-server.md) for the required routes and response fields.
 > [!WARNING]
 > Certificate and hostname verification is disabled for a custom HTTPS server,
 > so self-signed and private-CA certificates work. Use only a server and network
-> you trust. The two built-in services continue to use verified HTTPS.
+> you trust. The built-in services continue to use verified HTTPS. With legacy
+> P2WP/4–6 firmware, the archive compatibility fallback uses the custom-source
+> transport and therefore has the same limitation.
 
-[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–6 interface
+[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–7 interface
 specification. The Sphinx documentation adds implementation guides for
 [P2000T BASIC](docs/basic.rst) and
 [Z80 assembly](docs/assembly.rst).

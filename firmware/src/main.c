@@ -8,6 +8,7 @@
 #include "github_ca.h"
 #include "nos_teletekst_ca.h"
 #include "p2000t_teletekst_ca.h"
+#include "archive_teletekst_ca.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -54,8 +55,10 @@ enum {
 #define WIFI_MAX_PASSWORD 63u
 #define TELETEKST_NOS_HOST "teletekst-data.nos.nl"
 #define TELETEKST_P2000T_HOST "teletekst.philips-p2000t.nl"
+#define TELETEKST_ARCHIVE_HOST "teletekstarchief.nl"
 #define TELETEKST_NOS_PORT 443u
 #define TELETEKST_P2000T_PORT 443u
+#define TELETEKST_ARCHIVE_PORT 443u
 #define TELETEKST_ROWS_PER_CHUNK 6u
 #define TELETEKST_CHUNK_SIZE \
     (TELETEKST_COLUMNS * TELETEKST_ROWS_PER_CHUNK)
@@ -109,15 +112,23 @@ enum teletekst_fetch_state {
 };
 
 enum teletekst_error {
-    TELETEKST_ERROR_NONE = 0,
-    TELETEKST_ERROR_NOT_CONNECTED = 1,
-    TELETEKST_ERROR_TLS_CONFIG = 2,
-    TELETEKST_ERROR_REQUEST_START = 3,
-    TELETEKST_ERROR_NETWORK = 4,
-    TELETEKST_ERROR_HTTP_STATUS = 5,
-    TELETEKST_ERROR_TOO_LARGE = 6,
-    TELETEKST_ERROR_INVALID_DATA = 7,
-    TELETEKST_ERROR_PAGE_NOT_FOUND = 8,
+    TELETEKST_ERROR_NONE = P2WP_TELETEKST_ERROR_NONE,
+    TELETEKST_ERROR_NOT_CONNECTED = P2WP_TELETEKST_ERROR_NOT_CONNECTED,
+    TELETEKST_ERROR_TLS_CONFIG = P2WP_TELETEKST_ERROR_TLS_CONFIG,
+    TELETEKST_ERROR_REQUEST_START = P2WP_TELETEKST_ERROR_REQUEST_START,
+    TELETEKST_ERROR_NETWORK = P2WP_TELETEKST_ERROR_NETWORK,
+    TELETEKST_ERROR_HTTP_STATUS = P2WP_TELETEKST_ERROR_HTTP_STATUS,
+    TELETEKST_ERROR_TOO_LARGE = P2WP_TELETEKST_ERROR_TOO_LARGE,
+    TELETEKST_ERROR_INVALID_DATA = P2WP_TELETEKST_ERROR_INVALID_DATA,
+    TELETEKST_ERROR_PAGE_NOT_FOUND = P2WP_TELETEKST_ERROR_PAGE_NOT_FOUND,
+    TELETEKST_ERROR_DNS = P2WP_TELETEKST_ERROR_DNS,
+    TELETEKST_ERROR_CONNECT = P2WP_TELETEKST_ERROR_CONNECT,
+    TELETEKST_ERROR_CONNECTION_CLOSED =
+        P2WP_TELETEKST_ERROR_CONNECTION_CLOSED,
+    TELETEKST_ERROR_TIMEOUT = P2WP_TELETEKST_ERROR_TIMEOUT,
+    TELETEKST_ERROR_OUT_OF_MEMORY = P2WP_TELETEKST_ERROR_OUT_OF_MEMORY,
+    TELETEKST_ERROR_CONTENT_LENGTH = P2WP_TELETEKST_ERROR_CONTENT_LENGTH,
+    TELETEKST_ERROR_LOCAL_ABORT = P2WP_TELETEKST_ERROR_LOCAL_ABORT,
 };
 
 enum version_check_error {
@@ -193,6 +204,9 @@ static bool wifi_connection_active;
 static int wifi_pending_failure_status;
 static uint8_t teletekst_fetch_state;
 static uint8_t teletekst_error;
+static uint8_t teletekst_http_result;
+static int8_t teletekst_lwip_error;
+static uint16_t teletekst_http_status;
 static bool teletekst_fetch_requested;
 static bool teletekst_http_overflow;
 static bool teletekst_tls_cleanup_pending;
@@ -441,6 +455,54 @@ static void teletekst_set_failed(uint8_t error) {
     mutex_exit(&wifi_mutex);
 }
 
+/** Convert lwIP HTTP completion states into stable P2WP/7 error codes. */
+static uint8_t teletekst_http_error(httpc_result_t result) {
+    switch (result) {
+        case HTTPC_RESULT_ERR_HOSTNAME:
+            return TELETEKST_ERROR_DNS;
+        case HTTPC_RESULT_ERR_CONNECT:
+            return TELETEKST_ERROR_CONNECT;
+        case HTTPC_RESULT_ERR_CLOSED:
+            return TELETEKST_ERROR_CONNECTION_CLOSED;
+        case HTTPC_RESULT_ERR_TIMEOUT:
+            return TELETEKST_ERROR_TIMEOUT;
+        case HTTPC_RESULT_ERR_MEM:
+            return TELETEKST_ERROR_OUT_OF_MEMORY;
+        case HTTPC_RESULT_ERR_CONTENT_LEN:
+            return TELETEKST_ERROR_CONTENT_LENGTH;
+        case HTTPC_RESULT_LOCAL_ABORT:
+            return TELETEKST_ERROR_LOCAL_ABORT;
+        case HTTPC_RESULT_ERR_SVR_RESP:
+            return TELETEKST_ERROR_HTTP_STATUS;
+        case HTTPC_RESULT_ERR_UNKNOWN:
+        case HTTPC_RESULT_OK:
+        default:
+            return TELETEKST_ERROR_NETWORK;
+    }
+}
+
+/** Classify failures returned before lwIP can start an HTTP transaction. */
+static uint8_t teletekst_request_start_error(err_t error) {
+    switch (error) {
+        case ERR_MEM:
+        case ERR_BUF:
+            return TELETEKST_ERROR_OUT_OF_MEMORY;
+        case ERR_TIMEOUT:
+            return TELETEKST_ERROR_TIMEOUT;
+        case ERR_ABRT:
+            return TELETEKST_ERROR_LOCAL_ABORT;
+        case ERR_RST:
+        case ERR_CLSD:
+            return TELETEKST_ERROR_CONNECTION_CLOSED;
+        case ERR_RTE:
+        case ERR_CONN:
+        case ERR_IF:
+            return TELETEKST_ERROR_CONNECT;
+        default:
+            return TELETEKST_ERROR_REQUEST_START;
+    }
+}
+
 /**
  * @brief Allocate an lwIP TLS connection and configure hostname validation.
  *
@@ -560,11 +622,18 @@ static void teletekst_request_done(
 ) {
     (void)argument;
     (void)received_length;
-    (void)error;
+
+    mutex_enter_blocking(&wifi_mutex);
+    teletekst_http_result = (uint8_t)result;
+    teletekst_lwip_error = (int8_t)error;
+    teletekst_http_status = server_status <= UINT16_MAX
+        ? (uint16_t)server_status
+        : 0u;
+    mutex_exit(&wifi_mutex);
 
     teletekst_tls_cleanup_pending = true;
     if (result != HTTPC_RESULT_OK) {
-        teletekst_set_failed(TELETEKST_ERROR_NETWORK);
+        teletekst_set_failed(teletekst_http_error(result));
         return;
     }
     if (server_status == 404u) {
@@ -665,6 +734,11 @@ static void teletekst_start_requested_fetch(void) {
         port = TELETEKST_P2000T_PORT;
         root_ca = p2000t_teletekst_root_ca;
         root_ca_size = sizeof(p2000t_teletekst_root_ca);
+    } else if (source == P2WP_TELETEKST_SOURCE_ARCHIVE) {
+        host = TELETEKST_ARCHIVE_HOST;
+        port = TELETEKST_ARCHIVE_PORT;
+        root_ca = archive_teletekst_root_ca;
+        root_ca_size = sizeof(archive_teletekst_root_ca);
     } else if (custom_endpoint_parse(
                    teletekst_custom_url,
                    teletekst_custom_url_length,
@@ -732,6 +806,9 @@ static void teletekst_start_requested_fetch(void) {
     mutex_enter_blocking(&wifi_mutex);
     teletekst_http_length = 0u;
     teletekst_http_overflow = false;
+    teletekst_http_result = 0u;
+    teletekst_lwip_error = 0;
+    teletekst_http_status = 0u;
     mutex_exit(&wifi_mutex);
     const err_t result = httpc_get_file_dns(
         host,
@@ -743,11 +820,14 @@ static void teletekst_start_requested_fetch(void) {
         NULL
     );
     if (result != ERR_OK) {
+        mutex_enter_blocking(&wifi_mutex);
+        teletekst_lwip_error = (int8_t)result;
+        mutex_exit(&wifi_mutex);
         if (teletekst_tls_config != NULL) {
             altcp_tls_free_config(teletekst_tls_config);
             teletekst_tls_config = NULL;
         }
-        teletekst_set_failed(TELETEKST_ERROR_REQUEST_START);
+        teletekst_set_failed(teletekst_request_start_error(result));
     }
 }
 
@@ -1860,6 +1940,9 @@ static uint8_t pico_teletekst_fetch_start(
     teletekst_http_length = 0u;
     teletekst_http_overflow = false;
     teletekst_error = TELETEKST_ERROR_NONE;
+    teletekst_http_result = 0u;
+    teletekst_lwip_error = 0;
+    teletekst_http_status = 0u;
     teletekst_fetch_state = TELETEKST_FETCH_CONNECTING;
     teletekst_fetch_requested = true;
     mutex_exit(&wifi_mutex);
@@ -1883,8 +1966,16 @@ static uint8_t pico_teletekst_fetch_status(
     response->payload[2] = (uint8_t)received;
     response->payload[3] = (uint8_t)(received >> 8u);
     response->payload[4] = teletekst_next_subpage;
+    uint8_t fetch_error = teletekst_error;
+    if (frame->version < 7u && fetch_error >= TELETEKST_ERROR_DNS) {
+        fetch_error = TELETEKST_ERROR_NETWORK;
+    }
+    response->payload[1] = fetch_error;
     const uint16_t previous_page = teletekst_previous_page;
     const uint16_t next_page = teletekst_next_page;
+    const uint8_t http_result = teletekst_http_result;
+    const int8_t lwip_error = teletekst_lwip_error;
+    const uint16_t http_status = teletekst_http_status;
     mutex_exit(&wifi_mutex);
     if (frame->version >= 3u) {
         uint8_t local_clock[7];
@@ -1900,8 +1991,16 @@ static uint8_t pico_teletekst_fetch_status(
             response->payload[14] = (uint8_t)(previous_page >> 8u);
             response->payload[15] = (uint8_t)next_page;
             response->payload[16] = (uint8_t)(next_page >> 8u);
+            if (frame->version >= 7u) {
+                response->payload[17] = http_result;
+                response->payload[18] = (uint8_t)lwip_error;
+                response->payload[19] = (uint8_t)http_status;
+                response->payload[20] = (uint8_t)(http_status >> 8u);
+            }
         }
-        response->payload_length = frame->version >= 4u ? 17u : 13u;
+        response->payload_length = frame->version >= 7u
+            ? 21u
+            : (frame->version >= 4u ? 17u : 13u);
     } else {
         response->payload_length = 5u;
     }

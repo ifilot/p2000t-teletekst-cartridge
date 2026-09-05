@@ -674,67 +674,106 @@ static void test_firmware_core(void) {
         .version = P2WP_BOOTSTRAP_VERSION,
         .type = P2WP_TYPE_HELLO,
         .payload_length = 8u,
-        .payload = {'P', '2', 'W', 'P', 2u, 6u, 240u, 0u},
+        .payload = {'P', '2', 'W', 'P', 2u, 7u, 240u, 0u},
     };
     p2wp_firmware_core_handle(&core, &request, &response);
-    assert(response.payload[4] == 6u);
+    assert(response.payload[4] == 7u);
 
     request = (p2wp_frame_t){
-        .version = 6u,
-        .type = P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD,
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_FETCH_START,
         .sequence = 1u,
+        .payload_length = 4u,
+        .payload = {100u, 0u, 0u, P2WP_TELETEKST_SOURCE_ARCHIVE},
     };
     p2wp_firmware_core_handle(&core, &request, &response);
     assert(response.flags == P2WP_FLAG_RESPONSE);
     assert(platform.command_calls == 1u);
 
     request = (p2wp_frame_t){
-        .version = 6u,
-        .type = P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE,
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD,
         .sequence = 2u,
-        .payload_length = 18u,
-        .payload = {17u, 'h', 't', 't', 'p', ':', '/', '/', 't', 'e', 'r',
-                    'r', 'a', ':', '8', '0', '8', '0'},
     };
     p2wp_firmware_core_handle(&core, &request, &response);
     assert(response.flags == P2WP_FLAG_RESPONSE);
     assert(platform.command_calls == 2u);
 
     request = (p2wp_frame_t){
-        .version = 6u,
-        .type = P2WP_TYPE_TELETEKST_SETTINGS_LOAD,
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE,
         .sequence = 3u,
+        .payload_length = 18u,
+        .payload = {17u, 'h', 't', 't', 'p', ':', '/', '/', 't', 'e', 'r',
+                    'r', 'a', ':', '8', '0', '8', '0'},
     };
     p2wp_firmware_core_handle(&core, &request, &response);
     assert(response.flags == P2WP_FLAG_RESPONSE);
     assert(platform.command_calls == 3u);
 
     request = (p2wp_frame_t){
-        .version = 6u,
-        .type = P2WP_TYPE_TELETEKST_SETTINGS_SAVE,
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_SETTINGS_LOAD,
         .sequence = 4u,
-        .payload_length = 1u,
-        .payload = {P2WP_TELETEKST_MENU_SOURCE_ARCHIVE},
     };
     p2wp_firmware_core_handle(&core, &request, &response);
     assert(response.flags == P2WP_FLAG_RESPONSE);
     assert(platform.command_calls == 4u);
 
-    request.sequence = 5u;
+    request = (p2wp_frame_t){
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_SETTINGS_SAVE,
+        .sequence = 5u,
+        .payload_length = 1u,
+        .payload = {P2WP_TELETEKST_MENU_SOURCE_ARCHIVE},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 5u);
+
+    request.sequence = 6u;
     request.payload[0] = 4u;
     p2wp_firmware_core_handle(&core, &request, &response);
     assert((response.flags & P2WP_FLAG_ERROR) != 0u);
     assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
-    assert(platform.command_calls == 4u);
+    assert(platform.command_calls == 5u);
 
     request.type = P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE;
-    request.version = 6u;
-    request.sequence = 6u;
+    request.version = 7u;
+    request.sequence = 7u;
     request.payload_length = 17u;
     p2wp_firmware_core_handle(&core, &request, &response);
     assert((response.flags & P2WP_FLAG_ERROR) != 0u);
     assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
-    assert(platform.command_calls == 4u);
+    assert(platform.command_calls == 5u);
+
+    /* Source 3 is a P2WP/7 feature; older sessions must reject it. */
+    memset(&platform, 0, sizeof(platform));
+    p2wp_firmware_core_init(
+        &core,
+        &fake_operations,
+        &platform,
+        P2WP_HARDWARE_PICO_2_W
+    );
+    request = (p2wp_frame_t){
+        .version = P2WP_BOOTSTRAP_VERSION,
+        .type = P2WP_TYPE_HELLO,
+        .payload_length = 8u,
+        .payload = {'P', '2', 'W', 'P', 2u, 6u, 240u, 0u},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.payload[4] == 6u);
+    request = (p2wp_frame_t){
+        .version = 6u,
+        .type = P2WP_TYPE_TELETEKST_FETCH_START,
+        .sequence = 1u,
+        .payload_length = 4u,
+        .payload = {100u, 0u, 0u, P2WP_TELETEKST_SOURCE_ARCHIVE},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+    assert(platform.command_calls == 0u);
 }
 
 /**

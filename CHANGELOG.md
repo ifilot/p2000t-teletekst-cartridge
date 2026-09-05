@@ -10,6 +10,10 @@ and release diffs.
 
 ### Added
 
+- Added P2WP/7 archive transport with hostname- and certificate-verified HTTPS,
+  while retaining a P2WP/4–6 custom-source compatibility fallback.
+- Added stable DNS, connection, closed-connection, timeout, memory,
+  content-length, and local-abort fetch errors with raw HTTP/lwIP diagnostics.
 - Added TeletekstArchief.nl as a predefined source.
 - Added numeric-keypad page entry, Backspace correction, and left/right arrow
   aliases for previous/next page navigation.
@@ -37,6 +41,16 @@ and release diffs.
 ### Changed
 
 - Moved pause/resume from `P` to `A` so `P` can mean previous page.
+
+### Fixed
+
+- Clear the complete auto-start setting row before drawing a shorter value, so
+  cycling `ARCHIEF` to `EIGEN` or `UIT` no longer leaves stale characters.
+- Keep unattended auto-page mode running: content failures skip to the next
+  numeric page and transport failures retry the same page. Page 100 remains a
+  visible terminal health check.
+- Preserve older P2WP behavior by mapping new transport errors back to generic
+  network error `0x04` in P2WP/2–6 sessions.
 
 ## [0.5.0] - 2026-08-30
 

@@ -1,4 +1,4 @@
-; P2WP/2-6 Wi-Fi and Teletekst client for a Philips P2000T cartridge.
+; P2WP/2-7 Wi-Fi and Teletekst client for a Philips P2000T cartridge.
 ;
 ; The monitor maps this 16 KiB ROM at 1000h and enters it at 1010h. The
 ; sign_cartridge.py fills the checksum length and value after assembly.  The
@@ -28,7 +28,7 @@ STATUS_TX_READY:       equ 002h
 
 P2WP_BOOTSTRAP_VERSION: equ 002h
 P2WP_MIN_VERSION:      equ 002h
-P2WP_MAX_VERSION:      equ 006h
+P2WP_MAX_VERSION:      equ 007h
 CARTRIDGE_VERSION_MAJOR: equ 0
 CARTRIDGE_VERSION_MINOR: equ 5
 CARTRIDGE_VERSION_PATCH: equ 0
@@ -97,7 +97,21 @@ TELETEKST_CONNECTING:  equ 1
 TELETEKST_RECEIVING:   equ 2
 TELETEKST_COMPLETE:    equ 3
 TELETEKST_FAILED:      equ 4
+TELETEKST_ERROR_NOT_CONNECTED: equ 1
+TELETEKST_ERROR_TLS_CONFIG: equ 2
+TELETEKST_ERROR_REQUEST_START: equ 3
+TELETEKST_ERROR_NETWORK: equ 4
+TELETEKST_ERROR_HTTP_STATUS: equ 5
+TELETEKST_ERROR_TOO_LARGE: equ 6
+TELETEKST_ERROR_INVALID_DATA: equ 7
 TELETEKST_ERROR_PAGE_NOT_FOUND: equ 8
+TELETEKST_ERROR_DNS: equ 9
+TELETEKST_ERROR_CONNECT: equ 10
+TELETEKST_ERROR_CONNECTION_CLOSED: equ 11
+TELETEKST_ERROR_TIMEOUT: equ 12
+TELETEKST_ERROR_OUT_OF_MEMORY: equ 13
+TELETEKST_ERROR_CONTENT_LENGTH: equ 14
+TELETEKST_ERROR_LOCAL_ABORT: equ 15
 TELETEKST_CHUNK_COUNT: equ 4
 TELETEKST_CHUNK_SIZE:  equ 240
 TELETEKST_ROTATE_TICKS: equ 500
@@ -108,6 +122,7 @@ LINK_TIMEOUT_TICKS:    equ 100 ; 100 monitor ticks at 20 ms = 2 seconds
 TELETEKST_SOURCE_NOS:   equ 0
 TELETEKST_SOURCE_P2000T: equ 1
 TELETEKST_SOURCE_CUSTOM: equ 2
+TELETEKST_SOURCE_ARCHIVE: equ 3
 TELETEKST_MENU_SOURCE_CUSTOM: equ 0
 TELETEKST_MENU_SOURCE_NOS: equ 1
 TELETEKST_MENU_SOURCE_P2000T: equ 2
@@ -135,6 +150,7 @@ start:
         ld (teletekst_page_valid),a
         ld (opening_timed_out),a
         ld (teletekst_auto_page_enabled),a
+        ld (teletekst_auto_retry_pending),a
         ld (wifi_cancel_enabled),a
         dec a
         ld (teletekst_auto_start_source),a
@@ -1525,7 +1541,7 @@ teletekst_choose_source_selected:
 teletekst_choose_source_custom:
         ld a,(p2wp_session_version)
         cp 4
-        jr c,teletekst_custom_requires_v4
+        jp c,teletekst_custom_requires_v4
         call teletekst_enter_custom_url
         jp c,teletekst_choose_source
         ld a,TELETEKST_SOURCE_CUSTOM
@@ -1549,6 +1565,11 @@ teletekst_select_menu_source:
         jr teletekst_select_source_store
 teletekst_select_source_archive:
         ld a,(p2wp_session_version)
+        cp 7
+        jr c,teletekst_select_source_archive_legacy
+        ld a,TELETEKST_SOURCE_ARCHIVE
+        jr teletekst_select_source_store
+teletekst_select_source_archive_legacy:
         cp 4
         jr c,teletekst_select_source_failed
         ld hl,archive_url_text
@@ -1844,6 +1865,10 @@ teletekst_show_auto_start:
         ld hl,source_auto_start_archive_text
 teletekst_show_auto_start_write:
         ld de,VIDEO_RAM+880
+        push hl
+        call clear_line
+        pop hl
+        ld de,VIDEO_RAM+880
         jp write_string
 
 ; Display the previously entered value and preserve it while sources change.
@@ -1903,6 +1928,7 @@ teletekst_custom_video_add:
 teletekst_change_source:
         xor a
         ld (teletekst_rotation_enabled),a
+        ld (teletekst_auto_retry_pending),a
         ld (teletekst_input_count),a
         ld (teletekst_subpage),a
         ld (teletekst_cycle_started),a
@@ -1929,6 +1955,7 @@ wifi_cancel_to_source:
         xor a
         ld (wifi_cancel_enabled),a
         ld (teletekst_auto_page_enabled),a
+        ld (teletekst_auto_retry_pending),a
         ld (teletekst_rotation_enabled),a
         ld (teletekst_rotation_paused),a
         ld (teletekst_input_count),a
@@ -2100,6 +2127,8 @@ teletekst_toggle_auto_page:
         call teletekst_draw_auto_page_indicator
         jp teletekst_main_loop
 teletekst_auto_page_disabled:
+        xor a
+        ld (teletekst_auto_retry_pending),a
         call teletekst_restore_auto_page_indicator
         call teletekst_can_rotate
         jp z,teletekst_disable_rotation_and_loop
@@ -2406,6 +2435,9 @@ teletekst_check_rotation:
         ld (teletekst_subpage),a
         call teletekst_fetch_page
         jp nc,teletekst_main_loop
+        ld a,(teletekst_auto_page_enabled)
+        or a
+        jp nz,teletekst_auto_page_handle_error
         ; Keep the last complete page visible after a transient rotation
         ; failure. Typing another number remains available immediately.
         xor a
@@ -2415,7 +2447,15 @@ teletekst_check_rotation:
 teletekst_check_auto_page:
         ld a,(teletekst_auto_page_enabled)
         or a
-        jr z,teletekst_check_rotation_wrap
+        jp z,teletekst_check_rotation_wrap
+        ld a,(teletekst_auto_retry_pending)
+        or a
+        jr z,teletekst_auto_page_use_metadata
+        xor a
+        ld (teletekst_auto_retry_pending),a
+        ld hl,(teletekst_page)
+        jr teletekst_auto_page_navigate
+teletekst_auto_page_use_metadata:
         ld hl,(teletekst_next_page)
         ld a,h
         or l
@@ -2424,7 +2464,57 @@ teletekst_check_auto_page:
 teletekst_auto_page_navigate:
         xor a
         ld (teletekst_cycle_started),a
-        jp teletekst_navigate_to_hl
+        ld (teletekst_subpage),a
+        ld (teletekst_input_count),a
+        ld (teletekst_page),hl
+        call teletekst_fetch_page
+        jp nc,teletekst_main_loop
+
+teletekst_auto_page_handle_error:
+        ; Keep unattended mode alive. Content failures skip to the following
+        ; numeric page; transport failures retry the same page after a delay.
+        ; Page 100 remains the health sentinel and always shows a real error.
+        ld hl,(teletekst_page)
+        ld de,100
+        or a
+        sbc hl,de
+        jr z,teletekst_auto_page_terminal_error
+        ld a,(teletekst_error_code)
+        cp TELETEKST_ERROR_HTTP_STATUS
+        jr z,teletekst_auto_page_skip
+        cp TELETEKST_ERROR_TOO_LARGE
+        jr z,teletekst_auto_page_skip
+        cp TELETEKST_ERROR_INVALID_DATA
+        jr z,teletekst_auto_page_skip
+        cp TELETEKST_ERROR_PAGE_NOT_FOUND
+        jr z,teletekst_auto_page_skip
+        jr teletekst_auto_page_retry
+teletekst_auto_page_skip:
+        ld hl,(teletekst_page)
+        inc hl
+        push hl
+        ld de,900
+        or a
+        sbc hl,de
+        pop hl
+        jr c,teletekst_auto_page_store_retry
+        ld hl,100
+        jr teletekst_auto_page_store_retry
+teletekst_auto_page_retry:
+        ld hl,(teletekst_page)
+teletekst_auto_page_store_retry:
+        ld (teletekst_page),hl
+        ld a,1
+        ld (teletekst_auto_retry_pending),a
+        ld (teletekst_page_valid),a
+        call teletekst_schedule_rotation
+        jp teletekst_main_loop
+teletekst_auto_page_terminal_error:
+        xor a
+        ld (teletekst_auto_page_enabled),a
+        ld (teletekst_auto_retry_pending),a
+        call show_teletekst_error
+        jp teletekst_main_loop
 teletekst_check_rotation_wrap:
         xor a
         ld (teletekst_subpage),a
@@ -2466,6 +2556,11 @@ teletekst_ones:
 ; chunks of six 40-byte rows. Carry reports a fetch/protocol error.
 teletekst_fetch_page:
         call teletekst_indicator_begin
+        xor a
+        ld (teletekst_http_result),a
+        ld (teletekst_lwip_error),a
+        ld (teletekst_http_status),a
+        ld (teletekst_http_status+1),a
         ld a,P2WP_TYPE_TELETEKST_FETCH_START
         call prepare_request
         ld hl,(teletekst_page)
@@ -2539,6 +2634,14 @@ teletekst_fetch_poll_v3_length:
         jp nz,teletekst_fetch_failed
         jr teletekst_fetch_poll_length_ok
 teletekst_fetch_poll_v4_length:
+        ld a,(p2wp_session_version)
+        cp 7
+        ld a,b
+        jr c,teletekst_fetch_poll_v4_legacy_length
+        cp 21
+        jp nz,teletekst_fetch_failed
+        jr teletekst_fetch_poll_length_ok
+teletekst_fetch_poll_v4_legacy_length:
         cp 17
         jp nz,teletekst_fetch_failed
 teletekst_fetch_poll_length_ok:
@@ -2554,6 +2657,16 @@ teletekst_fetch_poll_length_ok:
         jp nz,teletekst_fetch_failed
         ld a,(RX_BUFFER+7)
         ld (teletekst_error_code),a
+        ld a,(p2wp_session_version)
+        cp 7
+        jr c,teletekst_fetch_error_details_ready
+        ld a,(RX_BUFFER+23)
+        ld (teletekst_http_result),a
+        ld a,(RX_BUFFER+24)
+        ld (teletekst_lwip_error),a
+        ld hl,(RX_BUFFER+25)
+        ld (teletekst_http_status),hl
+teletekst_fetch_error_details_ready:
         xor a
         ld (teletekst_page_valid),a
         call teletekst_indicator_restore
@@ -2568,7 +2681,7 @@ teletekst_fetch_rows:
         ld (teletekst_next_page),hl
         ld a,(teletekst_status_length)
         cp 17
-        jr nz,teletekst_fetch_rows_navigation_ready
+        jr c,teletekst_fetch_rows_navigation_ready
         ld hl,(RX_BUFFER+19)
         ld (teletekst_previous_page),hl
         ld hl,(RX_BUFFER+21)
@@ -2646,6 +2759,8 @@ teletekst_chunk_loop:
         ld (teletekst_zoom_state),a
         inc a
         ld (teletekst_page_valid),a
+        xor a
+        ld (teletekst_auto_retry_pending),a
         call teletekst_render_screen
         call teletekst_commit_screen
         ld a,(teletekst_next_subpage)
@@ -3217,9 +3332,82 @@ show_teletekst_error:
         ld de,VIDEO_RAM+320+10
         ld a,(teletekst_error_code)
         call write_hex_byte
+        ld hl,teletekst_error_prefix_text
+        ld de,VIDEO_RAM+400
+        call write_string
+        call teletekst_error_description
+        ld de,VIDEO_RAM+400+6
+        call write_string
+        ld a,(p2wp_session_version)
+        cp 7
+        jr c,show_teletekst_error_no_details
+        ld hl,teletekst_error_detail_text
+        ld de,VIDEO_RAM+480
+        call write_string
+        ld hl,(teletekst_http_status)
+        ld de,VIDEO_RAM+480+13
+        call write_page_number
+        ld a,(teletekst_lwip_error)
+        ld de,VIDEO_RAM+480+22
+        call write_hex_byte
+        ld a,(teletekst_http_result)
+        ld de,VIDEO_RAM+480+29
+        call write_hex_byte
+show_teletekst_error_no_details:
+        ld hl,teletekst_error_retry_text
+        ld de,VIDEO_RAM+640
+        call write_string
         xor a
         ld (teletekst_rotation_enabled),a
         call teletekst_draw_status_indicators
+        ret
+
+; Return a short Dutch explanation for every stable fetch error code.
+teletekst_error_description:
+        ld a,(teletekst_error_code)
+        cp TELETEKST_ERROR_NOT_CONNECTED
+        ld hl,teletekst_error_not_connected_text
+        ret z
+        cp TELETEKST_ERROR_TLS_CONFIG
+        ld hl,teletekst_error_tls_config_text
+        ret z
+        cp TELETEKST_ERROR_REQUEST_START
+        ld hl,teletekst_error_request_start_text
+        ret z
+        cp TELETEKST_ERROR_NETWORK
+        ld hl,teletekst_error_network_text
+        ret z
+        cp TELETEKST_ERROR_HTTP_STATUS
+        ld hl,teletekst_error_http_text
+        ret z
+        cp TELETEKST_ERROR_TOO_LARGE
+        ld hl,teletekst_error_too_large_text
+        ret z
+        cp TELETEKST_ERROR_INVALID_DATA
+        ld hl,teletekst_error_invalid_data_text
+        ret z
+        cp TELETEKST_ERROR_DNS
+        ld hl,teletekst_error_dns_text
+        ret z
+        cp TELETEKST_ERROR_CONNECT
+        ld hl,teletekst_error_connect_text
+        ret z
+        cp TELETEKST_ERROR_CONNECTION_CLOSED
+        ld hl,teletekst_error_closed_text
+        ret z
+        cp TELETEKST_ERROR_TIMEOUT
+        ld hl,teletekst_error_timeout_text
+        ret z
+        cp TELETEKST_ERROR_OUT_OF_MEMORY
+        ld hl,teletekst_error_memory_text
+        ret z
+        cp TELETEKST_ERROR_CONTENT_LENGTH
+        ld hl,teletekst_error_content_length_text
+        ret z
+        cp TELETEKST_ERROR_LOCAL_ABORT
+        ld hl,teletekst_error_abort_text
+        ret z
+        ld hl,teletekst_error_unknown_text
         ret
 
 ; A missing page is an ordinary navigation result, not a protocol failure.
@@ -4514,6 +4702,42 @@ teletekst_unavailable_text:
         defb "TELETEKSTPAGINA NIET BESCHIKBAAR",0
 teletekst_error_text:
         defb "FOUTCODE: 00",0
+teletekst_error_prefix_text:
+        defb "FOUT: ",0
+teletekst_error_detail_text:
+        defb "DETAIL: HTTP 000 LWIP 00 NET 00",0
+teletekst_error_retry_text:
+        defb "PROBEER OPNIEUW OF KIES EEN ANDERE BRON",0
+teletekst_error_not_connected_text:
+        defb "GEEN WIFI-VERBINDING",0
+teletekst_error_tls_config_text:
+        defb "TLS-CONFIGURATIE MISLUKT",0
+teletekst_error_request_start_text:
+        defb "AANVRAAG KON NIET STARTEN",0
+teletekst_error_network_text:
+        defb "ONBEKENDE NETWERKFOUT",0
+teletekst_error_http_text:
+        defb "HTTP-SERVERFOUT",0
+teletekst_error_too_large_text:
+        defb "ANTWOORD TE GROOT",0
+teletekst_error_invalid_data_text:
+        defb "ONGELDIGE PAGINADATA",0
+teletekst_error_dns_text:
+        defb "DNS-NAAM NIET GEVONDEN",0
+teletekst_error_connect_text:
+        defb "VERBINDING OF TLS MISLUKT",0
+teletekst_error_closed_text:
+        defb "VERBINDING AFGEBROKEN",0
+teletekst_error_timeout_text:
+        defb "SERVER REAGEERT NIET",0
+teletekst_error_memory_text:
+        defb "TE WEINIG PICO-GEHEUGEN",0
+teletekst_error_content_length_text:
+        defb "ONVOLLEDIG ANTWOORD",0
+teletekst_error_abort_text:
+        defb "AANVRAAG AFGEBROKEN",0
+teletekst_error_unknown_text:
+        defb "ONBEKENDE FOUT",0
 page_not_found_header_text:
         defb 004h,01dh,007h," P2000T  TELETEKST"
         defs 40-($-page_not_found_header_text),020h
@@ -4587,7 +4811,7 @@ protocol_legacy_found_text:
 protocol_legacy_available_text:
         defb 007h,01dh,004h,"    TELETEKST BLIJFT BESCHIKBAAR",0
 protocol_legacy_update_text:
-        defb 004h,01dh,007h,"     UPDATE INTERFACE VOOR P2WP/6",0
+        defb 004h,01dh,007h,"     UPDATE INTERFACE VOOR P2WP/7",0
 protocol_continue_text:
         defb 007h,"   DRUK OP EEN TOETS OM DOOR TE GAAN",0
 
@@ -4598,7 +4822,7 @@ protocol_incompatible_title_text:
 protocol_incompatible_shared_text:
         defb 007h,01dh,004h,"      GEEN GEDEELDE P2WP-VERSIE",0
 protocol_incompatible_range_text:
-        defb 007h,01dh,004h,"    CARTRIDGE: P2WP/2 TOT P2WP/6",0
+        defb 007h,01dh,004h,"    CARTRIDGE: P2WP/2 TOT P2WP/7",0
 protocol_incompatible_update_text:
         defb 004h,01dh,007h,"     UPDATE CARTRIDGE OF INTERFACE",0
 
@@ -4759,6 +4983,10 @@ teletekst_auto_page_enabled: equ 074a2h
 wifi_cancel_enabled:     equ 074a3h
 opening_countdown_last_tick: equ 074a4h
 opening_countdown_seconds: equ 074a6h
+teletekst_auto_retry_pending: equ 074a7h
+teletekst_http_result: equ 074a8h
+teletekst_lwip_error: equ 074a9h
+teletekst_http_status: equ 074aah
 TELETEXT_SCREEN_BUFFER: equ 07500h
 custom_url_length:       equ 078c0h
 teletekst_previous_page: equ 078c1h
