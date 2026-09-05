@@ -3062,24 +3062,53 @@ teletekst_clock_store_minutes:
 teletekst_clock_store_seconds:
         ld (teletekst_clock_seconds),a
 teletekst_clock_saved:
-        ld a,(teletekst_rotation_paused)
-        or a
-        ret nz
-        ld a,(teletekst_input_count)
-        or a
-        ret nz
         ld a,(teletekst_page_valid)
         or a
-        jp z,teletekst_write_clock_right
-        ld a,(teletekst_zoom_state)
+        jr nz,teletekst_clock_write_page
+        ld a,(teletekst_input_count)
         or a
-        ret nz
+        jp nz,teletekst_write_clock_error_input
+        jp teletekst_write_clock_right
+teletekst_clock_write_page:
         ld de,TELETEXT_RAW_SCREEN_BUFFER+1
         call teletekst_write_clock
+        ld a,(teletekst_zoom_state)
+        or a
+        jr nz,teletekst_clock_write_zoom
         ld de,TELETEXT_SCREEN_BUFFER+1
         call teletekst_write_clock
         ld de,VIDEO_RAM+1
         jp teletekst_write_clock
+
+; A zoomed row reserves column zero for the double-height control and copies
+; source column zero into visible column one. Overlay the live clock one cell
+; to the right in both zoom halves, while keeping the unzoomed raw page current.
+teletekst_clock_write_zoom:
+        ld de,TELETEXT_SCREEN_BUFFER+2
+        call teletekst_write_clock
+        ld de,VIDEO_RAM+2
+        jp teletekst_write_clock
+
+; Error screens normally right-align a full date and time. During three-digit
+; page entry that area is also the input field, so use a compact clock ending
+; at column 34 and leave columns 36-38 untouched.
+teletekst_write_clock_error_input:
+        ld hl,VIDEO_RAM+21
+        ld b,15
+        ld a,020h
+teletekst_write_clock_error_input_clear:
+        ld (hl),a
+        inc hl
+        djnz teletekst_write_clock_error_input_clear
+        ld a,(teletekst_clock_has_date)
+        push af
+        xor a
+        ld (teletekst_clock_has_date),a
+        ld de,VIDEO_RAM+27
+        call teletekst_write_clock
+        pop af
+        ld (teletekst_clock_has_date),a
+        ret
 
 ; Error pages keep their title at the left and right-align the live clock.
 ; DE points at the first clock glyph; teletekst_write_clock uses the cell just

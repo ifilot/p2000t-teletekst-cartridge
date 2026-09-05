@@ -44,6 +44,8 @@ and release diffs.
 
 ### Fixed
 
+- Keep the live clock updating while subpage rotation is paused, a page number
+  is being entered, or either double-height zoom view is active.
 - Clear the complete auto-start setting row before drawing a shorter value, so
   cycling `ARCHIEF` to `EIGEN` or `UIT` no longer leaves stale characters.
 - Keep unattended auto-page mode running: content failures skip to the next

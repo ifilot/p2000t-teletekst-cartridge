@@ -162,7 +162,9 @@ pages use the shorter `ww DD.mmm HH:MM` in columns one through fifteen, with a
 half-second blinking colon between hours and minutes. Dutch two-letter weekdays
 and three-letter month names are used throughout. The display advances from the
 monitor's 20 ms clock between network synchronizations, including the date and
-weekday at midnight. This leaves provider text on the right free.
+weekday at midnight. It remains live during page-number entry, paused subpage
+rotation, automatic page mode, error display, and both zoom views. This leaves
+provider text on the right free.
 
 Without an explicitly saved profile, Wi-Fi credentials remain session-only.
 The cartridge keeps the password in RAM only while retry or profile creation

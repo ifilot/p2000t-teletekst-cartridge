@@ -96,10 +96,15 @@ unsigned char page_backend_fetch(void *argument,unsigned char source,
         *following=metadata.next_page;}}
     if(!error && backend->fixture && subpage!=0) *next=0;
     free(body.data);
-    time_t now=time(NULL); struct tm local; localtime_r(&now,&local);
-    clock[0]=(unsigned char)local.tm_hour; clock[1]=(unsigned char)local.tm_min;
-    clock[2]=(unsigned char)local.tm_sec; clock[3]=(unsigned char)local.tm_mday;
-    clock[4]=(unsigned char)(local.tm_mon+1); clock[5]=(unsigned char)(local.tm_year-100);
-    clock[6]=(unsigned char)local.tm_wday;
+    if(backend->fixture){
+      static const unsigned char fixture_clock[7]={12,34,50,5,9,26,6};
+      memcpy(clock,fixture_clock,sizeof(fixture_clock));
+    }else{
+      time_t now=time(NULL);struct tm local;localtime_r(&now,&local);
+      clock[0]=(unsigned char)local.tm_hour;clock[1]=(unsigned char)local.tm_min;
+      clock[2]=(unsigned char)local.tm_sec;clock[3]=(unsigned char)local.tm_mday;
+      clock[4]=(unsigned char)(local.tm_mon+1);clock[5]=(unsigned char)(local.tm_year-100);
+      clock[6]=(unsigned char)local.tm_wday;
+    }
     return error;
 }

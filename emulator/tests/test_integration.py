@@ -15,7 +15,7 @@ sys.path.insert(0,str(ROOT/'server'))
 from server import page_response
 with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; intro_countdown_screen=temp/'intro-countdown-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_dialog_screen=temp/'custom-dialog-screen.bin'; custom_screen=temp/'custom-screen.bin'; restored_custom_screen=temp/'restored-custom-screen.bin'; emulated_flash=temp/'pico-flash.bin'; auto_flash=temp/'auto-flash.bin'; auto_screen=temp/'auto-screen.bin'; archive_screen=temp/'archive-screen.bin'; cancel_screen=temp/'cancel-screen.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'; keypad_pages=temp/'keypad-pages.txt'; arrow_pages=temp/'arrow-pages.txt'; auto_pages=temp/'auto-pages.txt'
-    cycle_screen=temp/'cycle-screen.bin'; archive_sources=temp/'archive-sources.bin'; legacy_archive_sources=temp/'legacy-archive-sources.bin'; auto_skip_pages=temp/'auto-skip-pages.txt'; timeout_screen=temp/'timeout-screen.bin'; legacy_timeout_screen=temp/'legacy-timeout-screen.bin'
+    cycle_screen=temp/'cycle-screen.bin'; archive_sources=temp/'archive-sources.bin'; legacy_archive_sources=temp/'legacy-archive-sources.bin'; auto_skip_pages=temp/'auto-skip-pages.txt'; timeout_screen=temp/'timeout-screen.bin'; legacy_timeout_screen=temp/'legacy-timeout-screen.bin'; paused_clock_screen=temp/'paused-clock-screen.bin'; input_clock_screen=temp/'input-clock-screen.bin'
     bundled_monitor=EMU/'assets/P2000ROM.bin'
     assert bundled_monitor.stat().st_size == 4096
     assert hashlib.sha256(bundled_monitor.read_bytes()).hexdigest() == \
@@ -145,9 +145,12 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     assert loop_fetches.read_bytes()[:3] == bytes((0,2,0)), \
         'automatic subpage rotation did not wrap from the last subpage to the first'
     subprocess.run(common+['--auto-pause-frame','250','--frames','900',
-        '--dump-fetches',str(pause_fetches)],check=True)
+        '--dump-fetches',str(pause_fetches),
+        '--dump-screen',str(paused_clock_screen)],check=True)
     assert pause_fetches.read_bytes() == bytes((0,)), \
         'paused subpage rotation performed an automatic fetch'
+    assert paused_clock_screen.read_bytes()[11:19] == b'12:35:04', \
+        'clock display stopped while subpage rotation was paused'
     subprocess.run(common+['--auto-pause-frame','250','--auto-resume-frame','350',
         '--frames','1000','--dump-fetches',str(resume_fetches)],check=True)
     assert resume_fetches.read_bytes()[:2] == bytes((0,2)), \
@@ -187,6 +190,8 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     assert display[13] == ord(':') and display[16] == ord(':')
     assert all(display[index:index+1].isdigit()
                for index in (4,5,11,12,14,15,17,18))
+    assert display[11:19] == b'12:34:59', \
+        'normal page clock did not advance from the fixture time'
     pixels=frame.read_bytes()
     assert len(pixels)==720*720*4
     colours={pixels[i:i+4] for i in range(0,len(pixels),4)}
@@ -253,6 +258,13 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--dump-screen',str(zoom_screen)],check=True)
     zoom=zoom_screen.read_bytes()
     assert zoom[0] == 0x0d and zoom[40:80] == b' '*40
+    assert zoom[12:20] == b'12:34:59', \
+        'clock display stopped in double-height zoom mode'
+    subprocess.run(common+['--auto-keys','1','--frames','650',
+        '--dump-screen',str(input_clock_screen)],check=True)
+    input_clock=input_clock_screen.read_bytes()
+    assert input_clock[11:19] == b'12:34:59' and input_clock[36] == ord('1'), \
+        'clock display stopped during partial page-number entry'
     reveal_page=bytearray(b' '*960)
     reveal_page[80:90]=b'NOS Telet '
     reveal_page[40:54]=bytes((0x07,))+b'PUBLIC'+bytes((0x18,))+b'SECRET'
