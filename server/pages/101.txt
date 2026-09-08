@@ -1,0 +1,24 @@
+                                     101
+
+          Concealed text demo
+
+What has keys but opens no locks?
+
+Press ? or R to reveal the answer.
+
+Answer: A piano!
+
+The answer bytes are always downloaded.
+Normally, the SAA5050 displays them as
+spaces after the conceal control code.
+
+Press ? or R again to conceal it.
+
+Edit server/pages/101.txt to experiment.
+Use byte 18 hex to begin concealment;
+use colour byte 07 hex to end it.
+
+
+
+
+                    READY

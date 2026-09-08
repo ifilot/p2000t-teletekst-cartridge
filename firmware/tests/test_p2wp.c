@@ -1,5 +1,8 @@
 #include "p2wp.h"
+#include "firmware_core.h"
 #include "teletekst.h"
+#include "custom_endpoint.h"
+#include "version.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -15,12 +18,66 @@ static void test_crc(void) {
 
 /** Verify newest-common-version selection and incompatible ranges. */
 static void test_version_negotiation(void) {
-    assert(p2wp_select_version(2u, 3u, 2u, 3u) == 3u);
-    assert(p2wp_select_version(2u, 2u, 2u, 3u) == 2u);
-    assert(p2wp_select_version(2u, 3u, 2u, 2u) == 2u);
+    assert(p2wp_select_version(2u, 5u, 2u, 5u) == 5u);
+    assert(p2wp_select_version(2u, 4u, 2u, 5u) == 4u);
+    assert(p2wp_select_version(2u, 3u, 2u, 5u) == 3u);
+    assert(p2wp_select_version(2u, 2u, 2u, 5u) == 2u);
     assert(p2wp_select_version(2u, 3u, 1u, 1u) == 0u);
     assert(p2wp_select_version(2u, 3u, 4u, 4u) == 0u);
     assert(p2wp_select_version(3u, 2u, 2u, 3u) == 0u);
+}
+
+static void test_custom_endpoint(void) {
+    custom_endpoint_t endpoint;
+    assert(custom_endpoint_parse(
+        "http://terra:8080", 17u, &endpoint
+    ));
+    assert(!endpoint.tls);
+    assert(strcmp(endpoint.host, "terra") == 0);
+    assert(endpoint.port == 8080u);
+    assert(strcmp(endpoint.base_path, "") == 0);
+
+    static const char secure[] = "https://192.168.1.20/teletext/";
+    assert(custom_endpoint_parse(secure, sizeof(secure) - 1u, &endpoint));
+    assert(endpoint.tls && endpoint.port == 443u);
+    assert(strcmp(endpoint.host, "192.168.1.20") == 0);
+    assert(strcmp(endpoint.base_path, "/teletext") == 0);
+    char path[CUSTOM_ENDPOINT_REQUEST_PATH_MAX];
+    assert(custom_endpoint_page_path(
+        &endpoint, 200u, 2u, path, sizeof(path)
+    ));
+    assert(strcmp(path, "/teletext/json/200-2") == 0);
+
+    assert(!custom_endpoint_parse("terra:8080", 10u, &endpoint));
+    assert(!custom_endpoint_parse("http://user@terra", 17u, &endpoint));
+    assert(!custom_endpoint_parse("http://terra:0", 14u, &endpoint));
+    assert(!custom_endpoint_parse("http://terra/path?q=1", 21u, &endpoint));
+}
+
+/** Verify bounded GitHub release-tag parsing and malformed input rejection. */
+static void test_release_version_parsing(void) {
+    static const char response[] =
+        "{\n  \"url\":\"ignored\",\n  \"tag_name\" : \"v12.34.5\",\n"
+        "  \"name\":\"Patch\"\n}";
+    p2wp_release_version_t version = {0};
+    assert(p2wp_parse_latest_release(
+        response,
+        sizeof(response) - 1u,
+        &version
+    ));
+    assert(version.major == 12u && version.minor == 34u && version.patch == 5u);
+    static const char short_tag[] = "{\"tag_name\":\"v1.2\"}";
+    assert(!p2wp_parse_latest_release(
+        short_tag,
+        sizeof(short_tag) - 1u,
+        &version
+    ));
+    static const char overflow[] = "{\"tag_name\":\"v256.2.3\"}";
+    assert(!p2wp_parse_latest_release(
+        overflow,
+        sizeof(overflow) - 1u,
+        &version
+    ));
 }
 
 /**
@@ -404,6 +461,321 @@ static void test_exact_binary_display(void) {
     ));
 }
 
+static void test_navigation_metadata(void) {
+    char json[18000];
+    const size_t length = build_teletekst_json(json, sizeof(json));
+    const char needle[] = "{\"nextSubPage\":\"100-2\"";
+    const char replacement[] =
+        "{\"prevPage\":\"099\",\"nextPage\":\"101\","
+        "\"nextSubPage\":\"100-2\"";
+    (void)needle;
+    char enriched[18100];
+    const size_t replacement_length = sizeof(replacement) - 1u;
+    memcpy(enriched, replacement, replacement_length);
+    memcpy(
+        enriched + replacement_length,
+        json + sizeof(needle) - 1u,
+        length - (sizeof(needle) - 1u)
+    );
+    const size_t enriched_length = replacement_length +
+        length - (sizeof(needle) - 1u);
+    uint8_t screen[TELETEKST_SCREEN_SIZE];
+    teletekst_metadata_t metadata;
+    assert(!teletekst_decode_json(
+        enriched, enriched_length, 100u, screen, &metadata
+    )); /* Page 099 is outside the supported range. */
+
+    memcpy(enriched + 13u, "100", 3u);
+    assert(teletekst_decode_json(
+        enriched, enriched_length, 100u, screen, &metadata
+    ));
+    assert(metadata.next_subpage == 2u);
+    assert(metadata.previous_page == 100u);
+    assert(metadata.next_page == 101u);
+}
+
+typedef struct {
+    unsigned command_calls;
+    unsigned capability_calls;
+    unsigned sensitive_clears;
+    uint8_t command_error;
+} fake_firmware_platform_t;
+
+static uint8_t fake_capabilities(void *context) {
+    fake_firmware_platform_t *platform = context;
+    ++platform->capability_calls;
+    return P2WP_CAPABILITY_ECHO | P2WP_CAPABILITY_WIFI |
+        P2WP_CAPABILITY_INTERNET | P2WP_CAPABILITY_WIFI_PROFILE |
+        P2WP_CAPABILITY_DEVICE_INFO | P2WP_CAPABILITY_VERSION_CHECK;
+}
+
+static uint8_t fake_command(
+    void *context,
+    const p2wp_frame_t *request,
+    p2wp_frame_t *response
+) {
+    fake_firmware_platform_t *platform = context;
+    ++platform->command_calls;
+    response->payload[0] = request->type;
+    response->payload_length = 1u;
+    return platform->command_error;
+}
+
+static void fake_clear_sensitive(void *context) {
+    fake_firmware_platform_t *platform = context;
+    ++platform->sensitive_clears;
+}
+
+static const p2wp_firmware_operations_t fake_operations = {
+    .capabilities = fake_capabilities,
+    .version_check_start = fake_command,
+    .version_check_status = fake_command,
+    .wifi_scan_start = fake_command,
+    .wifi_scan_status = fake_command,
+    .wifi_scan_result = fake_command,
+    .wifi_connect = fake_command,
+    .wifi_status = fake_command,
+    .wifi_profile_status = fake_command,
+    .wifi_profile_connect = fake_command,
+    .wifi_profile_save = fake_command,
+    .wifi_profile_delete = fake_command,
+    .teletekst_fetch_start = fake_command,
+    .teletekst_fetch_status = fake_command,
+    .teletekst_fetch_rows = fake_command,
+    .teletekst_custom_url_load = fake_command,
+    .teletekst_custom_url_save = fake_command,
+    .teletekst_settings_load = fake_command,
+    .teletekst_settings_save = fake_command,
+    .clear_sensitive = fake_clear_sensitive,
+};
+
+static p2wp_frame_t make_hello(uint8_t sequence) {
+    p2wp_frame_t request = {
+        .version = P2WP_BOOTSTRAP_VERSION,
+        .type = P2WP_TYPE_HELLO,
+        .sequence = sequence,
+        .payload_length = 8u,
+        .payload = {'P', '2', 'W', 'P', 2u, 3u, 240u, 0u},
+    };
+    return request;
+}
+
+/** Verify the portable production dispatcher and its platform boundary. */
+static void test_firmware_core(void) {
+    fake_firmware_platform_t platform = {0};
+    p2wp_firmware_core_t core;
+    p2wp_firmware_core_init(
+        &core,
+        &fake_operations,
+        &platform,
+        P2WP_HARDWARE_PICO_2_W
+    );
+
+    p2wp_frame_t request = {
+        .version = 3u,
+        .type = P2WP_TYPE_DEVICE_INFO,
+        .sequence = 1u,
+    };
+    p2wp_frame_t response;
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_UNSUPPORTED_VERSION);
+
+    request = make_hello(0u);
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(response.payload_length == 8u);
+    assert(memcmp(response.payload, "P2WP", 4u) == 0);
+    assert(response.payload[4] == 3u);
+    assert(response.payload[5] == 0x3fu);
+    assert(platform.capability_calls == 1u);
+
+    p2wp_frame_t retry = make_hello(0u);
+    p2wp_firmware_core_handle(&core, &retry, &response);
+    assert(response.payload[4] == 3u);
+    assert(platform.capability_calls == 1u);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_DEVICE_INFO,
+        .sequence = 1u,
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(response.payload_length == 4u);
+    assert(response.payload[0] == P2WP_HARDWARE_PICO_2_W);
+    assert(response.payload[1] == P2WP_FIRMWARE_VERSION_MAJOR);
+    assert(response.payload[2] == P2WP_FIRMWARE_VERSION_MINOR);
+    assert(response.payload[3] == P2WP_FIRMWARE_VERSION_PATCH);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_WIFI_CONNECT,
+        .sequence = 2u,
+        .payload_length = 4u,
+        .payload = {0u, 2u, 'p', 'w'},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 1u);
+    assert(platform.sensitive_clears == 1u);
+    assert(request.payload[2] == 0u && request.payload[3] == 0u);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_WIFI_CONNECT,
+        .sequence = 2u,
+        .payload_length = 4u,
+        .payload = {0u, 2u, 'p', 'w'},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(platform.command_calls == 1u);
+    assert(platform.sensitive_clears == 2u);
+    assert(request.payload[2] == 0u && request.payload[3] == 0u);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_WIFI_STATUS,
+        .sequence = 2u,
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_SEQUENCE_CONFLICT);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = P2WP_TYPE_TELETEKST_FETCH_START,
+        .sequence = 3u,
+        .payload_length = 4u,
+        .payload = {99u, 0u, 0u, P2WP_TELETEKST_SOURCE_NOS},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+    assert(platform.command_calls == 1u);
+
+    request = (p2wp_frame_t){
+        .version = 3u,
+        .type = 0xfeu,
+        .sequence = 4u,
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_UNKNOWN_TYPE);
+
+    memset(&platform, 0, sizeof(platform));
+    p2wp_firmware_core_init(
+        &core,
+        &fake_operations,
+        &platform,
+        P2WP_HARDWARE_PICO_2_W
+    );
+    request = (p2wp_frame_t){
+        .version = P2WP_BOOTSTRAP_VERSION,
+        .type = P2WP_TYPE_HELLO,
+        .payload_length = 8u,
+        .payload = {'P', '2', 'W', 'P', 2u, 7u, 240u, 0u},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.payload[4] == 7u);
+
+    request = (p2wp_frame_t){
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_FETCH_START,
+        .sequence = 1u,
+        .payload_length = 4u,
+        .payload = {100u, 0u, 0u, P2WP_TELETEKST_SOURCE_ARCHIVE},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 1u);
+
+    request = (p2wp_frame_t){
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD,
+        .sequence = 2u,
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 2u);
+
+    request = (p2wp_frame_t){
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE,
+        .sequence = 3u,
+        .payload_length = 18u,
+        .payload = {17u, 'h', 't', 't', 'p', ':', '/', '/', 't', 'e', 'r',
+                    'r', 'a', ':', '8', '0', '8', '0'},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 3u);
+
+    request = (p2wp_frame_t){
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_SETTINGS_LOAD,
+        .sequence = 4u,
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 4u);
+
+    request = (p2wp_frame_t){
+        .version = 7u,
+        .type = P2WP_TYPE_TELETEKST_SETTINGS_SAVE,
+        .sequence = 5u,
+        .payload_length = 1u,
+        .payload = {P2WP_TELETEKST_MENU_SOURCE_ARCHIVE},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.flags == P2WP_FLAG_RESPONSE);
+    assert(platform.command_calls == 5u);
+
+    request.sequence = 6u;
+    request.payload[0] = 4u;
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+    assert(platform.command_calls == 5u);
+
+    request.type = P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE;
+    request.version = 7u;
+    request.sequence = 7u;
+    request.payload_length = 17u;
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+    assert(platform.command_calls == 5u);
+
+    /* Source 3 is a P2WP/7 feature; older sessions must reject it. */
+    memset(&platform, 0, sizeof(platform));
+    p2wp_firmware_core_init(
+        &core,
+        &fake_operations,
+        &platform,
+        P2WP_HARDWARE_PICO_2_W
+    );
+    request = (p2wp_frame_t){
+        .version = P2WP_BOOTSTRAP_VERSION,
+        .type = P2WP_TYPE_HELLO,
+        .payload_length = 8u,
+        .payload = {'P', '2', 'W', 'P', 2u, 6u, 240u, 0u},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.payload[4] == 6u);
+    request = (p2wp_frame_t){
+        .version = 6u,
+        .type = P2WP_TYPE_TELETEKST_FETCH_START,
+        .sequence = 1u,
+        .payload_length = 4u,
+        .payload = {100u, 0u, 0u, P2WP_TELETEKST_SOURCE_ARCHIVE},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) != 0u);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+    assert(platform.command_calls == 0u);
+}
+
 /**
  * @brief Run all native framing and Teletekst decoder regression tests.
  *
@@ -412,11 +784,15 @@ static void test_exact_binary_display(void) {
 int main(void) {
     test_crc();
     test_version_negotiation();
+    test_release_version_parsing();
     test_round_trip();
     test_corruption();
     test_profile_save_round_trip();
+    test_custom_endpoint();
     test_teletekst_conversion();
     test_exact_binary_display();
+    test_navigation_metadata();
+    test_firmware_core();
     puts("p2wp tests passed");
     return 0;
 }

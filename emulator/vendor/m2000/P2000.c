@@ -788,7 +788,17 @@ void RefreshScreen_T(void)
   int eor;
   int found_si;
 
-  S = VRAM + (ColumnModeReg ? 0 : ScrollReg); // no scrolling in 80 column mode
+  /* Bit 7 of the P2000T scroll register disables video output. The cartridge
+     uses it while replacing a complete page; it is not part of the offset. */
+  if (!ColumnModeReg && (ScrollReg & 0x80))
+  {
+    for (y = 0; y < 24; ++y)
+      for (x = 0; x < 40; ++x)
+        PutChar(x, y, SPACE - 32, 0, 0, 0);
+    return;
+  }
+
+  S = VRAM + (ColumnModeReg ? 0 : (ScrollReg & 0x7f)); // no scrolling in 80 column mode
   found_si = 0; // init to no double height codes found
 
   for (y = 0; y < 24; ++y)

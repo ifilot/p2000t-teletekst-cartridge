@@ -21,6 +21,26 @@ typedef enum {
     TELETEKST_DECODE_UNREPRESENTABLE_ROW,
 } teletekst_decode_result_t;
 
+typedef struct {
+    uint8_t next_subpage;
+    uint16_t previous_page;
+    uint16_t next_page;
+} teletekst_metadata_t;
+
+/**
+ * @brief Decode a compatible JSON response and its navigation metadata.
+ *
+ * `prevPage` and `nextPage` are optional. Missing or empty values become zero.
+ * The legacy `nextSubPage` field remains required for API compatibility.
+ */
+bool teletekst_decode_json(
+    const char *json,
+    size_t json_length,
+    uint16_t requested_page,
+    uint8_t screen[TELETEKST_SCREEN_SIZE],
+    teletekst_metadata_t *metadata
+);
+
 /**
  * @brief Convert a Teletekst JSON response into SAA5050 display bytes.
  *

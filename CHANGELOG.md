@@ -6,6 +6,75 @@ in this file. The format is based on [Keep a Changelog].
 Entries through version 0.2.0 were reconstructed from the tagged Git history
 and release diffs.
 
+## [Unreleased]
+
+### Added
+
+- Added P2WP/7 archive transport with hostname- and certificate-verified HTTPS,
+  while retaining a P2WP/4–6 custom-source compatibility fallback.
+- Added stable DNS, connection, closed-connection, timeout, memory,
+  content-length, and local-abort fetch errors with raw HTTP/lwIP diagnostics.
+- Added TeletekstArchief.nl as a predefined source.
+- Added numeric-keypad page entry, Backspace correction, and left/right arrow
+  aliases for previous/next page navigation.
+- Added Shift-STOP cancellation to Wi-Fi and custom-server input.
+- Added a persistent P2WP/6 60-second auto-start source setting and automatic
+  next-page mode, enabled automatically after a timed start, plus a visible
+  opening-screen countdown.
+- Added a right-aligned live clock to the missing-page screen without allowing
+  it to overwrite the error header.
+- Added P2WP/5 retrieval and write-minimizing Pico flash persistence for the
+  last custom server URL, including file-backed emulator flash.
+- Redesigned the custom-server dialog as a three-line highlighted input panel
+  with clearer guidance, controls, persistence information, and footer styling.
+- Added custom HTTP(S) Teletekst servers, including DNS names,
+  IPv4 addresses, optional ports/base paths, and an intentionally permissive
+  custom-endpoint TLS mode for self-signed and private-CA certificates.
+- Added `START`/`I` index, `?`/`R` reveal, three-state `Z` zoom, and metadata-driven
+  `P`/`N` previous/next page shortcuts, with an expanded on-screen reference.
+- Added P2WP/4 custom URL requests and previous/next page metadata while
+  retaining P2WP/2–3 compatibility.
+- Added deterministic emulator coverage for custom URL entry and shortcuts.
+- Added a dependency-free Python example server with editable text or raw
+  SAA5050 pages and localhost HTTP tests.
+
+### Changed
+
+- Moved pause/resume from `P` to `A` so `P` can mean previous page.
+
+### Fixed
+
+- Keep the live clock updating while subpage rotation is paused, a page number
+  is being entered, or either double-height zoom view is active.
+- Clear the complete auto-start setting row before drawing a shorter value, so
+  cycling `ARCHIEF` to `EIGEN` or `UIT` no longer leaves stale characters.
+- Keep unattended auto-page mode running: content failures skip to the next
+  numeric page and transport failures retry the same page. Page 100 remains a
+  visible terminal health check.
+- Preserve older P2WP behavior by mapping new transport errors back to generic
+  network error `0x04` in P2WP/2–6 sessions.
+
+## [0.5.0] - 2026-08-30
+
+### Added
+
+- Added backward-compatible protocol commands for Pico W/Pico 2 W generation,
+  installed firmware version, and an asynchronous TLS-verified GitHub latest
+  release lookup.
+- Added post-login source-menu rows for cartridge, Pico, and online release
+  versions, plus a build/test guard that keeps cartridge and
+  firmware release numbers synchronized.
+- Bundled the 4096-byte P2000T monitor ROM with the emulator and made it the
+  launcher's default.
+- Added a portable production firmware core shared by the Pico builds and
+  emulator, with native tests for negotiation, retries, sequence conflicts,
+  command validation, dispatch, and sensitive-payload erasure.
+
+### Fixed
+
+- Wrapped an active automatic subpage loop from its final subpage back to the
+  API's default first subpage, while preserving pause and resume behavior.
+
 ## [0.4.0] - 2026-08-29
 
 ### Added

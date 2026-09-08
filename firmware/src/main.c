@@ -1,9 +1,14 @@
 #include "p2wp.h"
+#include "firmware_core.h"
 #include "version.h"
 #include "teletekst.h"
+#include "custom_endpoint.h"
+#include "custom_url_store.h"
 #include "wifi_profile.h"
+#include "github_ca.h"
 #include "nos_teletekst_ca.h"
 #include "p2000t_teletekst_ca.h"
+#include "archive_teletekst_ca.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -50,8 +55,10 @@ enum {
 #define WIFI_MAX_PASSWORD 63u
 #define TELETEKST_NOS_HOST "teletekst-data.nos.nl"
 #define TELETEKST_P2000T_HOST "teletekst.philips-p2000t.nl"
+#define TELETEKST_ARCHIVE_HOST "teletekstarchief.nl"
 #define TELETEKST_NOS_PORT 443u
 #define TELETEKST_P2000T_PORT 443u
+#define TELETEKST_ARCHIVE_PORT 443u
 #define TELETEKST_ROWS_PER_CHUNK 6u
 #define TELETEKST_CHUNK_SIZE \
     (TELETEKST_COLUMNS * TELETEKST_ROWS_PER_CHUNK)
@@ -63,6 +70,10 @@ enum {
 #define NTP_UNIX_EPOCH_OFFSET 2208988800u
 #define NTP_RETRY_MS 30000u
 #define NTP_RESYNC_MS (6u * 60u * 60u * 1000u)
+#define VERSION_HOST "api.github.com"
+#define VERSION_PORT 443u
+#define VERSION_PATH "/repos/ifilot/p2000t-teletekst-cartridge/releases/latest"
+#define VERSION_HTTP_BODY_MAX 16384u
 
 enum wifi_scan_state {
     WIFI_SCAN_IDLE = 0,
@@ -101,15 +112,33 @@ enum teletekst_fetch_state {
 };
 
 enum teletekst_error {
-    TELETEKST_ERROR_NONE = 0,
-    TELETEKST_ERROR_NOT_CONNECTED = 1,
-    TELETEKST_ERROR_TLS_CONFIG = 2,
-    TELETEKST_ERROR_REQUEST_START = 3,
-    TELETEKST_ERROR_NETWORK = 4,
-    TELETEKST_ERROR_HTTP_STATUS = 5,
-    TELETEKST_ERROR_TOO_LARGE = 6,
-    TELETEKST_ERROR_INVALID_DATA = 7,
-    TELETEKST_ERROR_PAGE_NOT_FOUND = 8,
+    TELETEKST_ERROR_NONE = P2WP_TELETEKST_ERROR_NONE,
+    TELETEKST_ERROR_NOT_CONNECTED = P2WP_TELETEKST_ERROR_NOT_CONNECTED,
+    TELETEKST_ERROR_TLS_CONFIG = P2WP_TELETEKST_ERROR_TLS_CONFIG,
+    TELETEKST_ERROR_REQUEST_START = P2WP_TELETEKST_ERROR_REQUEST_START,
+    TELETEKST_ERROR_NETWORK = P2WP_TELETEKST_ERROR_NETWORK,
+    TELETEKST_ERROR_HTTP_STATUS = P2WP_TELETEKST_ERROR_HTTP_STATUS,
+    TELETEKST_ERROR_TOO_LARGE = P2WP_TELETEKST_ERROR_TOO_LARGE,
+    TELETEKST_ERROR_INVALID_DATA = P2WP_TELETEKST_ERROR_INVALID_DATA,
+    TELETEKST_ERROR_PAGE_NOT_FOUND = P2WP_TELETEKST_ERROR_PAGE_NOT_FOUND,
+    TELETEKST_ERROR_DNS = P2WP_TELETEKST_ERROR_DNS,
+    TELETEKST_ERROR_CONNECT = P2WP_TELETEKST_ERROR_CONNECT,
+    TELETEKST_ERROR_CONNECTION_CLOSED =
+        P2WP_TELETEKST_ERROR_CONNECTION_CLOSED,
+    TELETEKST_ERROR_TIMEOUT = P2WP_TELETEKST_ERROR_TIMEOUT,
+    TELETEKST_ERROR_OUT_OF_MEMORY = P2WP_TELETEKST_ERROR_OUT_OF_MEMORY,
+    TELETEKST_ERROR_CONTENT_LENGTH = P2WP_TELETEKST_ERROR_CONTENT_LENGTH,
+    TELETEKST_ERROR_LOCAL_ABORT = P2WP_TELETEKST_ERROR_LOCAL_ABORT,
+};
+
+enum version_check_error {
+    VERSION_CHECK_ERROR_NONE = 0,
+    VERSION_CHECK_ERROR_NOT_CONNECTED = 1,
+    VERSION_CHECK_ERROR_TLS_CONFIG = 2,
+    VERSION_CHECK_ERROR_REQUEST_START = 3,
+    VERSION_CHECK_ERROR_NETWORK = 4,
+    VERSION_CHECK_ERROR_HTTP_STATUS = 5,
+    VERSION_CHECK_ERROR_INVALID_DATA = 6,
 };
 
 enum wifi_profile_state {
@@ -125,6 +154,12 @@ enum wifi_profile_operation {
     WIFI_PROFILE_OPERATION_DELETE = 3,
 };
 
+enum custom_url_operation {
+    CUSTOM_URL_OPERATION_NONE = 0,
+    CUSTOM_URL_OPERATION_SAVE = 1,
+    CUSTOM_URL_OPERATION_SETTINGS_SAVE = 2,
+};
+
 typedef struct {
     uint8_t ssid_length;
     uint8_t ssid[32];
@@ -136,14 +171,7 @@ typedef struct {
 static p2wp_parser_t parser;
 static p2wp_frame_t request;
 static uint8_t encoded_response[P2WP_MAX_ENCODED];
-static uint8_t cached_response[P2WP_MAX_ENCODED];
-static size_t cached_response_length;
-static bool cached_request_valid;
-static uint8_t cached_request_type;
-static uint8_t cached_request_sequence;
-static uint16_t cached_request_identity;
-static bool p2wp_session_valid;
-static uint8_t p2wp_session_version;
+static p2wp_firmware_core_t firmware_core;
 static mutex_t wifi_mutex;
 static uint8_t wifi_init_state;
 static uint8_t wifi_scan_state;
@@ -167,11 +195,18 @@ static uint8_t stored_profile_ssid_length;
 static uint8_t stored_profile_password[WIFI_PROFILE_MAX_PASSWORD];
 static uint8_t stored_profile_password_length;
 static uint32_t stored_profile_auth;
+static uint8_t stored_custom_url_operation;
+static uint8_t stored_custom_url_length;
+static char stored_custom_url[CUSTOM_ENDPOINT_URL_MAX];
+static uint8_t stored_auto_start_source;
 static bool wifi_scan_active;
 static bool wifi_connection_active;
 static int wifi_pending_failure_status;
 static uint8_t teletekst_fetch_state;
 static uint8_t teletekst_error;
+static uint8_t teletekst_http_result;
+static int8_t teletekst_lwip_error;
+static uint16_t teletekst_http_status;
 static bool teletekst_fetch_requested;
 static bool teletekst_http_overflow;
 static bool teletekst_tls_cleanup_pending;
@@ -182,9 +217,15 @@ static uint16_t teletekst_requested_page;
 static uint8_t teletekst_requested_subpage;
 static uint8_t teletekst_requested_source;
 static uint8_t teletekst_next_subpage;
-static char teletekst_path[32];
+static uint16_t teletekst_previous_page;
+static uint16_t teletekst_next_page;
+static char teletekst_custom_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
+static uint8_t teletekst_custom_url_length;
+static char teletekst_host[CUSTOM_ENDPOINT_HOST_MAX + 1u];
+static char teletekst_path[CUSTOM_ENDPOINT_REQUEST_PATH_MAX];
 static struct altcp_tls_config *teletekst_tls_config;
 static const char *teletekst_tls_hostname;
+static bool teletekst_tls_insecure;
 static altcp_allocator_t teletekst_tls_allocator;
 static httpc_connection_t teletekst_http_settings;
 static struct udp_pcb *ntp_pcb;
@@ -194,6 +235,23 @@ static uint32_t clock_unix_seconds;
 static absolute_time_t clock_reference;
 static absolute_time_t ntp_next_attempt;
 static absolute_time_t ntp_request_deadline;
+static uint8_t version_check_state;
+static uint8_t version_check_error;
+static bool version_check_requested;
+static bool version_http_overflow;
+static bool version_tls_cleanup_pending;
+static size_t version_http_length;
+static char version_http_body[VERSION_HTTP_BODY_MAX + 1u];
+static p2wp_release_version_t latest_release_version;
+static struct altcp_tls_config *version_tls_config;
+static altcp_allocator_t version_tls_allocator;
+static httpc_connection_t version_http_settings;
+
+#if defined(PICO_RP2350) && PICO_RP2350
+static const uint8_t hardware_model = P2WP_HARDWARE_PICO_2_W;
+#else
+static const uint8_t hardware_model = P2WP_HARDWARE_PICO_W;
+#endif
 
 /** Return the synchronized Unix time, or zero until the first NTP reply. */
 static uint32_t clock_now(void) {
@@ -397,6 +455,54 @@ static void teletekst_set_failed(uint8_t error) {
     mutex_exit(&wifi_mutex);
 }
 
+/** Convert lwIP HTTP completion states into stable P2WP/7 error codes. */
+static uint8_t teletekst_http_error(httpc_result_t result) {
+    switch (result) {
+        case HTTPC_RESULT_ERR_HOSTNAME:
+            return TELETEKST_ERROR_DNS;
+        case HTTPC_RESULT_ERR_CONNECT:
+            return TELETEKST_ERROR_CONNECT;
+        case HTTPC_RESULT_ERR_CLOSED:
+            return TELETEKST_ERROR_CONNECTION_CLOSED;
+        case HTTPC_RESULT_ERR_TIMEOUT:
+            return TELETEKST_ERROR_TIMEOUT;
+        case HTTPC_RESULT_ERR_MEM:
+            return TELETEKST_ERROR_OUT_OF_MEMORY;
+        case HTTPC_RESULT_ERR_CONTENT_LEN:
+            return TELETEKST_ERROR_CONTENT_LENGTH;
+        case HTTPC_RESULT_LOCAL_ABORT:
+            return TELETEKST_ERROR_LOCAL_ABORT;
+        case HTTPC_RESULT_ERR_SVR_RESP:
+            return TELETEKST_ERROR_HTTP_STATUS;
+        case HTTPC_RESULT_ERR_UNKNOWN:
+        case HTTPC_RESULT_OK:
+        default:
+            return TELETEKST_ERROR_NETWORK;
+    }
+}
+
+/** Classify failures returned before lwIP can start an HTTP transaction. */
+static uint8_t teletekst_request_start_error(err_t error) {
+    switch (error) {
+        case ERR_MEM:
+        case ERR_BUF:
+            return TELETEKST_ERROR_OUT_OF_MEMORY;
+        case ERR_TIMEOUT:
+            return TELETEKST_ERROR_TIMEOUT;
+        case ERR_ABRT:
+            return TELETEKST_ERROR_LOCAL_ABORT;
+        case ERR_RST:
+        case ERR_CLSD:
+            return TELETEKST_ERROR_CONNECTION_CLOSED;
+        case ERR_RTE:
+        case ERR_CONN:
+        case ERR_IF:
+            return TELETEKST_ERROR_CONNECT;
+        default:
+            return TELETEKST_ERROR_REQUEST_START;
+    }
+}
+
 /**
  * @brief Allocate an lwIP TLS connection and configure hostname validation.
  *
@@ -414,6 +520,9 @@ static struct altcp_pcb *teletekst_tls_alloc(void *arg, u8_t ip_type) {
         mbedtls_ssl_set_hostname(context, teletekst_tls_hostname) != 0) {
         altcp_abort(connection);
         return NULL;
+    }
+    if (teletekst_tls_insecure) {
+        mbedtls_ssl_set_hs_authmode(context, MBEDTLS_SSL_VERIFY_NONE);
     }
     return connection;
 }
@@ -513,11 +622,18 @@ static void teletekst_request_done(
 ) {
     (void)argument;
     (void)received_length;
-    (void)error;
+
+    mutex_enter_blocking(&wifi_mutex);
+    teletekst_http_result = (uint8_t)result;
+    teletekst_lwip_error = (int8_t)error;
+    teletekst_http_status = server_status <= UINT16_MAX
+        ? (uint16_t)server_status
+        : 0u;
+    mutex_exit(&wifi_mutex);
 
     teletekst_tls_cleanup_pending = true;
     if (result != HTTPC_RESULT_OK) {
-        teletekst_set_failed(TELETEKST_ERROR_NETWORK);
+        teletekst_set_failed(teletekst_http_error(result));
         return;
     }
     if (server_status == 404u) {
@@ -540,20 +656,22 @@ static void teletekst_request_done(
     }
 
     teletekst_http_body[body_length] = '\0';
-    uint8_t next_subpage = 0u;
-    if (!teletekst_decode_nos_json(
+    teletekst_metadata_t metadata;
+    if (!teletekst_decode_json(
             teletekst_http_body,
             body_length,
             page,
             teletekst_screen,
-            &next_subpage
+            &metadata
         )) {
         teletekst_set_failed(TELETEKST_ERROR_INVALID_DATA);
         return;
     }
 
     mutex_enter_blocking(&wifi_mutex);
-    teletekst_next_subpage = next_subpage;
+    teletekst_next_subpage = metadata.next_subpage;
+    teletekst_previous_page = metadata.previous_page;
+    teletekst_next_page = metadata.next_page;
     teletekst_error = TELETEKST_ERROR_NONE;
     teletekst_fetch_state = TELETEKST_FETCH_COMPLETE;
     mutex_exit(&wifi_mutex);
@@ -599,54 +717,98 @@ static void teletekst_start_requested_fetch(void) {
         return;
     }
 
-    const int path_length = subpage == 0u
-        ? snprintf(teletekst_path, sizeof(teletekst_path), "/json/%u", page)
-        : snprintf(
-            teletekst_path,
-            sizeof(teletekst_path),
-            "/json/%u-%u",
-            page,
-            subpage
-        );
-    if (path_length < 0 || (size_t)path_length >= sizeof(teletekst_path)) {
-        teletekst_set_failed(TELETEKST_ERROR_INVALID_DATA);
-        return;
-    }
-
     memset(&teletekst_http_settings, 0, sizeof(teletekst_http_settings));
     const char *host;
     uint16_t port;
-    const uint8_t *root_ca;
-    size_t root_ca_size;
+    const uint8_t *root_ca = NULL;
+    size_t root_ca_size = 0u;
+    bool tls = true;
+    custom_endpoint_t custom_endpoint;
     if (source == P2WP_TELETEKST_SOURCE_NOS) {
         host = TELETEKST_NOS_HOST;
         port = TELETEKST_NOS_PORT;
         root_ca = nos_teletekst_root_ca;
         root_ca_size = sizeof(nos_teletekst_root_ca);
-    } else {
+    } else if (source == P2WP_TELETEKST_SOURCE_P2000T) {
         host = TELETEKST_P2000T_HOST;
         port = TELETEKST_P2000T_PORT;
         root_ca = p2000t_teletekst_root_ca;
         root_ca_size = sizeof(p2000t_teletekst_root_ca);
-    }
-    teletekst_tls_hostname = host;
-    teletekst_tls_config = altcp_tls_create_config_client(
-        root_ca,
-        root_ca_size
-    );
-    if (teletekst_tls_config == NULL) {
-        teletekst_set_failed(TELETEKST_ERROR_TLS_CONFIG);
+    } else if (source == P2WP_TELETEKST_SOURCE_ARCHIVE) {
+        host = TELETEKST_ARCHIVE_HOST;
+        port = TELETEKST_ARCHIVE_PORT;
+        root_ca = archive_teletekst_root_ca;
+        root_ca_size = sizeof(archive_teletekst_root_ca);
+    } else if (custom_endpoint_parse(
+                   teletekst_custom_url,
+                   teletekst_custom_url_length,
+                   &custom_endpoint
+               )) {
+        memcpy(
+            teletekst_host,
+            custom_endpoint.host,
+            sizeof(custom_endpoint.host)
+        );
+        host = teletekst_host;
+        port = custom_endpoint.port;
+        tls = custom_endpoint.tls;
+    } else {
+        teletekst_set_failed(TELETEKST_ERROR_INVALID_DATA);
         return;
     }
-    teletekst_tls_allocator.alloc = teletekst_tls_alloc;
-    teletekst_tls_allocator.arg = teletekst_tls_config;
-    teletekst_http_settings.altcp_allocator = &teletekst_tls_allocator;
+
+    bool path_valid;
+    if (source == P2WP_TELETEKST_SOURCE_CUSTOM) {
+        path_valid = custom_endpoint_page_path(
+            &custom_endpoint,
+            page,
+            subpage,
+            teletekst_path,
+            sizeof(teletekst_path)
+        );
+    } else {
+        const int path_length = subpage == 0u
+            ? snprintf(teletekst_path, sizeof(teletekst_path), "/json/%u", page)
+            : snprintf(
+                teletekst_path,
+                sizeof(teletekst_path),
+                "/json/%u-%u",
+                page,
+                subpage
+            );
+        path_valid = path_length >= 0 &&
+            (size_t)path_length < sizeof(teletekst_path);
+    }
+    if (!path_valid) {
+        teletekst_set_failed(TELETEKST_ERROR_INVALID_DATA);
+        return;
+    }
+
+    teletekst_tls_hostname = host;
+    teletekst_tls_insecure = source == P2WP_TELETEKST_SOURCE_CUSTOM;
+    teletekst_tls_config = NULL;
+    if (tls) {
+        teletekst_tls_config = altcp_tls_create_config_client(
+            root_ca,
+            root_ca_size
+        );
+        if (teletekst_tls_config == NULL) {
+            teletekst_set_failed(TELETEKST_ERROR_TLS_CONFIG);
+            return;
+        }
+        teletekst_tls_allocator.alloc = teletekst_tls_alloc;
+        teletekst_tls_allocator.arg = teletekst_tls_config;
+        teletekst_http_settings.altcp_allocator = &teletekst_tls_allocator;
+    }
     teletekst_http_settings.result_fn = teletekst_request_done;
     teletekst_http_settings.headers_done_fn = teletekst_headers_done;
 
     mutex_enter_blocking(&wifi_mutex);
     teletekst_http_length = 0u;
     teletekst_http_overflow = false;
+    teletekst_http_result = 0u;
+    teletekst_lwip_error = 0;
+    teletekst_http_status = 0u;
     mutex_exit(&wifi_mutex);
     const err_t result = httpc_get_file_dns(
         host,
@@ -658,11 +820,190 @@ static void teletekst_start_requested_fetch(void) {
         NULL
     );
     if (result != ERR_OK) {
+        mutex_enter_blocking(&wifi_mutex);
+        teletekst_lwip_error = (int8_t)result;
+        mutex_exit(&wifi_mutex);
         if (teletekst_tls_config != NULL) {
             altcp_tls_free_config(teletekst_tls_config);
             teletekst_tls_config = NULL;
         }
-        teletekst_set_failed(TELETEKST_ERROR_REQUEST_START);
+        teletekst_set_failed(teletekst_request_start_error(result));
+    }
+}
+
+/** Publish a terminal firmware-version lookup error. */
+static void version_set_failed(uint8_t error) {
+    mutex_enter_blocking(&wifi_mutex);
+    version_check_state = P2WP_VERSION_CHECK_FAILED;
+    version_check_error = error;
+    mutex_exit(&wifi_mutex);
+}
+
+/** Allocate a GitHub TLS connection with hostname validation enabled. */
+static struct altcp_pcb *version_tls_alloc(void *arg, u8_t ip_type) {
+    struct altcp_pcb *connection = altcp_tls_alloc(arg, ip_type);
+    if (connection == NULL) {
+        return NULL;
+    }
+    mbedtls_ssl_context *context = altcp_tls_context(connection);
+    if (context == NULL ||
+        mbedtls_ssl_set_hostname(context, VERSION_HOST) != 0) {
+        altcp_abort(connection);
+        return NULL;
+    }
+    return connection;
+}
+
+/** Accept GitHub response headers; body storage is bounded in the receiver. */
+static err_t version_headers_done(
+    httpc_state_t *connection,
+    void *argument,
+    struct pbuf *headers,
+    u16_t header_length,
+    u32_t content_length
+) {
+    (void)connection;
+    (void)argument;
+    (void)headers;
+    (void)header_length;
+    (void)content_length;
+    return ERR_OK;
+}
+
+/** Collect a bounded prefix of the GitHub release response. */
+static err_t version_receive(
+    void *argument,
+    struct altcp_pcb *connection,
+    struct pbuf *data,
+    err_t error
+) {
+    (void)argument;
+    (void)error;
+    if (data == NULL) {
+        return ERR_OK;
+    }
+
+    mutex_enter_blocking(&wifi_mutex);
+    if (data->tot_len > VERSION_HTTP_BODY_MAX - version_http_length) {
+        version_http_overflow = true;
+    } else {
+        for (struct pbuf *part = data; part != NULL; part = part->next) {
+            memcpy(
+                version_http_body + version_http_length,
+                part->payload,
+                part->len
+            );
+            version_http_length += part->len;
+        }
+    }
+    mutex_exit(&wifi_mutex);
+
+    altcp_recved(connection, data->tot_len);
+    pbuf_free(data);
+    return ERR_OK;
+}
+
+/** Validate the GitHub response and publish its latest semantic version. */
+static void version_request_done(
+    void *argument,
+    httpc_result_t result,
+    u32_t received_length,
+    u32_t server_status,
+    err_t error
+) {
+    (void)argument;
+    (void)received_length;
+    (void)error;
+    version_tls_cleanup_pending = true;
+    if (result != HTTPC_RESULT_OK) {
+        version_set_failed(VERSION_CHECK_ERROR_NETWORK);
+        return;
+    }
+    if (server_status != 200u) {
+        version_set_failed(VERSION_CHECK_ERROR_HTTP_STATUS);
+        return;
+    }
+
+    mutex_enter_blocking(&wifi_mutex);
+    const size_t body_length = version_http_length;
+    mutex_exit(&wifi_mutex);
+    version_http_body[body_length] = '\0';
+    p2wp_release_version_t parsed;
+    if (!p2wp_parse_latest_release(
+            version_http_body,
+            body_length,
+            &parsed
+        )) {
+        version_set_failed(VERSION_CHECK_ERROR_INVALID_DATA);
+        return;
+    }
+
+    mutex_enter_blocking(&wifi_mutex);
+    latest_release_version = parsed;
+    version_check_error = VERSION_CHECK_ERROR_NONE;
+    version_check_state = P2WP_VERSION_CHECK_COMPLETE;
+    mutex_exit(&wifi_mutex);
+}
+
+/** Free version-check TLS state after lwIP releases its connection. */
+static void version_cleanup_tls(void) {
+    if (!version_tls_cleanup_pending) {
+        return;
+    }
+    version_tls_cleanup_pending = false;
+    if (version_tls_config != NULL) {
+        altcp_tls_free_config(version_tls_config);
+        version_tls_config = NULL;
+    }
+}
+
+/** Start an explicitly queued latest-release lookup. */
+static void version_start_requested_check(void) {
+    mutex_enter_blocking(&wifi_mutex);
+    const bool requested = version_check_requested;
+    version_check_requested = false;
+    const bool connected = wifi_connection_state == WIFI_CONNECTED;
+    mutex_exit(&wifi_mutex);
+    if (!requested) {
+        return;
+    }
+    if (!connected) {
+        version_set_failed(VERSION_CHECK_ERROR_NOT_CONNECTED);
+        return;
+    }
+
+    memset(&version_http_settings, 0, sizeof(version_http_settings));
+    version_tls_config = altcp_tls_create_config_client(
+        github_root_ca,
+        sizeof(github_root_ca)
+    );
+    if (version_tls_config == NULL) {
+        version_set_failed(VERSION_CHECK_ERROR_TLS_CONFIG);
+        return;
+    }
+    version_tls_allocator.alloc = version_tls_alloc;
+    version_tls_allocator.arg = version_tls_config;
+    version_http_settings.altcp_allocator = &version_tls_allocator;
+    version_http_settings.result_fn = version_request_done;
+    version_http_settings.headers_done_fn = version_headers_done;
+
+    mutex_enter_blocking(&wifi_mutex);
+    version_http_length = 0u;
+    version_http_overflow = false;
+    mutex_exit(&wifi_mutex);
+    const err_t result = httpc_get_file_dns(
+        VERSION_HOST,
+        VERSION_PORT,
+        VERSION_PATH,
+        &version_http_settings,
+        version_receive,
+        NULL,
+        NULL
+    );
+    if (result != ERR_OK) {
+        altcp_tls_free_config(version_tls_config);
+        version_tls_config = NULL;
+        version_set_failed(VERSION_CHECK_ERROR_REQUEST_START);
     }
 }
 
@@ -790,6 +1131,7 @@ static void wifi_service(void) {
     // A completed HTTP callback runs inside poll(). The connection has been
     // released when poll returns, so its TLS configuration is now safe to free.
     teletekst_cleanup_tls();
+    version_cleanup_tls();
 
     if (wifi_scan_active && !cyw43_wifi_scan_active(&cyw43_state)) {
         mutex_enter_blocking(&wifi_mutex);
@@ -1015,6 +1357,29 @@ static void wifi_profile_service(void) {
     mutex_exit(&wifi_mutex);
 }
 
+/** Execute a queued URL or cartridge-setting save on flash-safe core 0. */
+static void custom_url_store_service(void) {
+    char url[CUSTOM_ENDPOINT_URL_MAX];
+    uint8_t url_length = 0u;
+
+    mutex_enter_blocking(&wifi_mutex);
+    const uint8_t operation = stored_custom_url_operation;
+    const uint8_t auto_start_source = stored_auto_start_source;
+    if (operation == CUSTOM_URL_OPERATION_SAVE) {
+        url_length = stored_custom_url_length;
+        memcpy(url, stored_custom_url, url_length);
+    }
+    stored_custom_url_operation = CUSTOM_URL_OPERATION_NONE;
+    mutex_exit(&wifi_mutex);
+
+    if (url_length != 0u) {
+        (void)custom_url_store_save(url, url_length);
+        memset(url, 0, sizeof(url));
+    } else if (operation == CUSTOM_URL_OPERATION_SETTINGS_SAVE) {
+        (void)custom_url_store_settings_save(auto_start_source);
+    }
+}
+
 /**
  * @brief Initialize CYW43 and run the permanent core-0 network service loop.
  *
@@ -1050,6 +1415,7 @@ static void wifi_radio_main(void) {
         wifi_scan_requested = false;
         wifi_connect_requested = false;
         teletekst_fetch_requested = false;
+        version_check_requested = false;
     }
     mutex_exit(&wifi_mutex);
 
@@ -1065,8 +1431,10 @@ static void wifi_radio_main(void) {
         // configuration before a newly queued fetch can allocate another one.
         wifi_service();
         wifi_profile_service();
+        custom_url_store_service();
         wifi_start_requested_scan();
         wifi_start_requested_connection();
+        version_start_requested_check();
         teletekst_start_requested_fetch();
         tight_loop_contents();
     }
@@ -1092,6 +1460,7 @@ static void wifi_check_deadlines(void) {
         wifi_scan_requested = false;
         wifi_connect_requested = false;
         teletekst_fetch_requested = false;
+        version_check_requested = false;
     } else if (wifi_scan_state == WIFI_SCAN_RUNNING &&
                time_reached(wifi_scan_deadline)) {
         wifi_scan_state = WIFI_SCAN_FAILED;
@@ -1243,21 +1612,549 @@ static bool mailbox_send(const uint8_t *data, size_t length) {
     return true;
 }
 
-/**
- * @brief Encode and send an error response without changing retry-cache state.
- *
- * @param source Request whose type and sequence are reflected in the response.
- * @param error_code P2WP_ERROR_* payload value.
- */
-static void send_uncached_error(const p2wp_frame_t *source, uint8_t error_code) {
-    p2wp_frame_t response = {
-        .version = source->version,
-        .flags = P2WP_FLAG_RESPONSE | P2WP_FLAG_ERROR,
-        .type = source->type,
-        .sequence = source->sequence,
-        .payload_length = 1,
-        .payload = {error_code},
-    };
+
+static uint8_t pico_capabilities(void *context) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    const bool wifi_capable = wifi_init_state != WIFI_INIT_FAILED;
+    mutex_exit(&wifi_mutex);
+    return P2WP_CAPABILITY_ECHO |
+        P2WP_CAPABILITY_DEVICE_INFO |
+        P2WP_CAPABILITY_VERSION_CHECK |
+        (wifi_capable
+            ? P2WP_CAPABILITY_WIFI | P2WP_CAPABILITY_INTERNET |
+                P2WP_CAPABILITY_WIFI_PROFILE
+            : 0u);
+}
+
+static uint8_t pico_version_check_start(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    version_check_state = P2WP_VERSION_CHECK_RUNNING;
+    version_check_error = VERSION_CHECK_ERROR_NONE;
+    memset(&latest_release_version, 0, sizeof(latest_release_version));
+    version_check_requested = true;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_version_check_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    response->payload[0] = version_check_state;
+    response->payload[1] = version_check_error;
+    response->payload[2] = latest_release_version.major;
+    response->payload[3] = latest_release_version.minor;
+    response->payload[4] = latest_release_version.patch;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 5u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_scan_start(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    if (wifi_scan_state == WIFI_SCAN_RUNNING) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    wifi_result_count = 0u;
+    wifi_scan_state = WIFI_SCAN_RUNNING;
+    wifi_scan_deadline = make_timeout_time_ms(WIFI_SCAN_QUEUE_TIMEOUT_MS);
+    wifi_scan_requested = true;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_scan_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    response->payload[0] = wifi_scan_state;
+    response->payload[1] = wifi_result_count;
+    response->payload[2] = wifi_init_state;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 3u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_scan_result(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    if (wifi_scan_state != WIFI_SCAN_COMPLETE ||
+        frame->payload[0] >= wifi_result_count) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    const uint8_t index = frame->payload[0];
+    const wifi_result_t *result = &wifi_results[index];
+    response->payload[0] = index;
+    int16_t rssi = result->rssi;
+    if (rssi < -127) {
+        rssi = -127;
+    } else if (rssi > 0) {
+        rssi = 0;
+    }
+    response->payload[1] = (uint8_t)(int8_t)rssi;
+    response->payload[2] = result->security;
+    response->payload[3] = result->ssid_length;
+    memcpy(response->payload + 4u, result->ssid, result->ssid_length);
+    response->payload_length = 4u + result->ssid_length;
+    mutex_exit(&wifi_mutex);
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_connect(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    if (wifi_scan_state != WIFI_SCAN_COMPLETE ||
+        frame->payload[0] >= wifi_result_count) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    const wifi_result_t *result = &wifi_results[frame->payload[0]];
+    const uint8_t password_length = frame->payload[1];
+    if (result->security == WIFI_SECURITY_UNSUPPORTED ||
+        (result->security == WIFI_SECURITY_OPEN && password_length != 0u) ||
+        (result->security == WIFI_SECURITY_PSK &&
+         (password_length < 8u || password_length > WIFI_MAX_PASSWORD))) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    memcpy(wifi_ssid, result->ssid, result->ssid_length);
+    wifi_ssid[result->ssid_length] = '\0';
+    memcpy(wifi_password, frame->payload + 2u, password_length);
+    wifi_password[password_length] = '\0';
+    wifi_connect_auth = result->auth;
+    wifi_connection_state = WIFI_CONNECTING;
+    wifi_connect_requested = true;
+    mutex_exit(&wifi_mutex);
+    gpio_put(GPIO_WIFI_UP, false);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    response->payload[0] = wifi_connection_state;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 1u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_profile_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    response->payload[0] = stored_profile_state;
+    response->payload[1] = stored_profile_error;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 2u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_profile_connect(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_profile_state != WIFI_PROFILE_STATE_READY ||
+        stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    if (wifi_connection_state == WIFI_CONNECTED) {
+        stored_profile_error = WIFI_PROFILE_OK;
+        mutex_exit(&wifi_mutex);
+        response->payload_length = 0u;
+        return P2WP_FIRMWARE_COMMAND_OK;
+    }
+    stored_profile_error = WIFI_PROFILE_OK;
+    stored_profile_state = WIFI_PROFILE_STATE_BUSY;
+    stored_profile_operation = WIFI_PROFILE_OPERATION_CONNECT;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_profile_save(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_profile_state == WIFI_PROFILE_STATE_BUSY ||
+        stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    if (wifi_connection_state != WIFI_CONNECTED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    stored_profile_password_length = frame->payload[0];
+    stored_profile_ssid_length = (uint8_t)strlen(wifi_ssid);
+    stored_profile_auth = wifi_connect_auth;
+    memcpy(
+        stored_profile_password,
+        frame->payload + 1u,
+        stored_profile_password_length
+    );
+    memcpy(stored_profile_ssid, wifi_ssid, stored_profile_ssid_length);
+    stored_profile_error = WIFI_PROFILE_OK;
+    stored_profile_state = WIFI_PROFILE_STATE_BUSY;
+    stored_profile_operation = WIFI_PROFILE_OPERATION_SAVE;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_wifi_profile_delete(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_profile_state == WIFI_PROFILE_STATE_BUSY ||
+        stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    stored_profile_error = WIFI_PROFILE_OK;
+    stored_profile_state = WIFI_PROFILE_STATE_BUSY;
+    stored_profile_operation = WIFI_PROFILE_OPERATION_DELETE;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_fetch_start(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    const uint16_t page =
+        (uint16_t)frame->payload[0] |
+        ((uint16_t)frame->payload[1] << 8u);
+    const uint8_t source = frame->payload[3];
+    if (source == P2WP_TELETEKST_SOURCE_CUSTOM) {
+        custom_endpoint_t endpoint;
+        if (!custom_endpoint_parse(
+                (const char *)frame->payload + 5u,
+                frame->payload[4],
+                &endpoint
+            )) {
+            return P2WP_ERROR_INVALID_PAYLOAD;
+        }
+    }
+    mutex_enter_blocking(&wifi_mutex);
+    if (wifi_init_state == WIFI_INIT_FAILED ||
+        wifi_connection_state != WIFI_CONNECTED) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_UNAVAILABLE;
+    }
+    if (teletekst_fetch_requested ||
+        teletekst_fetch_state == TELETEKST_FETCH_CONNECTING ||
+        teletekst_fetch_state == TELETEKST_FETCH_RECEIVING) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    teletekst_requested_page = page;
+    teletekst_requested_subpage = frame->payload[2];
+    teletekst_requested_source = source;
+    teletekst_next_subpage = 0u;
+    teletekst_previous_page = 0u;
+    teletekst_next_page = 0u;
+    teletekst_custom_url_length = 0u;
+    if (source == P2WP_TELETEKST_SOURCE_CUSTOM) {
+        teletekst_custom_url_length = frame->payload[4];
+        memcpy(
+            teletekst_custom_url,
+            frame->payload + 5u,
+            teletekst_custom_url_length
+        );
+        teletekst_custom_url[teletekst_custom_url_length] = '\0';
+    }
+    teletekst_http_length = 0u;
+    teletekst_http_overflow = false;
+    teletekst_error = TELETEKST_ERROR_NONE;
+    teletekst_http_result = 0u;
+    teletekst_lwip_error = 0;
+    teletekst_http_status = 0u;
+    teletekst_fetch_state = TELETEKST_FETCH_CONNECTING;
+    teletekst_fetch_requested = true;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_fetch_status(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    response->payload[0] = teletekst_fetch_state;
+    response->payload[1] = teletekst_error;
+    size_t received = teletekst_http_length;
+    if (received > UINT16_MAX) {
+        received = UINT16_MAX;
+    }
+    response->payload[2] = (uint8_t)received;
+    response->payload[3] = (uint8_t)(received >> 8u);
+    response->payload[4] = teletekst_next_subpage;
+    uint8_t fetch_error = teletekst_error;
+    if (frame->version < 7u && fetch_error >= TELETEKST_ERROR_DNS) {
+        fetch_error = TELETEKST_ERROR_NETWORK;
+    }
+    response->payload[1] = fetch_error;
+    const uint16_t previous_page = teletekst_previous_page;
+    const uint16_t next_page = teletekst_next_page;
+    const uint8_t http_result = teletekst_http_result;
+    const int8_t lwip_error = teletekst_lwip_error;
+    const uint16_t http_status = teletekst_http_status;
+    mutex_exit(&wifi_mutex);
+    if (frame->version >= 3u) {
+        uint8_t local_clock[7];
+        const bool clock_is_valid = clock_local_components(
+            clock_now(),
+            local_clock
+        );
+        memcpy(response->payload + 5u, local_clock, 3u);
+        response->payload[8] = clock_is_valid ? 1u : 0u;
+        memcpy(response->payload + 9u, local_clock + 3u, 4u);
+        if (frame->version >= 4u) {
+            response->payload[13] = (uint8_t)previous_page;
+            response->payload[14] = (uint8_t)(previous_page >> 8u);
+            response->payload[15] = (uint8_t)next_page;
+            response->payload[16] = (uint8_t)(next_page >> 8u);
+            if (frame->version >= 7u) {
+                response->payload[17] = http_result;
+                response->payload[18] = (uint8_t)lwip_error;
+                response->payload[19] = (uint8_t)http_status;
+                response->payload[20] = (uint8_t)(http_status >> 8u);
+            }
+        }
+        response->payload_length = frame->version >= 7u
+            ? 21u
+            : (frame->version >= 4u ? 17u : 13u);
+    } else {
+        response->payload_length = 5u;
+    }
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_fetch_rows(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    if (teletekst_fetch_state != TELETEKST_FETCH_COMPLETE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    response->payload_length = TELETEKST_CHUNK_SIZE;
+    memcpy(
+        response->payload,
+        teletekst_screen +
+            (size_t)frame->payload[0] * TELETEKST_CHUNK_SIZE,
+        TELETEKST_CHUNK_SIZE
+    );
+    mutex_exit(&wifi_mutex);
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_custom_url_load(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    char url[CUSTOM_ENDPOINT_URL_MAX + 1u];
+    uint8_t url_length;
+    const custom_url_store_result_t result = custom_url_store_load(
+        url,
+        &url_length
+    );
+    if (result == CUSTOM_URL_STORE_NOT_FOUND ||
+        result == CUSTOM_URL_STORE_CORRUPT) {
+        response->payload[0] = 0u;
+        response->payload_length = 1u;
+        return P2WP_FIRMWARE_COMMAND_OK;
+    }
+    if (result != CUSTOM_URL_STORE_OK) {
+        return P2WP_ERROR_INTERNAL;
+    }
+    response->payload[0] = url_length;
+    memcpy(response->payload + 1u, url, url_length);
+    response->payload_length = (uint16_t)(1u + url_length);
+    memset(url, 0, sizeof(url));
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_custom_url_save(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    const uint8_t url_length = frame->payload[0];
+    custom_endpoint_t endpoint;
+    if (!custom_endpoint_parse(
+            (const char *)frame->payload + 1u,
+            url_length,
+            &endpoint
+        )) {
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_custom_url_operation != CUSTOM_URL_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    stored_custom_url_length = url_length;
+    memcpy(stored_custom_url, frame->payload + 1u, url_length);
+    stored_custom_url_operation = CUSTOM_URL_OPERATION_SAVE;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_settings_load(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    (void)frame;
+    uint8_t auto_start_source = P2WP_TELETEKST_AUTOSTART_DISABLED;
+    const custom_url_store_result_t result =
+        custom_url_store_settings_load(&auto_start_source);
+    if (result != CUSTOM_URL_STORE_OK &&
+        result != CUSTOM_URL_STORE_NOT_FOUND &&
+        result != CUSTOM_URL_STORE_CORRUPT) {
+        return P2WP_ERROR_INTERNAL;
+    }
+    response->payload[0] = auto_start_source;
+    response->payload_length = 1u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static uint8_t pico_teletekst_settings_save(
+    void *context,
+    const p2wp_frame_t *frame,
+    p2wp_frame_t *response
+) {
+    (void)context;
+    mutex_enter_blocking(&wifi_mutex);
+    if (stored_custom_url_operation != CUSTOM_URL_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    stored_auto_start_source = frame->payload[0];
+    stored_custom_url_operation = CUSTOM_URL_OPERATION_SETTINGS_SAVE;
+    mutex_exit(&wifi_mutex);
+    response->payload_length = 0u;
+    return P2WP_FIRMWARE_COMMAND_OK;
+}
+
+static void pico_clear_sensitive(void *context) {
+    (void)context;
+    mbedtls_platform_zeroize(parser.body, sizeof(parser.body));
+}
+
+static const p2wp_firmware_operations_t pico_firmware_operations = {
+    .capabilities = pico_capabilities,
+    .version_check_start = pico_version_check_start,
+    .version_check_status = pico_version_check_status,
+    .wifi_scan_start = pico_wifi_scan_start,
+    .wifi_scan_status = pico_wifi_scan_status,
+    .wifi_scan_result = pico_wifi_scan_result,
+    .wifi_connect = pico_wifi_connect,
+    .wifi_status = pico_wifi_status,
+    .wifi_profile_status = pico_wifi_profile_status,
+    .wifi_profile_connect = pico_wifi_profile_connect,
+    .wifi_profile_save = pico_wifi_profile_save,
+    .wifi_profile_delete = pico_wifi_profile_delete,
+    .teletekst_fetch_start = pico_teletekst_fetch_start,
+    .teletekst_fetch_status = pico_teletekst_fetch_status,
+    .teletekst_fetch_rows = pico_teletekst_fetch_rows,
+    .teletekst_custom_url_load = pico_teletekst_custom_url_load,
+    .teletekst_custom_url_save = pico_teletekst_custom_url_save,
+    .teletekst_settings_load = pico_teletekst_settings_load,
+    .teletekst_settings_save = pico_teletekst_settings_save,
+    .clear_sensitive = pico_clear_sensitive,
+};
+
+static void handle_request(p2wp_frame_t *frame) {
+    p2wp_frame_t response;
+    p2wp_firmware_core_handle(&firmware_core, frame, &response);
     const size_t length = p2wp_encode(
         &response,
         encoded_response,
@@ -1265,541 +2162,6 @@ static void send_uncached_error(const p2wp_frame_t *source, uint8_t error_code) 
     );
     if (length == 0u || !mailbox_send(encoded_response, length)) {
         gpio_put(GPIO_ERROR, true);
-    }
-}
-
-/**
- * @brief Encode, cache, and send a successful response.
- *
- * The cached request identity makes cartridge retries idempotent while still
- * detecting reuse of a sequence number for different content.
- *
- * @param source Request associated with the response.
- * @param response Decoded response to encode and transmit.
- */
-static void cache_and_send(
-    const p2wp_frame_t *source,
-    const p2wp_frame_t *response
-) {
-    const size_t length = p2wp_encode(
-        response,
-        encoded_response,
-        sizeof(encoded_response)
-    );
-    if (length == 0u) {
-        gpio_put(GPIO_ERROR, true);
-        return;
-    }
-
-    memcpy(cached_response, encoded_response, length);
-    cached_response_length = length;
-    cached_request_type = source->type;
-    cached_request_sequence = source->sequence;
-    cached_request_identity = p2wp_frame_identity(source);
-    cached_request_valid = true;
-
-    if (!mailbox_send(encoded_response, length)) {
-        gpio_put(GPIO_ERROR, true);
-    }
-}
-
-/**
- * @brief Validate the fixed HELLO signature and ordered version range.
- *
- * @param frame Candidate HELLO request.
- * @return true when its payload is structurally and version compatible.
- */
-static bool hello_is_valid(const p2wp_frame_t *frame) {
-    static const uint8_t magic[] = {'P', '2', 'W', 'P'};
-    return frame->payload_length == 8u &&
-        memcmp(frame->payload, magic, sizeof(magic)) == 0 &&
-        frame->payload[4] <= frame->payload[5];
-}
-
-/** Select the newest protocol revision shared with a valid HELLO request. */
-static uint8_t hello_select_version(const p2wp_frame_t *frame) {
-    return p2wp_select_version(
-        frame->payload[4],
-        frame->payload[5],
-        P2WP_MIN_VERSION,
-        P2WP_MAX_VERSION
-    );
-}
-
-/**
- * @brief Check that a request type which carries no arguments is empty.
- *
- * @param frame Request to inspect.
- * @return true when payload_length is zero.
- */
-static bool empty_request(const p2wp_frame_t *frame) {
-    return frame->payload_length == 0u;
-}
-
-/**
- * @brief Validate and dispatch one decoded negotiated P2WP request.
- *
- * Fast mailbox operations are completed immediately. Network and flash work is
- * queued in mutex-protected state for core 0, then observed through status
- * requests. Password bytes are wiped after they have been copied.
- *
- * @param frame Mutable decoded request; secret payload bytes may be zeroized.
- */
-static void handle_request(const p2wp_frame_t *frame) {
-    const uint16_t identity = p2wp_frame_identity(frame);
-    if (cached_request_valid &&
-        frame->type == cached_request_type &&
-        frame->sequence == cached_request_sequence &&
-        identity == cached_request_identity) {
-        if (!mailbox_send(cached_response, cached_response_length)) {
-            gpio_put(GPIO_ERROR, true);
-        }
-        return;
-    }
-
-    if ((frame->flags & P2WP_FLAG_RESPONSE) != 0u) {
-        send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-        return;
-    }
-
-    if (frame->type == P2WP_TYPE_HELLO) {
-        if (frame->version != P2WP_BOOTSTRAP_VERSION) {
-            send_uncached_error(frame, P2WP_ERROR_UNSUPPORTED_VERSION);
-            return;
-        }
-    } else if (!p2wp_session_valid || frame->version != p2wp_session_version) {
-        send_uncached_error(frame, P2WP_ERROR_UNSUPPORTED_VERSION);
-        return;
-    }
-
-    if (frame->type != P2WP_TYPE_HELLO && cached_request_valid &&
-        frame->sequence == cached_request_sequence) {
-        send_uncached_error(frame, P2WP_ERROR_SEQUENCE_CONFLICT);
-        return;
-    }
-
-    p2wp_frame_t response = {
-        .version = frame->type == P2WP_TYPE_HELLO
-            ? P2WP_BOOTSTRAP_VERSION
-            : p2wp_session_version,
-        .flags = P2WP_FLAG_RESPONSE,
-        .type = frame->type,
-        .sequence = frame->sequence,
-    };
-
-    switch (frame->type) {
-        case P2WP_TYPE_HELLO: {
-            if (!hello_is_valid(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            const uint8_t selected_version = hello_select_version(frame);
-            if (selected_version == 0u) {
-                send_uncached_error(frame, P2WP_ERROR_UNSUPPORTED_VERSION);
-                return;
-            }
-
-            const uint16_t host_limit =
-                (uint16_t)frame->payload[6] | ((uint16_t)frame->payload[7] << 8);
-            const uint16_t negotiated_limit = host_limit < P2WP_MAX_PAYLOAD
-                ? host_limit
-                : P2WP_MAX_PAYLOAD;
-            if (negotiated_limit == 0u) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            static const uint8_t magic[] = {'P', '2', 'W', 'P'};
-            memcpy(response.payload, magic, sizeof(magic));
-            response.payload[4] = selected_version;
-            mutex_enter_blocking(&wifi_mutex);
-            const bool wifi_capable = wifi_init_state != WIFI_INIT_FAILED;
-            mutex_exit(&wifi_mutex);
-            response.payload[5] = P2WP_CAPABILITY_ECHO |
-                (wifi_capable
-                    ? P2WP_CAPABILITY_WIFI | P2WP_CAPABILITY_INTERNET |
-                        P2WP_CAPABILITY_WIFI_PROFILE
-                    : 0u);
-            response.payload[6] = (uint8_t)negotiated_limit;
-            response.payload[7] = (uint8_t)(negotiated_limit >> 8);
-            response.payload_length = 8u;
-
-            cached_request_valid = false;
-            p2wp_session_version = selected_version;
-            p2wp_session_valid = true;
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_ECHO:
-            response.payload_length = frame->payload_length;
-            if (frame->payload_length != 0u) {
-                memcpy(response.payload, frame->payload, frame->payload_length);
-            }
-            cache_and_send(frame, &response);
-            break;
-
-        case P2WP_TYPE_WIFI_SCAN_START: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            if (wifi_scan_state == WIFI_SCAN_RUNNING) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-
-            wifi_result_count = 0u;
-            wifi_scan_state = WIFI_SCAN_RUNNING;
-            wifi_scan_deadline =
-                make_timeout_time_ms(WIFI_SCAN_QUEUE_TIMEOUT_MS);
-            wifi_scan_requested = true;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_SCAN_STATUS: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            response.payload[0] = wifi_scan_state;
-            response.payload[1] = wifi_result_count;
-            response.payload[2] = wifi_init_state;
-            mutex_exit(&wifi_mutex);
-            response.payload_length = 3u;
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_SCAN_RESULT: {
-            if (frame->payload_length != 1u) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            if (wifi_scan_state != WIFI_SCAN_COMPLETE ||
-                frame->payload[0] >= wifi_result_count) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            const uint8_t index = frame->payload[0];
-            const wifi_result_t *result = &wifi_results[index];
-            response.payload[0] = index;
-            int16_t rssi = result->rssi;
-            if (rssi < -127) {
-                rssi = -127;
-            } else if (rssi > 0) {
-                rssi = 0;
-            }
-            response.payload[1] = (uint8_t)(int8_t)rssi;
-            response.payload[2] = result->security;
-            response.payload[3] = result->ssid_length;
-            memcpy(response.payload + 4u, result->ssid, result->ssid_length);
-            response.payload_length = 4u + result->ssid_length;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_CONNECT: {
-            if (frame->payload_length < 2u ||
-                frame->payload[1] > WIFI_MAX_PASSWORD ||
-                frame->payload_length != (uint16_t)(2u + frame->payload[1])) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            if (wifi_scan_state != WIFI_SCAN_COMPLETE ||
-                frame->payload[0] >= wifi_result_count) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            const wifi_result_t *result = &wifi_results[frame->payload[0]];
-            const uint8_t password_length = frame->payload[1];
-            if (result->security == WIFI_SECURITY_UNSUPPORTED ||
-                (result->security == WIFI_SECURITY_OPEN && password_length != 0u) ||
-                (result->security == WIFI_SECURITY_PSK &&
-                 (password_length < 8u || password_length > WIFI_MAX_PASSWORD))) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            memcpy(wifi_ssid, result->ssid, result->ssid_length);
-            wifi_ssid[result->ssid_length] = '\0';
-            memcpy(wifi_password, frame->payload + 2u, password_length);
-            wifi_password[password_length] = '\0';
-            wifi_connect_auth = result->auth;
-            wifi_connection_state = WIFI_CONNECTING;
-            wifi_connect_requested = true;
-            mutex_exit(&wifi_mutex);
-            gpio_put(GPIO_WIFI_UP, false);
-            cache_and_send(frame, &response);
-            mbedtls_platform_zeroize(
-                (uint8_t *)frame->payload + 2u,
-                password_length
-            );
-            mbedtls_platform_zeroize(parser.body, sizeof(parser.body));
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_STATUS: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            response.payload[0] = wifi_connection_state;
-            mutex_exit(&wifi_mutex);
-            response.payload_length = 1u;
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_PROFILE_STATUS: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            response.payload[0] = stored_profile_state;
-            response.payload[1] = stored_profile_error;
-            mutex_exit(&wifi_mutex);
-            response.payload_length = 2u;
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_PROFILE_CONNECT: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            if (stored_profile_state != WIFI_PROFILE_STATE_READY ||
-                stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-            // A P2000T-only reset leaves the Pico and Wi-Fi association alive.
-            // Treat that as a successful profile connection instead of asking
-            // CYW43 to reconnect an interface that is already online.
-            if (wifi_connection_state == WIFI_CONNECTED) {
-                stored_profile_error = WIFI_PROFILE_OK;
-                mutex_exit(&wifi_mutex);
-                cache_and_send(frame, &response);
-                break;
-            }
-            stored_profile_error = WIFI_PROFILE_OK;
-            stored_profile_state = WIFI_PROFILE_STATE_BUSY;
-            stored_profile_operation = WIFI_PROFILE_OPERATION_CONNECT;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_PROFILE_SAVE: {
-            if (frame->payload_length < 1u ||
-                frame->payload[0] > WIFI_PROFILE_MAX_PASSWORD ||
-                frame->payload_length != (uint16_t)(1u + frame->payload[0])) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            if (stored_profile_state == WIFI_PROFILE_STATE_BUSY ||
-                stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-            if (wifi_connection_state != WIFI_CONNECTED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            stored_profile_password_length = frame->payload[0];
-            stored_profile_ssid_length = (uint8_t)strlen(wifi_ssid);
-            stored_profile_auth = wifi_connect_auth;
-            memcpy(
-                stored_profile_password,
-                frame->payload + 1u,
-                stored_profile_password_length
-            );
-            memcpy(
-                stored_profile_ssid,
-                wifi_ssid,
-                stored_profile_ssid_length
-            );
-            stored_profile_error = WIFI_PROFILE_OK;
-            stored_profile_state = WIFI_PROFILE_STATE_BUSY;
-            stored_profile_operation = WIFI_PROFILE_OPERATION_SAVE;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            mbedtls_platform_zeroize(
-                (uint8_t *)frame->payload + 1u,
-                frame->payload[0]
-            );
-            mbedtls_platform_zeroize(parser.body, sizeof(parser.body));
-            break;
-        }
-
-        case P2WP_TYPE_WIFI_PROFILE_DELETE: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            if (stored_profile_state == WIFI_PROFILE_STATE_BUSY ||
-                stored_profile_operation != WIFI_PROFILE_OPERATION_NONE) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-            stored_profile_error = WIFI_PROFILE_OK;
-            stored_profile_state = WIFI_PROFILE_STATE_BUSY;
-            stored_profile_operation = WIFI_PROFILE_OPERATION_DELETE;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_TELETEKST_FETCH_START: {
-            if (frame->payload_length != 4u) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            const uint16_t page =
-                (uint16_t)frame->payload[0] |
-                ((uint16_t)frame->payload[1] << 8u);
-            const uint8_t subpage = frame->payload[2];
-            const uint8_t source = frame->payload[3];
-            if (page < 100u || page > 899u || subpage > 99u ||
-                source > P2WP_TELETEKST_SOURCE_P2000T) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-
-            mutex_enter_blocking(&wifi_mutex);
-            if (wifi_init_state == WIFI_INIT_FAILED ||
-                wifi_connection_state != WIFI_CONNECTED) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_UNAVAILABLE);
-                return;
-            }
-            if (teletekst_fetch_requested ||
-                teletekst_fetch_state == TELETEKST_FETCH_CONNECTING ||
-                teletekst_fetch_state == TELETEKST_FETCH_RECEIVING) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_WIFI_BUSY);
-                return;
-            }
-            teletekst_requested_page = page;
-            teletekst_requested_subpage = subpage;
-            teletekst_requested_source = source;
-            teletekst_next_subpage = 0u;
-            teletekst_http_length = 0u;
-            teletekst_http_overflow = false;
-            teletekst_error = TELETEKST_ERROR_NONE;
-            teletekst_fetch_state = TELETEKST_FETCH_CONNECTING;
-            teletekst_fetch_requested = true;
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_TELETEKST_FETCH_STATUS: {
-            if (!empty_request(frame)) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            response.payload[0] = teletekst_fetch_state;
-            response.payload[1] = teletekst_error;
-            size_t received = teletekst_http_length;
-            if (received > UINT16_MAX) {
-                received = UINT16_MAX;
-            }
-            response.payload[2] = (uint8_t)received;
-            response.payload[3] = (uint8_t)(received >> 8u);
-            response.payload[4] = teletekst_next_subpage;
-            mutex_exit(&wifi_mutex);
-            if (p2wp_session_version >= 3u) {
-                uint8_t local_clock[7];
-                const bool clock_is_valid = clock_local_components(
-                    clock_now(), local_clock
-                );
-                memcpy(response.payload + 5u, local_clock, 3u);
-                response.payload[8] = clock_is_valid ? 1u : 0u;
-                memcpy(response.payload + 9u, local_clock + 3u, 4u);
-                response.payload_length = 13u;
-            } else {
-                response.payload_length = 5u;
-            }
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        case P2WP_TYPE_TELETEKST_FETCH_ROWS: {
-            if (frame->payload_length != 1u ||
-                frame->payload[0] >= TELETEKST_CHUNK_COUNT) {
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            mutex_enter_blocking(&wifi_mutex);
-            if (teletekst_fetch_state != TELETEKST_FETCH_COMPLETE) {
-                mutex_exit(&wifi_mutex);
-                send_uncached_error(frame, P2WP_ERROR_INVALID_PAYLOAD);
-                return;
-            }
-            response.payload_length = TELETEKST_CHUNK_SIZE;
-            memcpy(
-                response.payload,
-                teletekst_screen +
-                    (size_t)frame->payload[0] * TELETEKST_CHUNK_SIZE,
-                TELETEKST_CHUNK_SIZE
-            );
-            mutex_exit(&wifi_mutex);
-            cache_and_send(frame, &response);
-            break;
-        }
-
-        default:
-            send_uncached_error(frame, P2WP_ERROR_UNKNOWN_TYPE);
-            break;
     }
 }
 
@@ -1855,8 +2217,14 @@ static void mailbox_core_main(void) {
 int main(void) {
     mailbox_init();
     mutex_init(&wifi_mutex);
-    p2wp_session_valid = false;
-    p2wp_session_version = P2WP_BOOTSTRAP_VERSION;
+    p2wp_firmware_core_init(
+        &firmware_core,
+        &pico_firmware_operations,
+        NULL,
+        hardware_model
+    );
+    version_check_state = P2WP_VERSION_CHECK_IDLE;
+    version_check_error = VERSION_CHECK_ERROR_NONE;
     wifi_init_state = WIFI_INIT_STARTING;
     stored_profile_state = wifi_profile_present()
         ? WIFI_PROFILE_STATE_READY

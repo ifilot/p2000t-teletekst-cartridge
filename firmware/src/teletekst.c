@@ -331,6 +331,42 @@ static bool parse_next_subpage(
     return true;
 }
 
+/** Parse an optional empty-or-three-digit neighboring page property. */
+static bool parse_page_link(
+    const char *json,
+    const char *end,
+    const char *key,
+    uint16_t *page
+) {
+    const char *value = find_json_string(json, end, key);
+    *page = 0u;
+    if (value == NULL) {
+        return true;
+    }
+    json_string_reader_t reader = {.position = value, .end = end};
+    unsigned parsed = 0u;
+    unsigned digits = 0u;
+    while (true) {
+        const int32_t character = json_string_next(&reader);
+        if (character == -1) {
+            break;
+        }
+        if (character < '0' || character > '9' || digits == 3u) {
+            return false;
+        }
+        parsed = parsed * 10u + (unsigned)(character - '0');
+        ++digits;
+    }
+    if (digits == 0u) {
+        return true;
+    }
+    if (digits != 3u || parsed < 100u || parsed > 899u) {
+        return false;
+    }
+    *page = (uint16_t)parsed;
+    return true;
+}
+
 /**
  * @brief Translate a NOS CSS colour name into an SAA5050 colour index.
  *
@@ -1002,4 +1038,39 @@ bool teletekst_decode_nos_json(
         next_subpage,
         NULL
     ) == TELETEKST_DECODE_OK;
+}
+
+/** @copydoc teletekst_decode_json */
+bool teletekst_decode_json(
+    const char *json,
+    size_t json_length,
+    uint16_t requested_page,
+    uint8_t screen[TELETEKST_SCREEN_SIZE],
+    teletekst_metadata_t *metadata
+) {
+    if (metadata == NULL) {
+        return false;
+    }
+    teletekst_metadata_t parsed = {0};
+    if (!teletekst_decode_nos_json(
+            json,
+            json_length,
+            requested_page,
+            screen,
+            &parsed.next_subpage
+        )) {
+        return false;
+    }
+    const char *end = json + json_length;
+    if (!parse_page_link(
+            json,
+            end,
+            "prevPage",
+            &parsed.previous_page
+        ) ||
+        !parse_page_link(json, end, "nextPage", &parsed.next_page)) {
+        return false;
+    }
+    *metadata = parsed;
+    return true;
 }
