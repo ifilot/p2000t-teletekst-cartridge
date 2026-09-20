@@ -4,6 +4,64 @@
 `0x1010`, communicates with the slot-2 Pico interface at ports `0x40` through
 `0x42`, and writes progress directly to the P2000T video RAM at `0x5000`.
 
+## Z88DK C migration
+
+The parallel `cartridge-c` tree is the incremental replacement for the
+assembly implementation. It currently provides the custom P2000T CRT and
+memory map, C video-RAM access, monitor and cartridge-port assembly shims, ROM
+padding and signing, and a reusable P2WP transaction layer with framing, CRC,
+retry, sequence, protocol-error and HELLO validation. The migration image also
+uses `DEVICE_INFO` and an escape-heavy `ECHO` as hardware diagnostics. The
+production and release ROM remains `p2wp-cartridge.bin` until the C
+implementation reaches behavioural parity.
+
+The current Wi-Fi vertical slice queries the encrypted-profile state and, when
+a profile exists, starts it and polls through acquisition of an IP address. If
+no usable profile exists, it starts an asynchronous scan, polls radio and scan
+state, validates and displays up to nine SSIDs, accepts network selection and a
+masked WPA/WPA2 password, connects, and optionally asks the Pico to encrypt and
+save that profile. Password storage is wiped after use. Unsupported security,
+short passwords, timeouts and connection failures produce explicit messages.
+
+After Wi-Fi connects, the C image now presents the first restored
+Teletekst-style source menu and can select NOS, P2000T, or (with P2WP/7)
+TeletekstArchief.nl. It starts an asynchronous request for page 100, validates
+the version-dependent status response, retrieves all four 240-byte display
+chunks, stages the complete 960-byte screen in RAM, and then displays it. Page
+navigation, custom-server entry, clock updates, and the long-running viewer
+controls still remain in the assembly implementation.
+
+The reusable C UI layer reintroduces SAA5050 blue-background headers,
+white-and-blue content panels, mosaic separator rules, a small native mosaic
+badge, and the cartridge footer. The opening screen, source menu, and loading
+screen use this layer; later migration phases can extend it without embedding
+control-byte strings throughout the application logic.
+
+Build the migration image using the pinned Z88DK 2.4 Docker image:
+
+```sh
+make -C src c-rom
+```
+
+This produces `src/p2wp-cartridge-c.bin`. To boot it in the emulator and test
+the C runtime, keyboard shim and P2WP/2–7 negotiation, run:
+
+```sh
+make -C src c-smoke
+```
+
+Every C ROM build reports code/read-only-data bytes, initialized-data bytes,
+and the remaining padding capacity in the 16 KiB cartridge. The generated ROM
+itself is always exactly 16,384 bytes after padding and signing.
+
+The generated map, symbols and listing are placed in `src/build-c`. The ROM
+builder appends Z88DK's initialized-data image after code and read-only data so
+the CRT can copy it to RAM during startup. ROM code starts at `0x1000`,
+execution starts at `0x1010`, mutable sections start at `0x7000`, and the stack
+starts at `0x9ff0`. Keep platform-specific entry, monitor-call and port-I/O
+details in the assembly shim; application and protocol logic belongs in C
+modules.
+
 `p2wp-cartridge.bin` is a generated ROM image and is not stored in Git. Build it
 with `make -C src`; this requires `z80asm` 1.8 or a compatible assembler.
 The build signs the image with the P2000T additive 16-bit cartridge checksum.

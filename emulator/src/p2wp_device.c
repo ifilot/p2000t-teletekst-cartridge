@@ -29,6 +29,7 @@ static uint16_t previous_page, next_page;
 static uint8_t fetch_state;
 static uint8_t fetch_error;
 static uint8_t profile_state;
+static uint8_t wifi_security;
 static uint8_t protocol_maximum = P2WP_MAX_VERSION;
 static uint8_t status_length_override;
 static const char *flash_path;
@@ -111,7 +112,7 @@ static uint8_t wifi_scan_result(
     static const char ssid[] = "Emulated WiFi";
     response->payload[0] = request->payload[0];
     response->payload[1] = (uint8_t)-35;
-    response->payload[2] = 0u;
+    response->payload[2] = wifi_security;
     response->payload[3] = sizeof(ssid) - 1u;
     memcpy(response->payload + 4u, ssid, sizeof(ssid) - 1u);
     response->payload_length = 4u + sizeof(ssid) - 1u;
@@ -124,7 +125,10 @@ static uint8_t wifi_connect(
     p2wp_frame_t *response
 ) {
     (void)context;
-    (void)request;
+    if ((wifi_security == 0u && request->payload[1] != 0u) ||
+        (wifi_security == 1u && request->payload[1] < 8u)) {
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
     response->payload_length = 0u;
     return P2WP_FIRMWARE_COMMAND_OK;
 }
@@ -426,6 +430,14 @@ void p2wp_device_set_status_length(uint8_t length) {
     status_length_override = length;
 }
 
+void p2wp_device_set_profile_present(int present) {
+    profile_state = present ? 1u : 0u;
+}
+
+void p2wp_device_set_wifi_security(uint8_t security) {
+    wifi_security = security;
+}
+
 void p2wp_device_set_flash_path(const char *path) {
     flash_path = path;
     stored_custom_url_length = 0u;
@@ -490,6 +502,7 @@ void p2wp_device_reset(void) {
     previous_page = 0u;
     next_page = 0u;
     profile_state = 0u;
+    wifi_security = 0u;
     memset(screen, 0, sizeof(screen));
 }
 

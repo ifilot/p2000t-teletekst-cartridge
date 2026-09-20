@@ -175,7 +175,21 @@ make -C docs html
 
 ### Cartridge
 
-Build the cartridge with `make -C src`. 
+Build the production assembly cartridge with `make -C src`.
+
+An incremental Z88DK C migration is available alongside it. Build its current
+bootstrap milestone in a pinned Docker toolchain and run its emulator smoke
+test with:
+
+```sh
+make -C src c-rom
+make -C src c-smoke
+```
+
+The C image is not yet a release artifact; see [`src/README.md`](src/README.md)
+for its memory map and migration status. The current implementation snapshot,
+hardware-test status, known limitations and resume checklist are recorded in
+[`docs/c-migration-handoff.md`](docs/c-migration-handoff.md).
 
 ### PICO Firmware
 

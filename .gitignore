@@ -8,7 +8,10 @@ compile_commands.json
 # build the ROM from source and publish it as an artifact instead.
 *.lst
 *.lab
+*.lis
+*.sym
 /src/*.bin
+/src/build-c/
 
 # Native protocol-test executable
 firmware/tests/p2wp-test
