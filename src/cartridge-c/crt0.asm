@@ -23,6 +23,7 @@ ELSE
 ENDIF
 
 defc CRT_ORG_CODE = ROM_Start
+defc CRT_ENABLE_STDIO = 0
 defc TAR__register_sp = Stack_Top
 defc TAR__clib_exit_stack_size = 0
 defc TAR__crt_on_exit = $10001

@@ -8,12 +8,19 @@
 
 The parallel `cartridge-c` tree is the incremental replacement for the
 assembly implementation. It currently provides the custom P2000T CRT and
-memory map, C video-RAM access, monitor and cartridge-port assembly shims, ROM
+memory map, compact video-RAM/monitor/cartridge-port assembly shims, ROM
 padding and signing, and a reusable P2WP transaction layer with framing, CRC,
-retry, sequence, protocol-error and HELLO validation. The migration image also
-uses `DEVICE_INFO` and an escape-heavy `ECHO` as hardware diagnostics. The
-production and release ROM remains `p2wp-cartridge.bin` until the C
+retry, sequence, protocol-error and HELLO validation. Negotiation is performed
+behind the normal Wi-Fi scan display rather than exposing the earlier C-only
+`PICO TEST` diagnostics screen. `DEVICE_INFO` supplies the Pico version shown
+on the source menu. The production and release ROM remains
+`p2wp-cartridge.bin` until the C
 implementation reaches behavioural parity.
+
+The fixed 40x24 video-memory operations and unsigned-byte decimal writer are
+implemented as compact Z80 routines. The latter uses repeated subtraction;
+the linked cartridge therefore contains no `sprintf`/`printf`, division,
+multiplication, or arithmetic-error support from the general C runtime.
 
 The current Wi-Fi vertical slice queries the encrypted-profile state and, when
 a profile exists, starts it and polls through acquisition of an IP address. If
@@ -23,19 +30,39 @@ masked WPA/WPA2 password, connects, and optionally asks the Pico to encrypt and
 save that profile. Password storage is wiped after use. Unsupported security,
 short passwords, timeouts and connection failures produce explicit messages.
 
-After Wi-Fi connects, the C image now presents the first restored
-Teletekst-style source menu and can select NOS, P2000T, or (with P2WP/7)
-TeletekstArchief.nl. It starts an asynchronous request for page 100, validates
+After Wi-Fi connects, the C image presents the restored Teletekst-style source
+menu and can select NOS, P2000T, a custom server, or (with P2WP/7)
+TeletekstArchief.nl. The custom-server editor accepts 96 characters over three
+rows; P2WP/5 restores and saves the URL in Pico flash, while P2WP/4 retains it
+for the cartridge session. It starts an asynchronous request for page 100, validates
 the version-dependent status response, retrieves all four 240-byte display
 chunks, stages the complete 960-byte screen in RAM, and then displays it. Page
-navigation, custom-server entry, clock updates, and the long-running viewer
-controls still remain in the assembly implementation.
+state now persists in a viewer loop: three digits select pages 100-899,
+Backspace edits an unfinished number, `START`/`I` returns to page 100,
+`P`/left and `N`/right follow previous/next metadata, and `STOP` returns to
+source selection. Subpages advance automatically every ten seconds and wrap
+to the default first subpage; `A` pauses/resumes that sequence and `S` selects
+a subpage manually. `R`/`?` reveals concealed text, `Z` cycles normal and both
+half-page zoom modes, `H` shows and dismisses the help page without refetching,
+`V` enables automatic next-page navigation, and `W` returns to Wi-Fi setup.
+Clock updates, source-menu autostart, and the assembly error/recovery detail
+remain to be migrated.
+
+The C Wi-Fi screen now follows the assembly layout for network results and
+password input. Protected networks first ask whether entry should be visible
+(`J`) or masked (`N`); the 63-character input spans two rows, supports
+Backspace, preserves the original protocol bytes, and displays `#` using its
+Viewdata glyph. Emulator comparison confirms that the list and visibility
+prompt are byte-identical to the assembly version.
 
 The reusable C UI layer reintroduces SAA5050 blue-background headers,
-white-and-blue content panels, mosaic separator rules, a small native mosaic
-badge, and the cartridge footer. The opening screen, source menu, and loading
-screen use this layer; later migration phases can extend it without embedding
-control-byte strings throughout the application logic.
+white-and-blue content panels, mosaic separator rules, the complete
+fourteen-row joined P2000T/TELETEKST mosaic, and the cartridge footer. The
+opening screen, source menu, and basic error recovery use this layer; later
+migration phases can extend it without embedding control-byte strings
+throughout the application logic. Page requests preserve the current display
+and animate the assembly version's six-phase mosaic tile in the upper-left
+corner until the complete replacement page has arrived.
 
 Build the migration image using the pinned Z88DK 2.4 Docker image:
 
