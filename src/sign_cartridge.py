@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import os
 from pathlib import Path
 import sys
@@ -48,17 +49,37 @@ def sign(path: Path, length: int | None) -> tuple[int, int]:
     output[1:3] = payload_length.to_bytes(2, "little")
     output[3:5] = value.to_bytes(2, "little")
 
+    write_atomically(path, bytes(output))
+    return payload_length, value
+
+
+def write_atomically(path: Path, data: bytes) -> None:
+    """@brief Replace a file's contents through a temporary file and rename.
+
+    @param path File to overwrite.
+    @param data Complete new contents.
+
+    WSL2 drvfs (9p) mounts occasionally refuse to rename over a file that was
+    written moments ago and report EXDEV even though both paths share a
+    filesystem. Atomicity is only a nicety here, so fall back to writing the
+    file in place when that happens.
+    """
+    path = path.resolve()
     with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as temporary:
-        temporary.write(output)
+        temporary.write(data)
         temporary.flush()
         os.fsync(temporary.fileno())
         temporary_path = Path(temporary.name)
     try:
         os.replace(temporary_path, path)
+    except OSError as error:
+        temporary_path.unlink(missing_ok=True)
+        if error.errno != errno.EXDEV:
+            raise
+        path.write_bytes(data)
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
-    return payload_length, value
 
 
 def verify(path: Path) -> tuple[int, int]:

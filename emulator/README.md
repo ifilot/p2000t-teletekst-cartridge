@@ -23,6 +23,16 @@ and run it via
 emulator/run
 ```
 
+From the repository root, `make run-asm` performs both steps and starts the
+emulator with the assembly cartridge, while `make run` does the same with the
+Z88DK C cartridge (`src/p2wp-cartridge-c.bin`). Extra emulator options go in
+`ARGS`, and `EMUFLAGS` replaces the default `--live` network mode:
+
+```sh
+make run ARGS="--auto-key Z"
+make run-asm EMUFLAGS="--fixture emulator/tests/fixtures/nos-100.json"
+```
+
 The emulator presents one open network named `Emulated WiFi`; select it with
 `1`, decline profile storage with `N`, then choose NOS with `1`. Choose `2` for
 P2000T Teletekst, `3` for TeletekstArchief.nl, or `0` to type a custom server

@@ -173,6 +173,15 @@ make -C docs html
 
 ## Compilation
 
+### Quick start
+
+From the repository root, `make run` builds the emulator and the C cartridge and
+boots the C cartridge in the emulator; `make run-asm` does the same for the
+production assembly cartridge. Both need the emulator dependencies listed in
+[`emulator/README.md`](emulator/README.md). Append emulator options with
+`ARGS`, for example `make run ARGS="--p2wp-version 2"`, or replace the network
+mode with `EMUFLAGS`.
+
 ### Cartridge
 
 Build the production assembly cartridge with `make -C src`.
