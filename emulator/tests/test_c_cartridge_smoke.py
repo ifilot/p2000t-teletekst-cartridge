@@ -149,13 +149,12 @@ def main() -> int:
             100,
             True,
         )
-        assert source_menu[1 * 40 : 2 * 40] == (
-            b"\x04\x1d\x07 P2000T TELETEKST           BRONKEUZE"
-        )
-        assert b"0 - EIGEN SERVER" in source_menu
-        assert b"START/I INDEX       ?/R ONTHUL" in source_menu
-        assert b"CARTRIDGE: v0.5.0 / PICO v0.5.0" in source_menu
-        assert b"LAATSTE VERSIE ONLINE: v0.5.0" in source_menu
+        assert source_menu[:3] == bytes((0x04, 0x1D, 0x17))
+        assert b"KIES UW TELETEKSTBRON" in source_menu[14 * 40 : 15 * 40]
+        assert b"0\x07  EIGEN SERVER" in source_menu
+        assert b"A\x07 AUTOSTART NA 60S: UIT" in source_menu[20 * 40 : 21 * 40]
+        assert b"H\x07 HULP" in source_menu[21 * 40 : 22 * 40]
+        assert b"START/I INDEX" not in source_menu
 
         custom_sources = temp / "custom-sources.bin"
         custom_flash = temp / "custom-flash.bin"
@@ -253,7 +252,7 @@ def main() -> int:
         )
         assert viewer_pages.read_text().splitlines()[:3] == ["100", "101", "100"]
         assert b"KIES UW TELETEKSTBRON" in viewer
-        assert b"STOP - ANDERE TELETEKSTBRON" in viewer
+        assert b"H\x07 HULP" in viewer
 
         metadata_pages = temp / "metadata-pages.txt"
         metadata_viewer = run_emulator(
@@ -349,35 +348,41 @@ def main() -> int:
         )
         expected_help = bytearray(b" " * 960)
 
-        def help_line(row: int, foreground: int, colour: int, text: str) -> None:
+        def help_band(row: int, text: str) -> None:
             offset = row * 40
-            expected_help[offset:offset + 3] = bytes((foreground, 0x1D, colour))
+            expected_help[offset:offset + 3] = bytes((0x04, 0x1D, 0x07))
             encoded = text.encode("ascii")[:37]
             expected_help[offset + 3:offset + 3 + len(encoded)] = encoded
 
-        def help_rule(row: int) -> None:
+        def help_row(row: int, *parts: tuple[int, str]) -> None:
             offset = row * 40
-            expected_help[offset] = 0x14
-            expected_help[offset + 1:offset + 40] = bytes((0x73,)) * 39
+            for colour, text in parts:
+                expected_help[offset] = colour
+                offset += 1
+                encoded = text.encode("ascii")
+                expected_help[offset:offset + len(encoded)] = encoded
+                offset += len(encoded)
 
-        help_line(0, 0x04, 0x07, " P2000T  HULP")
-        help_rule(1)
-        help_line(2, 0x07, 0x04, "       BEDIENING VAN DE CARTRIDGE")
-        help_line(4, 0x04, 0x07, " PAGINA EN VERBINDING")
-        help_line(5, 0x07, 0x04, " 100-899  TYP DRIE CIJFERS")
-        help_line(6, 0x07, 0x04, " START/I  INDEXPAGINA 100")
-        help_line(7, 0x07, 0x04, " <-/P ->/N VORIGE / VOLGENDE PAGINA")
-        help_line(8, 0x07, 0x04, " V        AUTO VOLGENDE PAGINA")
-        help_line(9, 0x04, 0x07, " WEERGAVE")
-        help_line(10, 0x07, 0x04, " ?/R      VERBORGEN TEKST ONTHULLEN")
-        help_line(12, 0x04, 0x07, " SUBPAGINA'S")
-        help_line(13, 0x07, 0x04, " S        KIES EEN SUBPAGINA")
-        help_line(14, 0x07, 0x04, " A        SUBPAGINA PAUZE / DOOR")
-        help_line(15, 0x07, 0x04, " W        KIES EEN ANDER WIFI-NETWERK")
-        help_line(16, 0x07, 0x04, " STOP     ANDERE BRON / INVOER TERUG")
-        help_line(17, 0x07, 0x04, " H        DEZE HULPPAGINA")
-        help_rule(20)
-        help_line(22, 0x04, 0x07, "     DRUK EEN TOETS OM TERUG TE GAAN")
+        help_band(0, " P2000T TELETEKST  HULP")
+        help_row(2, (0x03, " PAGINA"))
+        help_row(3, (0x06, " 100-899"), (0x07, "  KIES PAGINA"))
+        help_row(4, (0x06, " START / I"), (0x07, " INDEX PAGINA 100"))
+        help_row(5, (0x06, " <- / P"), (0x07, " VORIGE  "),
+                 (0x06, "-> / N"), (0x07, " VOLGENDE"))
+        help_row(6, (0x06, " V"), (0x07, " AUTO VOLGENDE PAGINA"))
+        help_row(8, (0x03, " SUBPAGINA'S"))
+        help_row(9, (0x06, " S"), (0x07, " KIES EEN SUBPAGINA"))
+        help_row(10, (0x06, " A"), (0x07, " PAUZE / DOORGAAN"))
+        help_row(12, (0x03, " WEERGAVE"))
+        help_row(13, (0x06, " ? / R"), (0x07, " VERBORGEN TEKST TONEN"))
+        help_row(15, (0x03, " VERBINDING"))
+        help_row(16, (0x06, " W"), (0x07, " KIES EEN ANDER WIFI-NETWERK"))
+        help_row(17, (0x06, " STOP"), (0x07, " ANDERE TELETEKSTBRON"))
+        help_row(19, (0x03, " BRONKEUZE"))
+        help_row(20, (0x06, " A"), (0x07, " AUTOSTARTBRON WIJZIGEN"))
+        help_row(21, (0x06, " H"), (0x07, " HULP VANAF DE BRONKEUZE"))
+        help_band(22, " DRUK EEN TOETS OM TERUG TE GAAN")
+        help_band(23, "P2000T Teletekst Cartridge     v0.5.0")
         assert help_page == expected_help
 
         help_pages = temp / "help-pages.txt"
@@ -559,7 +564,7 @@ def main() -> int:
             saved_profile=True,
         )
         assert b"KIES UW TELETEKSTBRON" in profile
-        assert b"1 - NOS TELETEKST" in profile
+        assert b"1\x07  NOS TELETEKST" in profile
 
         incompatible = run_emulator(
             build / "p2000t-emulator",

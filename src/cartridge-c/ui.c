@@ -170,18 +170,25 @@ void ui_rule(uint8_t row) {
 void ui_footer(void) { ui_title(23u, "P2000T Teletekst Cartridge     v0.5.0"); }
 
 /**
+ * @brief Draws the 14-row cartridge mosaic at the requested screen row.
+ */
+void ui_draw_logo(uint8_t row) {
+  uint8_t logo_row;
+  lz4_decompress(opening_logo_lz4, opening_logo, sizeof(opening_logo_lz4));
+  for (logo_row = 0u; logo_row != 14u; ++logo_row)
+    platform_write_bytes((uint8_t)(row + logo_row), 0u,
+                         opening_logo + (uint16_t)logo_row * 40u, 40u);
+}
+
+/**
  * @brief Draws the complete cartridge opening screen.
  */
 void ui_opening_screen(void) {
-  uint8_t row;
-  lz4_decompress(opening_logo_lz4, opening_logo, sizeof(opening_logo_lz4));
   platform_clear_screen();
   ui_title(0u, "                                      ");
   ui_title(1u, "                                      ");
   ui_title(2u, "    P2000T  INTERNET TELETEKST");
-  for (row = 0u; row != 14u; ++row)
-    platform_write_bytes((uint8_t)(3u + row), 0u,
-                         opening_logo + (uint16_t)row * 40u, 40u);
+  ui_draw_logo(3u);
   ui_panel(17u, "     UW VENSTER OP DE WERELD");
   ui_panel(18u, "     NOS EN P2000T TELETEKST");
   ui_action(19u, "  ORIGINEEL SAA5050-MOZAIEKBEELD");

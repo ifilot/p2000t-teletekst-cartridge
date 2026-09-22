@@ -13,6 +13,12 @@
 #include <stdint.h>
 
 /**
+ * @brief Draws the 14-row cartridge mosaic at the requested screen row.
+ * @param row First destination row.
+ */
+void ui_draw_logo(uint8_t row);
+
+/**
  * @brief Draws the complete cartridge opening screen.
  */
 void ui_opening_screen(void);

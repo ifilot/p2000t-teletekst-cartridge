@@ -305,7 +305,8 @@ static void automatic_keyboard(int frame) {
     code = 25;
     stage++;
   } else if (stage == 3 && frame >= source_action_frame &&
-             screen_has("KIES BRON")) {
+             (screen_has("KIES BRON") ||
+              screen_has("KIES UW TELETEKSTBRON"))) {
     if (source_cycles_done < auto_source_cycles) {
       code = 34;
       source_cycles_done++;
