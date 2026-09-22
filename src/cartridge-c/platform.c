@@ -1,5 +1,15 @@
+/**
+ * @file platform.c
+ * @brief Portable keyboard translation and monitor timing helpers.
+ *
+ * SPDX-License-Identifier: GPL-3.0-only
+ * This file is part of the P2000T Teletekst cartridge and is licensed under
+ * version 3 of the GNU General Public License. See the repository LICENSE.
+ */
+
 #include "platform.h"
 
+/** P2000T keyboard matrix codes mapped to cartridge input bytes. */
 static const uint8_t keymap[144] = {
     0,   '6', 0,   'q', '3', '5', '7', '4', 0,   'h', 'z', 's', 'd', 'g', 'j',
     'f', 0,   ' ', '0', '0', '#', 0,   ',', 0,   0,   'n', '<', 'x', 'c', 'b',
@@ -13,26 +23,35 @@ static const uint8_t keymap[144] = {
     '"', 0,   'L', 0,   0,   0,   '+', 'I', '*',
 };
 
+/**
+ * @brief Translates a P2000T matrix/monitor key code into cartridge input.
+ */
 uint8_t platform_translate_key(uint8_t key) {
-  if (key == 0u)
-    return P2000T_KEY_LEFT;
-  if (key == 23u)
-    return P2000T_KEY_RIGHT;
-  if (key == 128u)
-    return P2000T_KEY_START;
+  if (key == 0u) return P2000T_KEY_LEFT;
+  if (key == 23u) return P2000T_KEY_RIGHT;
+  if (key == 128u) return P2000T_KEY_START;
   return key < sizeof(keymap) ? keymap[key] : 0u;
 }
 
+/**
+ * @brief Converts an uppercase ASCII letter to lowercase.
+ */
 uint8_t platform_lower_ascii(uint8_t key) {
   return key >= 'A' && key <= 'Z' ? (uint8_t)(key + ('a' - 'A')) : key;
 }
 
+/**
+ * @brief Busy-waits for a number of 20 ms monitor ticks.
+ */
 void platform_wait_ticks(uint8_t ticks) {
   uint16_t end = platform_clock() + ticks;
   while ((int16_t)(platform_clock() - end) < 0) {
   }
 }
 
+/**
+ * @brief Reads the next translated non-START/non-STOP character.
+ */
 uint8_t platform_read_ascii(void) {
   uint8_t key;
   do {

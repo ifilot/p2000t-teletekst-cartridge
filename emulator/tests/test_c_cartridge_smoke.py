@@ -31,6 +31,10 @@ def run_emulator(
     auto_source: int | None = None,
     custom_server: str | None = None,
     flash: Path | None = None,
+    auto_source_cycles: int = 0,
+    wait_opening: bool = False,
+    fail_page: int = 0,
+    fail_error: int = 0,
 ) -> bytes:
     command = [
         str(binary),
@@ -56,6 +60,13 @@ def run_emulator(
         command.extend(("--custom-server", custom_server))
     if flash is not None:
         command.extend(("--flash", str(flash)))
+    if auto_source_cycles:
+        command.extend(("--auto-source-cycles", str(auto_source_cycles)))
+    if wait_opening:
+        command.append("--auto-wait-opening")
+    if fail_page:
+        command.extend(("--fail-page", str(fail_page),
+                        "--fail-error", str(fail_error)))
     if protocol_version != 0:
         command.extend(("--p2wp-version", str(protocol_version)))
     if saved_profile:
@@ -98,7 +109,7 @@ def main() -> int:
         )
 
         before = run_emulator(
-            build / "p2000t-emulator", monitor, temp / "before.bin", 50, False
+            build / "p2000t-emulator", monitor, temp / "before.bin", 10, False
         )
         assert before[0:3] == bytes((0x04, 0x1D, 0x07))
         assert b"P2000T  INTERNET TELETEKST" in before
@@ -114,7 +125,7 @@ def main() -> int:
             build / "p2000t-emulator",
             monitor,
             temp / "scanning.bin",
-            15,
+            10,
             True,
         )
         assert scanning[1 * 40 : 2 * 40] == (
@@ -185,6 +196,47 @@ def main() -> int:
         assert b"NOS Telet" in after
         assert b"Meer bevoegdheden" in after
         assert sources.read_bytes() == bytes((0,))
+        assert b"za 05.sep 12:" in after[:40]
+
+        legacy_archive_sources = temp / "legacy-archive-sources.bin"
+        run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "legacy-archive.bin",
+            500,
+            True,
+            protocol_version=6,
+            sources=legacy_archive_sources,
+            auto_source=3,
+        )
+        assert legacy_archive_sources.read_bytes() == bytes((2,))
+
+        settings_flash = temp / "settings-flash.bin"
+        run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "settings.bin",
+            500,
+            True,
+            flash=settings_flash,
+            auto_source_cycles=1,
+        )
+        assert settings_flash.read_bytes()[8:11] == bytes((0xFE, 1, 0))
+
+        timed_sources = temp / "timed-sources.bin"
+        timed = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "timed.bin",
+            3400,
+            True,
+            flash=settings_flash,
+            wait_opening=True,
+            sources=timed_sources,
+        )
+        assert b"NOS Telet" in timed
+        assert timed_sources.read_bytes()[0] == 0
+        assert timed[35] == ord("V")
 
         viewer_pages = temp / "viewer-pages.txt"
         viewer = run_emulator(
@@ -217,7 +269,7 @@ def main() -> int:
             build / "p2000t-emulator",
             monitor,
             temp / "fetching.bin",
-            280,
+            194,
             True,
             auto_keys="RIGHT",
         )
@@ -281,8 +333,39 @@ def main() -> int:
             True,
             auto_keys="H",
         )
-        assert b"VERBORGEN TEKST ONTHULLEN" in help_page
-        assert b"VORIGE / VOLGENDE PAGINA" in help_page
+        expected_help = bytearray(b" " * 960)
+
+        def help_line(row: int, foreground: int, colour: int, text: str) -> None:
+            offset = row * 40
+            expected_help[offset:offset + 3] = bytes((foreground, 0x1D, colour))
+            encoded = text.encode("ascii")[:37]
+            expected_help[offset + 3:offset + 3 + len(encoded)] = encoded
+
+        def help_rule(row: int) -> None:
+            offset = row * 40
+            expected_help[offset] = 0x14
+            expected_help[offset + 1:offset + 40] = bytes((0x73,)) * 39
+
+        help_line(0, 0x04, 0x07, " P2000T  HULP")
+        help_rule(1)
+        help_line(2, 0x07, 0x04, "       BEDIENING VAN DE CARTRIDGE")
+        help_line(4, 0x04, 0x07, " PAGINA EN VERBINDING")
+        help_line(5, 0x07, 0x04, " 100-899  TYP DRIE CIJFERS")
+        help_line(6, 0x07, 0x04, " START/I  INDEXPAGINA 100")
+        help_line(7, 0x07, 0x04, " <-/P ->/N VORIGE / VOLGENDE PAGINA")
+        help_line(8, 0x07, 0x04, " V        AUTO VOLGENDE PAGINA")
+        help_line(9, 0x04, 0x07, " WEERGAVE")
+        help_line(10, 0x07, 0x04, " ?/R      VERBORGEN TEKST ONTHULLEN")
+        help_line(11, 0x07, 0x04, " Z        BOVEN / ONDER / NORMAAL")
+        help_line(12, 0x04, 0x07, " SUBPAGINA'S")
+        help_line(13, 0x07, 0x04, " S        KIES EEN SUBPAGINA")
+        help_line(14, 0x07, 0x04, " A        SUBPAGINA PAUZE / DOOR")
+        help_line(15, 0x07, 0x04, " W        KIES EEN ANDER WIFI-NETWERK")
+        help_line(16, 0x07, 0x04, " STOP     ANDERE BRON / INVOER TERUG")
+        help_line(17, 0x07, 0x04, " H        DEZE HULPPAGINA")
+        help_rule(20)
+        help_line(22, 0x04, 0x07, "     DRUK EEN TOETS OM TERUG TE GAAN")
+        assert help_page == expected_help
 
         help_pages = temp / "help-pages.txt"
         restored = run_emulator(
@@ -321,6 +404,18 @@ def main() -> int:
         assert revealed[47] == 0x07
         assert revealed[48:54] == b"SECRET"
 
+        reconcealed = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "reconcealed.bin",
+            675,
+            True,
+            auto_keys="?,?",
+            fixture=reveal_fixture,
+        )
+        assert reconcealed[47] == 0x18
+        assert reconcealed[48:54] == b"SECRET"
+
         auto_pages = temp / "auto-pages.txt"
         automatic = run_emulator(
             build / "p2000t-emulator",
@@ -333,6 +428,36 @@ def main() -> int:
         )
         assert auto_pages.read_text().splitlines()[:3] == ["100", "100", "101"]
         assert automatic[35] == ord("V")
+
+        auto_skip_pages = temp / "auto-skip-pages.txt"
+        run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "auto-skip.bin",
+            1900,
+            True,
+            pages=auto_skip_pages,
+            auto_keys="V",
+            fail_page=101,
+            fail_error=7,
+        )
+        assert auto_skip_pages.read_text().splitlines()[:4] == [
+            "100", "100", "101", "102"
+        ]
+
+        timeout = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "timeout.bin",
+            450,
+            True,
+            auto_keys="KP1,KP0,KP1",
+            fail_page=101,
+            fail_error=12,
+        )
+        assert b"FOUTCODE: 0C" in timeout
+        assert b"FOUT: SERVER REAGEERT NIET" in timeout
+        assert b"DETAIL: HTTP 000 LWIP 00 NET 00" in timeout
 
         wifi_return = run_emulator(
             build / "p2000t-emulator",

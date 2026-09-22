@@ -327,6 +327,7 @@ static void automatic_keyboard(int frame) {
     }
   } else if (stage == 5 && auto_action &&
              (screen_has("NOS Telet") || screen_has("TYP PAGINA") ||
+              screen_has("FOUTCODE:") ||
               (screen_has("S:") && !screen_has("AUTOSTART")) ||
               screen_has("DRUK EEN TOETS OM TERUG") ||
               previous_action_code == ascii_keycode('w')) &&

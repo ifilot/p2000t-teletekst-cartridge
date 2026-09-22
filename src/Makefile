@@ -10,9 +10,11 @@ C_ROM := p2wp-cartridge-c.bin
 C_BUILD := build-c
 C_SOURCES := cartridge-c/main.c cartridge-c/p2wp.c cartridge-c/platform.c cartridge-c/ui.c \
 	cartridge-c/teletekst.c cartridge-c/wifi.c \
-	cartridge-c/platform.asm cartridge-c/crt0.asm
+	cartridge-c/platform.asm cartridge-c/lz4_z80.asm cartridge-c/crt0.asm
+C_HEADERS := cartridge-c/lz4_z80.h cartridge-c/p2wp.h cartridge-c/platform.h \
+	cartridge-c/teletekst.h cartridge-c/ui.h cartridge-c/wifi.h
 
-.PHONY: all c-rom c-smoke sign verify check-version clean
+.PHONY: all c-rom c-lint c-smoke sign verify check-version clean
 
 all: $(ROM)
 
@@ -23,16 +25,22 @@ $(ROM): $(SOURCE) $(SIGNER)
 
 c-rom: $(C_ROM)
 
-$(C_ROM): $(C_SOURCES) make_cartridge_rom.py $(SIGNER)
+c-lint:
+	clang-format --dry-run --Werror cartridge-c/*.c cartridge-c/*.h
+	python3 check_doxygen_style.py cartridge-c/*.c cartridge-c/*.h
+	cd .. && doxygen docs/Doxyfile.cartridge
+
+$(C_ROM): $(C_SOURCES) $(C_HEADERS) make_cartridge_rom.py $(SIGNER)
 	mkdir -p $(C_BUILD)
 	$(Z88DK_DOCKER) /opt/z88dk/bin/zcc +embedded \
-		-compiler=sccz80 -clib=default -O2 \
+		-compiler=sdcc -clib=default --opt-code-size \
+		--max-allocs-per-node200000 -SO3 \
 		-crt0=cartridge-c/crt0.asm \
 		-m -s --list \
 		-o $(C_BUILD)/p2wp-cartridge-c \
 		cartridge-c/main.c cartridge-c/p2wp.c cartridge-c/wifi.c cartridge-c/ui.c \
 		cartridge-c/teletekst.c \
-		cartridge-c/platform.c cartridge-c/platform.asm
+		cartridge-c/platform.c cartridge-c/platform.asm cartridge-c/lz4_z80.asm
 	python3 make_cartridge_rom.py \
 		--data $(C_BUILD)/p2wp-cartridge-c_DATA.bin \
 		$(C_BUILD)/p2wp-cartridge-c $(C_ROM)

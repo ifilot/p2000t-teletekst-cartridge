@@ -1,4 +1,15 @@
+/**
+ * @file ui.c
+ * @brief Reusable SAA5050 panels, opening artwork, and footer components.
+ *
+ * SPDX-License-Identifier: GPL-3.0-only
+ * This file is part of the P2000T Teletekst cartridge and is licensed under
+ * version 3 of the GNU General Public License. See the repository LICENSE.
+ */
+
 #include "ui.h"
+
+#include "lz4_z80.h"
 #include "platform.h"
 
 enum {
@@ -8,6 +19,37 @@ enum {
   SAA_NEW_BACKGROUND = 0x1d,
 };
 
+/** Raw LZ4 block for the original 14x40 SAA5050 opening mosaic. */
+static const uint8_t opening_logo_lz4[] = {
+    0x41u, 0x04u, 0x1du, 0x17u, 0x20u, 0x01u, 0x00u, 0x1fu, 0x70u, 0x01u, 0x00u,
+    0x04u, 0x00u, 0x1cu, 0x00u, 0x35u, 0x20u, 0x20u, 0x20u, 0x28u, 0x00u, 0x4fu,
+    0x35u, 0x20u, 0x20u, 0x6au, 0x04u, 0x00u, 0x01u, 0x00u, 0x1cu, 0x00u, 0x09u,
+    0x28u, 0x00u, 0x50u, 0x6au, 0x35u, 0x6au, 0x7fu, 0x7fu, 0x06u, 0x00u, 0x06u,
+    0x02u, 0x00u, 0x40u, 0x7fu, 0x35u, 0x6au, 0x23u, 0x1cu, 0x00u, 0x09u, 0x28u,
+    0x00u, 0x03u, 0x40u, 0x00u, 0x00u, 0x20u, 0x00u, 0x04u, 0x02u, 0x00u, 0x24u,
+    0x7fu, 0x35u, 0x4fu, 0x00u, 0x07u, 0x28u, 0x00u, 0x01u, 0x4eu, 0x00u, 0x00u,
+    0x04u, 0x00u, 0x06u, 0x02u, 0x00u, 0x0fu, 0x28u, 0x00u, 0x06u, 0x00u, 0x50u,
+    0x00u, 0x07u, 0x04u, 0x00u, 0x0au, 0x28u, 0x00u, 0x20u, 0x3cu, 0x2cu, 0x01u,
+    0x00u, 0x1fu, 0x2fu, 0x01u, 0x00u, 0x03u, 0x00u, 0x1bu, 0x00u, 0x30u, 0x2cu,
+    0x2cu, 0x34u, 0x28u, 0x00u, 0x10u, 0x35u, 0x30u, 0x00u, 0x0fu, 0x01u, 0x00u,
+    0x0bu, 0x10u, 0x35u, 0x28u, 0x00u, 0x60u, 0x75u, 0x70u, 0x70u, 0x30u, 0x20u,
+    0x60u, 0x2cu, 0x01u, 0x02u, 0x01u, 0x00u, 0x09u, 0x0du, 0x00u, 0x11u, 0x70u,
+    0x5au, 0x01u, 0x00u, 0x28u, 0x00u, 0xe1u, 0x20u, 0x20u, 0x20u, 0x17u, 0x35u,
+    0x20u, 0x6au, 0x20u, 0x60u, 0x70u, 0x35u, 0x20u, 0x7fu, 0x7fu, 0x07u, 0x00u,
+    0x02u, 0x0du, 0x00u, 0x00u, 0x02u, 0x00u, 0x20u, 0x70u, 0x7au, 0x4du, 0x00u,
+    0x01u, 0xa0u, 0x00u, 0x04u, 0x28u, 0x00u, 0x21u, 0x2au, 0x2fu, 0x28u, 0x00u,
+    0x00u, 0x07u, 0x00u, 0x02u, 0x0du, 0x00u, 0x6du, 0x65u, 0x70u, 0x35u, 0x20u,
+    0x2fu, 0x6fu, 0x28u, 0x00u, 0x21u, 0x68u, 0x7cu, 0x28u, 0x00u, 0x00u, 0x07u,
+    0x00u, 0x02u, 0x0du, 0x00u, 0x40u, 0x34u, 0x20u, 0x7du, 0x7cu, 0x90u, 0x01u,
+    0x0bu, 0x28u, 0x00u, 0x61u, 0x22u, 0x23u, 0x35u, 0x20u, 0x23u, 0x6bu, 0x07u,
+    0x00u, 0x02u, 0x0du, 0x00u, 0x45u, 0x35u, 0x20u, 0x37u, 0x23u, 0x28u, 0x00u,
+    0x7fu, 0x17u, 0x7cu, 0x7cu, 0x7cu, 0x7cu, 0x70u, 0x73u, 0x01u, 0x00u, 0x09u,
+    0x50u, 0x71u, 0x78u, 0x7cu, 0x7cu, 0x7cu};
+/** RAM workspace receiving the decompressed opening mosaic. */
+static uint8_t opening_logo[14u * 40u];
+
+/* Uncompressed reference retained next to the generated block for review. */
+#if 0
 /* The original assembly cartridge's joined P2000T/TELETEKST mosaic. Each
  * entry is one complete, display-ready 40-column SAA5050 row. */
 static const uint8_t opening_logo[14][40] = {
@@ -68,7 +110,15 @@ static const uint8_t opening_logo[14][40] = {
      0x73, 0x73, 0x73, 0x73, 0x73, 0x73, 0x73, 0x73, 0x73, 0x73,
      0x73, 0x73, 0x73, 0x73, 0x73, 0x71, 0x78, 0x7c, 0x7c, 0x7c},
 };
+#endif
 
+/**
+ * @brief Clears and writes one full-width styled text row.
+ * @param row Screen row to update.
+ * @param foreground SAA5050 colour control used as the new background.
+ * @param text_colour SAA5050 alpha colour used for the text.
+ * @param text Null-terminated row text, starting after the control prefix.
+ */
 static void styled_line(uint8_t row, uint8_t foreground, uint8_t text_colour,
                         const char *text) {
   uint8_t prefix[3];
@@ -80,18 +130,30 @@ static void styled_line(uint8_t row, uint8_t foreground, uint8_t text_colour,
   platform_write_text(row, 3u, text);
 }
 
+/**
+ * @brief Writes a white-on-blue full-width title row.
+ */
 void ui_title(uint8_t row, const char *text) {
   styled_line(row, SAA_ALPHA_BLUE, SAA_ALPHA_WHITE, text);
 }
 
+/**
+ * @brief Writes a blue-on-white full-width content row.
+ */
 void ui_panel(uint8_t row, const char *text) {
   styled_line(row, SAA_ALPHA_WHITE, SAA_ALPHA_BLUE, text);
 }
 
+/**
+ * @brief Writes a white-on-blue full-width action row.
+ */
 void ui_action(uint8_t row, const char *text) {
   styled_line(row, SAA_ALPHA_BLUE, SAA_ALPHA_WHITE, text);
 }
 
+/**
+ * @brief Draws a blue mosaic separator across one row.
+ */
 void ui_rule(uint8_t row) {
   static const uint8_t graphics_blue[] = {SAA_GRAPHICS_BLUE};
   static const uint8_t mosaic_rule[] = {0x73};
@@ -102,16 +164,24 @@ void ui_rule(uint8_t row) {
     platform_write_bytes(row, column, mosaic_rule, 1u);
 }
 
+/**
+ * @brief Draws the standard cartridge version footer.
+ */
 void ui_footer(void) { ui_title(23u, "P2000T Teletekst Cartridge     v0.5.0"); }
 
+/**
+ * @brief Draws the complete cartridge opening screen.
+ */
 void ui_opening_screen(void) {
   uint8_t row;
+  lz4_decompress(opening_logo_lz4, opening_logo, sizeof(opening_logo_lz4));
   platform_clear_screen();
   ui_title(0u, "                                      ");
   ui_title(1u, "                                      ");
   ui_title(2u, "    P2000T  INTERNET TELETEKST");
   for (row = 0u; row != 14u; ++row)
-    platform_write_bytes((uint8_t)(3u + row), 0u, opening_logo[row], 40u);
+    platform_write_bytes((uint8_t)(3u + row), 0u,
+                         opening_logo + (uint16_t)row * 40u, 40u);
   ui_panel(17u, "     UW VENSTER OP DE WERELD");
   ui_panel(18u, "     NOS EN P2000T TELETEKST");
   ui_action(19u, "  ORIGINEEL SAA5050-MOZAIEKBEELD");
@@ -120,4 +190,42 @@ void ui_opening_screen(void) {
   platform_write_bytes(22u, 0u, (const uint8_t *)"\007   DRUK OP EEN TOETS",
                        22u);
   ui_footer();
+}
+
+/**
+ * @brief Runs the key wait and 60-second opening countdown.
+ */
+uint8_t ui_wait_opening(void) {
+  uint16_t next_second = (uint16_t)(platform_clock() + 50u);
+  uint16_t deadline = (uint16_t)(platform_clock() + 3000u);
+  uint16_t next_blink = (uint16_t)(platform_clock() + 25u);
+  uint8_t seconds = 60u;
+  uint8_t visible = 1u;
+
+  platform_write_u8(22u, 33u, seconds);
+  for (;;) {
+    uint16_t now;
+    uint8_t status = platform_key_status();
+    if (status != 0u) {
+      (void)platform_read_key();
+      return 0u;
+    }
+    now = platform_clock();
+    if ((int16_t)(now - deadline) >= 0) {
+      platform_write_text(22u, 33u, " 0");
+      return 1u;
+    }
+    if ((int16_t)(now - next_second) >= 0) {
+      next_second = (uint16_t)(next_second + 50u);
+      --seconds;
+      platform_write_text(22u, 33u, "  ");
+      platform_write_u8(22u, 33u, seconds);
+    }
+    if ((int16_t)(now - next_blink) >= 0) {
+      next_blink = (uint16_t)(next_blink + 25u);
+      visible ^= 1u;
+      platform_write_text(22u, 4u,
+                          visible ? "DRUK OP EEN TOETS" : "                 ");
+    }
+  }
 }

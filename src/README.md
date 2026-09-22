@@ -45,8 +45,8 @@ to the default first subpage; `A` pauses/resumes that sequence and `S` selects
 a subpage manually. `R`/`?` reveals concealed text, `Z` cycles normal and both
 half-page zoom modes, `H` shows and dismisses the help page without refetching,
 `V` enables automatic next-page navigation, and `W` returns to Wi-Fi setup.
-Clock updates, source-menu autostart, and the assembly error/recovery detail
-remain to be migrated.
+Clock updates, the persistent source-menu autostart countdown, legacy Archive
+fallback, and detailed error/recovery behaviour are included in the C image.
 
 The C Wi-Fi screen now follows the assembly layout for network results and
 password input. Protected networks first ask whether entry should be visible
@@ -64,7 +64,11 @@ throughout the application logic. Page requests preserve the current display
 and animate the assembly version's six-phase mosaic tile in the upper-left
 corner until the complete replacement page has arrived.
 
-Build the migration image using the pinned Z88DK 2.4 Docker image:
+Build the migration image using the pinned Z88DK 2.4 Docker image. The build
+uses the SDCC frontend with `--opt-code-size -SO3` and
+`--max-allocs-per-node200000`; the latter saves ROM space but can make the
+production compile take several minutes. The assembly platform entry points
+follow SDCC's packed-byte stack ABI:
 
 ```sh
 make -C src c-rom
@@ -80,6 +84,14 @@ make -C src c-smoke
 Every C ROM build reports code/read-only-data bytes, initialized-data bytes,
 and the remaining padding capacity in the 16 KiB cartridge. The generated ROM
 itself is always exactly 16,384 bytes after padding and signing.
+
+The opening logo, help page, and error-description tables use a
+cartridge-resident raw-LZ4 decoder. Page rendering, clock
+arithmetic/formatting, fixed-width numeric formatting, atomic screen commits
+and reveal updates use focused Z80 routines; the protocol and viewer state
+machines remain in C for maintainability. `make -C src c-lint` verifies Google
+C formatting, readable multi-line Doxygen block layout, and all documentation
+headers.
 
 The generated map, symbols and listing are placed in `src/build-c`. The ROM
 builder appends Z88DK's initialized-data image after code and read-only data so

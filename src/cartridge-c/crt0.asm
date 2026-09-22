@@ -1,4 +1,9 @@
-; Minimal Z88DK classic CRT for the P2000T slot-1 cartridge.
+; @file crt0.asm
+; @brief Minimal Z88DK classic CRT and P2000T cartridge memory map.
+;
+; SPDX-License-Identifier: GPL-3.0-only
+; This file is part of the P2000T Teletekst cartridge and is licensed under
+; version 3 of the GNU General Public License. See the repository LICENSE.
 ;
 ; The monitor maps this image at 0x1000 and jumps to 0x1010.  The first
 ; sixteen bytes are therefore the cartridge header, not executable code.

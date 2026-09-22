@@ -8,8 +8,9 @@ Working branch: `port-c`
 The 16 KiB P2000T slot-1 cartridge is being migrated incrementally from the
 single `src/p2wp-cartridge.asm` program to maintainable C compiled with Z88DK.
 The assembly cartridge remains intact and is still the production/release ROM.
-The C cartridge is a parallel development image and is not yet at behavioural
-parity.
+The C cartridge is a parallel development image with the assembly behaviour
+ported; the remaining work is hardware regression testing and pixel-level UI
+comparison rather than another major functional slice.
 
 Do not remove or replace the assembly build until the C implementation has
 passed full hardware and parity testing.
@@ -29,6 +30,7 @@ Important new files:
 - `src/cartridge-c/wifi.c`: saved-profile startup and interactive Wi-Fi
   onboarding.
 - `src/cartridge-c/ui.c`: reusable SAA5050 blue/white panel primitives.
+- `src/cartridge-c/lz4_z80.asm`: compact raw-LZ4 screen/string decompressor.
 - `src/cartridge-c/teletekst.c`: source selection and initial page retrieval.
 - `src/make_cartridge_rom.py`: ROM padding and payload-size reporting.
 - `emulator/tests/test_c_cartridge_smoke.py`: end-to-end C cartridge test.
@@ -53,8 +55,8 @@ The C image currently performs this sequence:
    screen bytes in emulator comparison.
 6. Displays a blue/white Teletekst-style source menu.
 7. Selects NOS, P2000T, a custom server, or TeletekstArchief.nl. The custom URL
-   editor supports 96 characters and P2WP/5 persistence; Archive currently
-   requires P2WP/7.
+   editor supports 96 characters and P2WP/5 persistence; P2WP/4-6 use the
+   custom-source compatibility route for Archive.
 8. Starts an asynchronous request for page 100, polls its status, downloads
    four validated 240-byte chunks into a 960-byte staging buffer, and commits
    the completed SAA5050 page to video RAM.
@@ -93,10 +95,14 @@ The most recent successful build reports:
 | Viewer controls, help, auto-page and Wi-Fi return | 15,110 | 2,109 | 1,274 |
 | Custom server with persisted URL | 16,263 | 1,153 | 121 |
 | Assembly video/arithmetic optimization | 15,608 | -655 | 776 |
+| SDCC size-optimized build | 13,391 | -2,217 | 2,993 |
+| Functional-parity and compressed UI build | 16,342 | 2,951 | 42 |
+| Assembly page renderer | 16,120 | -222 | 262 |
+| Compressed help-screen template | 15,859 | -261 | 523 |
 
-The current 15,608 bytes consist of 15,607 code/read-only-data bytes and one
-initialized-data byte. The output ROM is always padded and signed to exactly
-16,384 bytes. The 776-byte figure is unused ROM capacity, not free RAM.
+The current 15,861-byte payload consists of 15,859 code/read-only-data bytes
+and two initialized-data bytes. The output ROM is always padded and signed to
+exactly 16,384 bytes. The 523-byte figure is unused ROM capacity, not free RAM.
 
 Every `c-rom` build prints the current linked and remaining sizes.
 
@@ -127,6 +133,7 @@ make -C src verify
 make -C firmware/tests test
 python3 -m py_compile emulator/tests/test_c_cartridge_smoke.py \
   src/make_cartridge_rom.py
+make -C src c-lint
 git diff --check
 ```
 
@@ -148,18 +155,18 @@ former C-only `PICO TEST` transition screen has been removed.
 
 ## Hardware-test status
 
-All phases through navigation, subpages, password parity, and the restored
-screen layouts were confirmed on real hardware by the user. The controls and
-custom-server additions in this snapshot have passed the emulator but still
-need a hardware run.
+The behavioural-parity build before the latest page-renderer optimization was
+confirmed on real hardware by the user. The current image passes the complete
+emulator suite but its new assembly renderer should receive one hardware
+regression run, especially normal, zoomed, revealed and reconcealed pages.
 
 For the next hardware session:
 
 1. Program `src/p2wp-cartridge-c.bin` as a raw 16 KiB cartridge image.
 2. Check the new opening screen and press a key.
 3. Continue through Wi-Fi; a valid saved profile should bypass scanning.
-4. Select source `1`, `2`, or `3` (`3` needs P2WP/7), then source `0` and enter
-   a custom base URL. Reopen source `0` after a reboot to verify persistence.
+4. Select source `1`, `2`, or `3`, then source `0` and enter a custom base URL.
+   Reopen source `0` after a reboot to verify persistence.
 5. Confirm that page 100 appears with its provider-supplied SAA5050 graphics
    and colours.
 6. On a protected network, verify both `J` (visible) and `N` (asterisks) at the
@@ -175,31 +182,25 @@ For the next hardware session:
 
 ## Known limitations
 
-- Persistent source-menu autostart settings have not been migrated.
-- Archive compatibility through the custom-source fallback for P2WP/4-6 has
-  not been ported; the C menu accepts Archive only with P2WP/7.
-- Clock metadata is validated by response length but not displayed.
-- Error presentation and recovery are basic compared with the assembly ROM.
-- The page-fetch indicator now matches assembly, but the 960-byte screen commit
-  still writes rows directly to video RAM. The assembly
-  version's vertical-retrace/video-blanked atomic commit is still to be ported.
-- The assembly autostart countdown on the opening screen has not been ported;
-  the C opening otherwise uses the complete original fourteen-row joined
-  P2000T/TELETEKST mosaic.
+- A few transient status screens and compact error panels can still differ at
+  the byte/pixel level even though their behaviour and recovery paths match.
+- The current optimized image has not yet had its final hardware regression
+  run.
+- The assembly ROM remains the release default until that comparison is
+  accepted.
 
 ## Recommended next phase
 
-Test this image on hardware before adding more behavior. The assembly video
-primitives and fixed-purpose decimal conversion recovered 655 bytes, leaving
-776 ROM bytes. The map now contains no `sprintf`/`printf`, general division,
-general multiplication, or arithmetic-error runtime. The next phase can use
-the recovered space for the live clock and detailed error/recovery behavior;
-source-menu autostart and the P2WP/4-6 Archive fallback also remain.
-
-The assembly implementation around `teletekst_main_loop`,
-`teletekst_fetch_page`, `teletekst_accept_input` and
-`teletekst_choose_source` is the behavioural reference. Port behaviour in
-bounded slices rather than translating that entire block at once.
+Test this image on hardware before adding more behaviour. The largest remaining
+C routines are `fetch_page` (about 1,427 bytes), `viewer_loop` (about 1,278),
+`scan_networks` (about 670), `choose_source` (about 520) and
+`choose_custom_url` (about 422). They are state machines, so rewriting them
+wholesale in assembly would work against the maintainability goal. Prefer
+bundling and compressing additional static screen templates with the existing
+raw-LZ4 decoder. The help page now uses this approach and recovered 261 linked
+bytes. See `docs/c-size-optimization.md` for measured whole-function
+compression ratios and the fixed-address RAM-code design. The map contains no
+`sprintf`/`printf` runtime to remove.
 
 ## Memory and build notes
 
@@ -208,6 +209,8 @@ bounded slices rather than translating that entire block at once.
 - the stack begins at `0x9ff0`.
 - P2WP response payloads are currently limited to 240 bytes on the cartridge,
   matching one page chunk.
+- The C image uses Z88DK's SDCC frontend with `--opt-code-size -SO3` and
+  `--max-allocs-per-node200000`; a production build can take several minutes.
 - Compiler maps, listings and symbols are generated in `src/build-c` or as
   ignored `.lis`/`.sym` files beside the sources.
 - The Docker image is pinned by tag and digest in `src/Makefile`.
