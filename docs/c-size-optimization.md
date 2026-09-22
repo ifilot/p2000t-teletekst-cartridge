@@ -15,7 +15,7 @@ matching `lz4_z80.asm`.
 
 - The 560-byte opening mosaic is stored as a 259-byte raw-LZ4 block.
 - The 341-byte error-description table is stored as a raw-LZ4 block.
-- The complete 960-byte help screen is stored as a 438-byte raw-LZ4 block.
+- The complete 960-byte help screen is stored as a 412-byte raw-LZ4 block.
   This replaces its procedural drawing function and separate string literals.
   `display_screen` is reused as the decode buffer, so it consumes no additional
   RAM. Returning from help re-renders the raw page and its current markers.

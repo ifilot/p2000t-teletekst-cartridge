@@ -33,6 +33,7 @@ static const char *dump_path, *dump_frame_path, *dump_fetches_path,
     *dump_pages_path, *dump_sources_path;
 static const char *flash_path;
 static int fail_page, fail_error;
+static int fixture_repeats_next_subpage;
 static uint8_t queued_keys[16];
 static size_t queued_head, queued_tail;
 
@@ -250,7 +251,8 @@ static int named_keycode(const char *name, size_t length) {
   } keys[] = {{"START", 128},    {"ENTER", 52},  {"LEFT", 0}, {"RIGHT", 23},
               {"BACKSPACE", 44}, {"STOP", 0x58}, {"KP0", 19}, {"KP1", 59},
               {"KP2", 58},       {"KP3", 56},    {"KP4", 67}, {"KP5", 66},
-              {"KP6", 64},       {"KP7", 51},    {"KP8", 50}, {"KP9", 48}};
+              {"KP6", 64},       {"KP7", 51},    {"KP8", 50}, {"KP9", 48},
+              {"LSHIFT", 72},    {"RSHIFT", 79}};
   for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
     if (strlen(keys[i].name) == length && !memcmp(name, keys[i].name, length))
       return keys[i].code;
@@ -452,6 +454,8 @@ int main(int argc, char **argv) {
       font = argv[i];
     else if (!strcmp(argv[i], "--fixture") && ++i < argc)
       fixture = argv[i];
+    else if (!strcmp(argv[i], "--fixture-repeat-subpage"))
+      fixture_repeats_next_subpage = 1;
     else if (!strcmp(argv[i], "--live"))
       live = 1;
     else if (!strcmp(argv[i], "--headless"))
@@ -550,6 +554,8 @@ int main(int argc, char **argv) {
     return 1;
   struct page_backend backend = {.fixture = fixture,
                                  .live = live,
+                                 .fixture_repeats_next_subpage =
+                                     fixture_repeats_next_subpage,
                                  .fail_page = (uint16_t)fail_page,
                                  .fail_error = (uint8_t)fail_error};
   p2wp_device_init(page_backend_fetch, &backend);

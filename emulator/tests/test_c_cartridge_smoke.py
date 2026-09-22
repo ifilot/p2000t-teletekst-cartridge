@@ -35,6 +35,7 @@ def run_emulator(
     wait_opening: bool = False,
     fail_page: int = 0,
     fail_error: int = 0,
+    repeat_fixture_subpage: bool = False,
 ) -> bytes:
     command = [
         str(binary),
@@ -54,6 +55,8 @@ def run_emulator(
     ]
     if inject_key:
         command.append("--auto")
+    if repeat_fixture_subpage:
+        command.append("--fixture-repeat-subpage")
     if auto_source is not None:
         command.extend(("--auto-source", str(auto_source)))
     if custom_server is not None:
@@ -150,7 +153,7 @@ def main() -> int:
             b"\x04\x1d\x07 P2000T TELETEKST           BRONKEUZE"
         )
         assert b"0 - EIGEN SERVER" in source_menu
-        assert b"START/I INDEX ?/R ONTHUL Z ZOOM" in source_menu
+        assert b"START/I INDEX       ?/R ONTHUL" in source_menu
         assert b"CARTRIDGE: v0.5.0 / PICO v0.5.0" in source_menu
         assert b"LAATSTE VERSIE ONLINE: v0.5.0" in source_menu
 
@@ -269,7 +272,7 @@ def main() -> int:
             build / "p2000t-emulator",
             monitor,
             temp / "fetching.bin",
-            194,
+            198,
             True,
             auto_keys="RIGHT",
         )
@@ -314,16 +317,27 @@ def main() -> int:
         )
         assert manual_fetches.read_bytes()[:2] == bytes((0, 2))
 
-        zoomed = run_emulator(
+        zoom_removed = run_emulator(
             build / "p2000t-emulator",
             monitor,
-            temp / "zoomed.bin",
+            temp / "zoom-removed.bin",
             650,
             True,
             auto_keys="Z",
         )
-        assert zoomed[0] == 0x0D
-        assert zoomed[40:80] == b" " * 40
+        assert zoom_removed[0] != 0x0D
+        assert b"NOS Telet" in zoom_removed
+
+        shifted = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "shifted.bin",
+            650,
+            True,
+            auto_keys="LSHIFT,RSHIFT",
+        )
+        assert b"12:34:" in shifted[:40]
+        assert b"NOS Telet" in shifted
 
         help_page = run_emulator(
             build / "p2000t-emulator",
@@ -356,7 +370,6 @@ def main() -> int:
         help_line(8, 0x07, 0x04, " V        AUTO VOLGENDE PAGINA")
         help_line(9, 0x04, 0x07, " WEERGAVE")
         help_line(10, 0x07, 0x04, " ?/R      VERBORGEN TEKST ONTHULLEN")
-        help_line(11, 0x07, 0x04, " Z        BOVEN / ONDER / NORMAAL")
         help_line(12, 0x04, 0x07, " SUBPAGINA'S")
         help_line(13, 0x07, 0x04, " S        KIES EEN SUBPAGINA")
         help_line(14, 0x07, 0x04, " A        SUBPAGINA PAUZE / DOOR")
@@ -404,6 +417,32 @@ def main() -> int:
         assert revealed[47] == 0x07
         assert revealed[48:54] == b"SECRET"
 
+        rotating_reveal_fixture = temp / "rotating-reveal.json"
+        rotating_reveal_fixture.write_text(
+            json.dumps(
+                {
+                    "prevPage": "",
+                    "nextPage": "101",
+                    "nextSubPage": "100-1",
+                    "binaryDisplay": base64.b64encode(reveal_page).decode("ascii"),
+                }
+            )
+        )
+        rotating_reveal_fetches = temp / "rotating-reveal-fetches.bin"
+        rotating_revealed = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "rotating-revealed.bin",
+            1350,
+            True,
+            fetches=rotating_reveal_fetches,
+            auto_keys="?",
+            fixture=rotating_reveal_fixture,
+        )
+        assert rotating_reveal_fetches.read_bytes()[:3] == bytes((0, 1, 0))
+        assert rotating_revealed[47] == 0x07
+        assert rotating_revealed[48:54] == b"SECRET"
+
         reconcealed = run_emulator(
             build / "p2000t-emulator",
             monitor,
@@ -425,6 +464,7 @@ def main() -> int:
             True,
             pages=auto_pages,
             auto_keys="V",
+            repeat_fixture_subpage=True,
         )
         assert auto_pages.read_text().splitlines()[:3] == ["100", "100", "101"]
         assert automatic[35] == ord("V")

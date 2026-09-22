@@ -409,10 +409,10 @@ _platform_format_clock:
     push hl
     pop ix
     ld b,0
-    ld a,(ix+25)             ; clock_has_date
+    ld a,(ix+24)             ; clock_has_date
     or a
     jr z,platform_clock_time
-    ld a,(ix+23)             ; weekday * 2
+    ld a,(ix+22)             ; weekday * 2
     add a,a
     ld l,a
     ld h,0
@@ -423,11 +423,11 @@ _platform_format_clock:
     call platform_clock_copy2
     ld a,' '
     call platform_clock_put
-    ld a,(ix+20)
+    ld a,(ix+19)
     call platform_clock_two_digits
     ld a,'.'
     call platform_clock_put
-    ld a,(ix+21)             ; (month - 1) * 3
+    ld a,(ix+20)             ; (month - 1) * 3
     dec a
     ld l,a
     add a,a
@@ -449,26 +449,26 @@ _platform_format_clock:
     ld a,' '
     call platform_clock_put
 platform_clock_time:
-    ld a,(ix+17)
+    ld a,(ix+16)
     call platform_clock_two_digits
     ld a,':'
     ld c,(ix+0)              ; P2000T source has the blinking colon
     dec c
     jr nz,platform_clock_colon
-    ld c,(ix+26)
+    ld c,(ix+25)
     dec c
     jr nz,platform_clock_colon
     ld a,' '
 platform_clock_colon:
     call platform_clock_put
-    ld a,(ix+18)
+    ld a,(ix+17)
     call platform_clock_two_digits
     ld a,(ix+0)
     dec a
     jr z,platform_clock_done
     ld a,':'
     call platform_clock_put
-    ld a,(ix+19)
+    ld a,(ix+18)
     call platform_clock_two_digits
 platform_clock_done:
     ld l,b
@@ -514,12 +514,12 @@ _platform_advance_clock:
     push ix
     push hl
     pop ix
-    ld a,(ix+24)
+    ld a,(ix+23)
     or a
     jp z,platform_clock_unchanged
     ld hl,($6010)
-    ld e,(ix+27)
-    ld d,(ix+28)
+    ld e,(ix+26)
+    ld d,(ix+27)
     or a
     sbc hl,de
     bit 7,h
@@ -527,17 +527,12 @@ _platform_advance_clock:
     ld hl,($6010)
     ld de,25
     add hl,de
-    ld (ix+27),l
-    ld (ix+28),h
-    ld a,(ix+26)
+    ld (ix+26),l
+    ld (ix+27),h
+    ld a,(ix+25)
     xor 1
-    ld (ix+26),a
+    ld (ix+25),a
     jr nz,platform_clock_changed
-    inc (ix+19)
-    ld a,(ix+19)
-    cp 60
-    jr c,platform_clock_changed
-    ld (ix+19),0
     inc (ix+18)
     ld a,(ix+18)
     cp 60
@@ -545,44 +540,49 @@ _platform_advance_clock:
     ld (ix+18),0
     inc (ix+17)
     ld a,(ix+17)
-    cp 24
+    cp 60
     jr c,platform_clock_changed
     ld (ix+17),0
-    ld a,(ix+25)
+    inc (ix+16)
+    ld a,(ix+16)
+    cp 24
+    jr c,platform_clock_changed
+    ld (ix+16),0
+    ld a,(ix+24)
     or a
     jr z,platform_clock_changed
-    inc (ix+23)
-    ld a,(ix+23)
+    inc (ix+22)
+    ld a,(ix+22)
     cp 7
     jr c,platform_clock_weekday_ready
-    ld (ix+23),0
+    ld (ix+22),0
 platform_clock_weekday_ready:
-    ld a,(ix+21)
+    ld a,(ix+20)
     dec a
     ld l,a
     ld h,0
     ld de,platform_month_days
     add hl,de
     ld c,(hl)
-    ld a,(ix+21)
+    ld a,(ix+20)
     cp 2
     jr nz,platform_clock_days_ready
-    ld a,(ix+22)
+    ld a,(ix+21)
     and 3
     jr nz,platform_clock_days_ready
     inc c
 platform_clock_days_ready:
-    inc (ix+20)
+    inc (ix+19)
     ld a,c
-    cp (ix+20)
+    cp (ix+19)
     jr nc,platform_clock_changed
-    ld (ix+20),1
-    inc (ix+21)
-    ld a,(ix+21)
+    ld (ix+19),1
+    inc (ix+20)
+    ld a,(ix+20)
     cp 13
     jr c,platform_clock_changed
-    ld (ix+21),1
-    inc (ix+22)
+    ld (ix+20),1
+    inc (ix+21)
 platform_clock_changed:
     ld hl,1
     pop ix
@@ -655,8 +655,7 @@ platform_reveal_next:
     ret
 
 ; Render a raw 40x24 SAA5050 page, replacing conceal controls when requested.
-; Zoom creates the monitor's double-height 12-row layout. SDCC packs raw at
-; SP+2, display at SP+4, zoom at SP+6 and reveal at SP+7.
+; SDCC packs raw at SP+2, display at SP+4 and reveal at SP+6.
 _platform_render_page:
     push ix
     ld ix,0
@@ -665,9 +664,6 @@ _platform_render_page:
     ld h,(ix+5)
     ld e,(ix+6)
     ld d,(ix+7)
-    ld a,(ix+8)
-    or a
-    jr nz,platform_render_zoom
     ld a,24
 platform_render_normal_row:
     push af
@@ -677,45 +673,6 @@ platform_render_normal_row:
     pop af
     dec a
     jr nz,platform_render_normal_row
-    pop ix
-    ret
-
-platform_render_zoom:
-    push hl
-    push de
-    ex de,hl
-    ld (hl),' '
-    push hl
-    pop de
-    inc de
-    ld bc,959
-    ldir
-    pop de
-    pop hl
-    ld a,(ix+8)
-    cp 2
-    jr nz,platform_render_zoom_source
-    ld bc,480
-    add hl,bc
-platform_render_zoom_source:
-    ld a,12
-platform_render_zoom_row:
-    push af
-    ld a,$0d
-    ld (de),a
-    inc de
-    ld c,$07
-    ld b,39
-    call platform_render_copy
-    inc hl
-    push hl
-    ld hl,40
-    add hl,de
-    ex de,hl
-    pop hl
-    pop af
-    dec a
-    jr nz,platform_render_zoom_row
     pop ix
     ret
 
@@ -738,7 +695,7 @@ platform_render_colour:
 platform_render_conceal:
     cp $18
     jr nz,platform_render_original
-    ld a,(ix+9)
+    ld a,(ix+8)
     or a
     jr z,platform_render_original
     pop af

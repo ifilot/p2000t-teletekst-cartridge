@@ -94,7 +94,8 @@ unsigned char page_backend_fetch(void *argument,unsigned char source,
         error=P2WP_TELETEKST_ERROR_INVALID_DATA;
       else{*next=metadata.next_subpage;*previous=metadata.previous_page;
         *following=metadata.next_page;}}
-    if(!error && backend->fixture && subpage!=0) *next=0;
+    if(!error && backend->fixture && subpage!=0 &&
+       !backend->fixture_repeats_next_subpage) *next=0;
     free(body.data);
     if(backend->fixture){
       static const unsigned char fixture_clock[7]={12,34,50,5,9,26,6};

@@ -46,7 +46,6 @@ typedef struct {
   uint8_t rotation_paused;    /**< Whether subpage rotation is paused. */
   uint8_t cycle_started;      /**< Whether the current subpage cycle started. */
   uint8_t reveal;             /**< Whether concealed text is shown. */
-  uint8_t zoom;               /**< Normal, top-half, or bottom-half view. */
   uint8_t auto_page;          /**< Whether page navigation is automatic. */
   uint8_t error;              /**< Last cartridge or remote fetch error. */
   uint8_t hour;               /**< Provider clock hour. */
@@ -129,21 +128,19 @@ static const uint8_t help_screen_lz4[] =
     "\x4f\x52\x49\x47\x45\x20\x2f\x20\x56\x4f\x4c\x47\x45\x4e\x44\x45"
     "\x94\x00\x01\x28\x00\x14\x56\x35\x00\x4e\x41\x55\x54\x4f\x23\x00"
     "\x05\xc8\x00\x7e\x57\x45\x45\x52\x47\x41\x56\x00\x01\x0b\x78\x00"
-    "\x32\x3f\x2f\x52\x0d\x00\x00\xef\x00\xf2\x06\x4f\x52\x47\x45\x4e"
+    "\x32\x3f\x2f\x52\x0d\x00\x00\xef\x00\xff\x06\x4f\x52\x47\x45\x4e"
     "\x20\x54\x45\x4b\x53\x54\x20\x4f\x4e\x54\x48\x55\x4c\x4c\x45\x4e"
-    "\x28\x00\x24\x5a\x20\x6b\x01\xf4\x07\x4f\x56\x45\x4e\x20\x2f\x20"
-    "\x4f\x4e\x44\x45\x52\x20\x2f\x20\x4e\x4f\x52\x4d\x41\x41\x4c\x78"
-    "\x00\x32\x53\x55\x42\x8c\x00\x2f\x27\x53\x78\x00\x0a\x05\x1e\x00"
-    "\x86\x4b\x49\x45\x53\x20\x45\x45\x4e\x3a\x00\x09\x28\x00\x05\x0e"
-    "\x00\x06\x1f\x00\x40\x50\x41\x55\x5a\x20\x01\x45\x44\x4f\x4f\x52"
-    "\x28\x00\x1d\x57\x50\x00\x11\x41\xa1\x00\xc2\x57\x49\x46\x49\x2d"
-    "\x4e\x45\x54\x57\x45\x52\x4b\x90\x01\x12\x4f\x78\x02\x01\x1f\x00"
-    "\x50\x45\x20\x42\x52\x4f\xce\x00\xc1\x49\x4e\x56\x4f\x45\x52\x20"
-    "\x54\x45\x52\x55\x47\x50\x00\x14\x48\x50\x00\x41\x44\x45\x5a\x45"
-    "\xae\x02\x0b\x9d\x00\x0f\x01\x00\x40\x0f\xf8\x02\x15\x0f\xd0\x02"
-    "\x19\x01\xc3\x00\x31\x52\x55\x4b\x13\x01\x83\x54\x4f\x45\x54\x53"
-    "\x20\x4f\x4d\xe8\x00\x7f\x54\x45\x20\x47\x41\x41\x4e\x4b\x00\x11"
-    "\x50\x20\x20\x20\x20\x20";
+    "\x40\x01\x1b\x32\x53\x55\x42\x8c\x00\x2f\x27\x53\x78\x00\x0a\x05"
+    "\x1e\x00\x86\x4b\x49\x45\x53\x20\x45\x45\x4e\x3a\x00\x09\x28\x00"
+    "\x05\x0e\x00\x06\x1f\x00\x40\x50\x41\x55\x5a\x20\x01\x45\x44\x4f"
+    "\x4f\x52\x28\x00\x1d\x57\x50\x00\xf2\x03\x41\x4e\x44\x45\x52\x20"
+    "\x57\x49\x46\x49\x2d\x4e\x45\x54\x57\x45\x52\x4b\x90\x01\x12\x4f"
+    "\x78\x02\x01\x1f\x00\xf1\x06\x45\x20\x42\x52\x4f\x4e\x20\x2f\x20"
+    "\x49\x4e\x56\x4f\x45\x52\x20\x54\x45\x52\x55\x47\x50\x00\x14\x48"
+    "\x50\x00\x41\x44\x45\x5a\x45\xae\x02\x0b\x9d\x00\x0f\x01\x00\x40"
+    "\x0f\xf8\x02\x15\x0f\x90\x01\x19\x01\xc3\x00\x31\x52\x55\x4b\x13"
+    "\x01\x83\x54\x4f\x45\x54\x53\x20\x4f\x4d\xe8\x00\x6f\x54\x45\x20"
+    "\x47\x41\x41\xe1\x01\x12\x50\x20\x20\x20\x20\x20";
 
 /** Six animation frames for the top-left page-fetch indicator. */
 static const uint8_t indicator_frames[6][4] = {
@@ -405,7 +402,7 @@ draw_menu:
   ui_action(10u, "        KIES BRON (0-3)");
   show_auto_start(session);
   ui_action(12u, "      BEDIENING OP DE PAGINA");
-  ui_panel(13u, " START/I INDEX ?/R ONTHUL Z ZOOM");
+  ui_panel(13u, " START/I INDEX       ?/R ONTHUL");
   ui_panel(14u, "  <-/P VORIGE     ->/N VOLGENDE");
   ui_panel(15u, "  A PAUZE/DOORGAAN  S SUBPAGINA");
   ui_panel(16u, "  V AUTO-PAGINA  W WIFI  H HULP");
@@ -540,22 +537,22 @@ static void clock_update(viewer_state_t *state) {
     platform_write_bytes(0u, (uint8_t)(40u - length), text, length);
     return;
   }
-  platform_write_bytes(0u, state->zoom == 0u ? 1u : 2u, text, length);
+  platform_write_bytes(0u, 1u, text, length);
   {
     uint8_t index;
     for (index = 0u; index != length; ++index) {
       page_screen[1u + index] = text[index];
-      display_screen[(state->zoom == 0u ? 1u : 2u) + index] = text[index];
+      display_screen[1u + index] = text[index];
     }
   }
 }
 
 /**
  * @brief Renders the raw page into the packed display buffer.
- * @param state Viewer state selecting zoom and reveal modes.
+ * @param state Viewer state selecting reveal mode.
  */
 static void render_page(const viewer_state_t *state) {
-  platform_render_page(page_screen, display_screen, state->zoom, state->reveal);
+  platform_render_page(page_screen, display_screen, state->reveal);
 }
 
 /**
@@ -644,13 +641,17 @@ static uint8_t fetch_page(p2wp_session_t *session, viewer_state_t *state) {
   } else {
     state->clock_valid = 0u;
   }
-  state->previous_page = 0u;
-  state->next_page = 0u;
   if (session->version >= 4u) {
-    state->previous_page =
+    uint16_t previous_page =
         (uint16_t)reply.payload[13] | ((uint16_t)reply.payload[14] << 8u);
-    state->next_page =
+    uint16_t next_page =
         (uint16_t)reply.payload[15] | ((uint16_t)reply.payload[16] << 8u);
+    if (state->subpage == 0u || previous_page != 0u)
+      state->previous_page = previous_page;
+    if (state->subpage == 0u || next_page != 0u) state->next_page = next_page;
+  } else {
+    state->previous_page = 0u;
+    state->next_page = 0u;
   }
 
   for (chunk = 0u; chunk != CHUNK_COUNT; ++chunk) {
@@ -664,8 +665,6 @@ static uint8_t fetch_page(p2wp_session_t *session, viewer_state_t *state) {
         *destination++ = reply.payload[index];
     }
   }
-  state->reveal = 0u;
-  state->zoom = 0u;
   state->page_visible = 1u;
   clock_overlay_raw(state);
   present_page(state);
@@ -862,7 +861,7 @@ static void toggle_auto_page(viewer_state_t *state) {
  * @param state Viewer state to update.
  */
 static void rotate_subpage(p2wp_session_t *session, viewer_state_t *state) {
-  if (state->next_subpage != 0u) {
+  if (state->next_subpage != 0u && state->next_subpage > state->subpage) {
     state->subpage = state->next_subpage;
   } else {
     state->subpage = 0u;
@@ -892,16 +891,17 @@ static uint8_t viewer_loop(p2wp_session_t *session, viewer_state_t *state) {
   uint8_t status;
 
   for (;;) {
+    clock_update(state);
     status = platform_key_status();
     if (status == 2u) return 0u;
     if (status == 0u) {
-      clock_update(state);
       if (input_count == 0u &&
           (state->auto_page ||
            (!state->rotation_paused &&
             (state->next_subpage != 0u || state->cycle_started))) &&
           (int16_t)(platform_clock() - state->rotation_deadline) >= 0) {
-        if (!state->rotation_paused && state->next_subpage != 0u)
+        if (!state->rotation_paused && state->next_subpage != 0u &&
+            (!state->auto_page || state->next_subpage > state->subpage))
           rotate_subpage(session, state);
         else if (state->auto_page) {
           uint16_t page =
@@ -949,19 +949,8 @@ static uint8_t viewer_loop(p2wp_session_t *session, viewer_state_t *state) {
     if (key == 'r' || key == '?') {
       input_count = 0u;
       state->reveal ^= 1u;
-      if (state->zoom == 0u) {
-        render_page(state);
-        platform_commit_reveal(page_screen, state->reveal);
-      } else {
-        present_page(state);
-      }
-      continue;
-    }
-    if (key == 'z') {
-      input_count = 0u;
-      ++state->zoom;
-      if (state->zoom == 3u) state->zoom = 0u;
-      present_page(state);
+      render_page(state);
+      platform_commit_reveal(page_screen, state->reveal);
       continue;
     }
     if (key == 'h') {
@@ -1023,7 +1012,6 @@ void teletekst_start(p2wp_session_t *session, uint8_t opening_timed_out) {
     state.rotation_paused = 0u;
     state.cycle_started = 0u;
     state.reveal = 0u;
-    state.zoom = 0u;
     state.auto_page = started_automatically;
     state.auto_retry = 0u;
     if (!fetch_page(session, &state)) show_fetch_error(&state);

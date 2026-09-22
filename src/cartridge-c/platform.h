@@ -181,13 +181,11 @@ uint8_t platform_advance_clock(uint8_t *state) __z88dk_fastcall;
 void platform_commit_reveal(const uint8_t *screen, uint8_t reveal);
 
 /**
- * @brief Renders normal or zoomed SAA5050 page bytes into a packed buffer.
+ * @brief Renders SAA5050 page bytes into a packed buffer.
  * @param raw Raw 40-by-24 page bytes.
  * @param[out] display Packed output display.
- * @param zoom Zero for normal, one for top, or two for bottom half.
  * @param reveal Whether conceal controls should be replaced by current colour.
  */
-void platform_render_page(const uint8_t *raw, uint8_t *display, uint8_t zoom,
-                          uint8_t reveal);
+void platform_render_page(const uint8_t *raw, uint8_t *display, uint8_t reveal);
 
 #endif  // P2000T_PLATFORM_H_
