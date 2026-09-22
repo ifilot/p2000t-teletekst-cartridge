@@ -70,19 +70,25 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Z80 assembler
-        run: sudo apt-get update && sudo apt-get install --yes z80asm
+      - name: Install cartridge and emulator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes z80asm cmake ninja-build libsdl2-dev libcurl4-openssl-dev
 
       - name: Build and verify cartridge
         run: |
           make -C src
           make -C src verify
+          make -C src c-rom
+          make -C src c-smoke
           make -C firmware/tests test
 
       - uses: actions/upload-artifact@v4
         with:
           name: p2wp-cartridge
-          path: src/p2wp-cartridge.bin
+          path: |
+            src/p2wp-cartridge.bin
+            src/p2wp-cartridge-c.bin
           if-no-files-found: error
 
   firmware:

@@ -4,6 +4,103 @@
 `0x1010`, communicates with the slot-2 Pico interface at ports `0x40` through
 `0x42`, and writes progress directly to the P2000T video RAM at `0x5000`.
 
+## Z88DK C migration
+
+The parallel `cartridge-c` tree is the incremental replacement for the
+assembly implementation. It currently provides the custom P2000T CRT and
+memory map, compact video-RAM/monitor/cartridge-port assembly shims, ROM
+padding and signing, and a reusable P2WP transaction layer with framing, CRC,
+retry, sequence, protocol-error and HELLO validation. Negotiation is performed
+behind the normal Wi-Fi scan display rather than exposing the earlier C-only
+`PICO TEST` diagnostics screen. `DEVICE_INFO` supplies the Pico version shown
+on the source menu. The production and release ROM remains
+`p2wp-cartridge.bin` until the C
+implementation reaches behavioural parity.
+
+The fixed 40x24 video-memory operations and unsigned-byte decimal writer are
+implemented as compact Z80 routines. The latter uses repeated subtraction;
+the linked cartridge therefore contains no `sprintf`/`printf`, division,
+multiplication, or arithmetic-error support from the general C runtime.
+
+The current Wi-Fi vertical slice queries the encrypted-profile state and, when
+a profile exists, starts it and polls through acquisition of an IP address. If
+no usable profile exists, it starts an asynchronous scan, polls radio and scan
+state, validates and displays up to nine SSIDs, accepts network selection and a
+masked WPA/WPA2 password, connects, and optionally asks the Pico to encrypt and
+save that profile. Password storage is wiped after use. Unsupported security,
+short passwords, timeouts and connection failures produce explicit messages.
+
+After Wi-Fi connects, the C image presents the restored Teletekst-style source
+menu and can select NOS, P2000T, a custom server, or (with P2WP/7)
+TeletekstArchief.nl. The custom-server editor accepts 96 characters over three
+rows; P2WP/5 restores and saves the URL in Pico flash, while P2WP/4 retains it
+for the cartridge session. It starts an asynchronous request for page 100, validates
+the version-dependent status response, retrieves all four 240-byte display
+chunks, stages the complete 960-byte screen in RAM, and then displays it. Page
+state now persists in a viewer loop: three digits select pages 100-899,
+Backspace edits an unfinished number, `START`/`I` returns to page 100,
+`P`/left and `N`/right follow previous/next metadata, and `STOP` returns to
+source selection. Subpages advance automatically every ten seconds and wrap
+to the default first subpage; `A` pauses/resumes that sequence and `S` selects
+a subpage manually. `R`/`?` reveals concealed text, `Z` cycles normal and both
+half-page zoom modes, `H` shows and dismisses the help page without refetching,
+`V` enables automatic next-page navigation, and `W` returns to Wi-Fi setup.
+Clock updates, the persistent source-menu autostart countdown, legacy Archive
+fallback, and detailed error/recovery behaviour are included in the C image.
+
+The C Wi-Fi screen now follows the assembly layout for network results and
+password input. Protected networks first ask whether entry should be visible
+(`J`) or masked (`N`); the 63-character input spans two rows, supports
+Backspace, preserves the original protocol bytes, and displays `#` using its
+Viewdata glyph. Emulator comparison confirms that the list and visibility
+prompt are byte-identical to the assembly version.
+
+The reusable C UI layer reintroduces SAA5050 blue-background headers,
+white-and-blue content panels, mosaic separator rules, the complete
+fourteen-row joined P2000T/TELETEKST mosaic, and the cartridge footer. The
+opening screen, source menu, and basic error recovery use this layer; later
+migration phases can extend it without embedding control-byte strings
+throughout the application logic. Page requests preserve the current display
+and animate the assembly version's six-phase mosaic tile in the upper-left
+corner until the complete replacement page has arrived.
+
+Build the migration image using the pinned Z88DK 2.4 Docker image. The build
+uses the SDCC frontend with `--opt-code-size -SO3` and
+`--max-allocs-per-node200000`; the latter saves ROM space but can make the
+production compile take several minutes. The assembly platform entry points
+follow SDCC's packed-byte stack ABI:
+
+```sh
+make -C src c-rom
+```
+
+This produces `src/p2wp-cartridge-c.bin`. To boot it in the emulator and test
+the C runtime, keyboard shim and P2WP/2–7 negotiation, run:
+
+```sh
+make -C src c-smoke
+```
+
+Every C ROM build reports code/read-only-data bytes, initialized-data bytes,
+and the remaining padding capacity in the 16 KiB cartridge. The generated ROM
+itself is always exactly 16,384 bytes after padding and signing.
+
+The opening logo, help page, and error-description tables use a
+cartridge-resident raw-LZ4 decoder. Page rendering, clock
+arithmetic/formatting, fixed-width numeric formatting, atomic screen commits
+and reveal updates use focused Z80 routines; the protocol and viewer state
+machines remain in C for maintainability. `make -C src c-lint` verifies Google
+C formatting, readable multi-line Doxygen block layout, and all documentation
+headers.
+
+The generated map, symbols and listing are placed in `src/build-c`. The ROM
+builder appends Z88DK's initialized-data image after code and read-only data so
+the CRT can copy it to RAM during startup. ROM code starts at `0x1000`,
+execution starts at `0x1010`, mutable sections start at `0x7000`, and the stack
+starts at `0x9ff0`. Keep platform-specific entry, monitor-call and port-I/O
+details in the assembly shim; application and protocol logic belongs in C
+modules.
+
 `p2wp-cartridge.bin` is a generated ROM image and is not stored in Git. Build it
 with `make -C src`; this requires `z80asm` 1.8 or a compatible assembler.
 The build signs the image with the P2000T additive 16-bit cartridge checksum.

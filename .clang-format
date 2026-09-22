@@ -1,0 +1,7 @@
+# Google-style formatting rules for the maintainable C cartridge sources.
+# SPDX-License-Identifier: GPL-3.0-only
+
+BasedOnStyle: Google
+ColumnLimit: 80
+DerivePointerAlignment: false
+PointerAlignment: Right

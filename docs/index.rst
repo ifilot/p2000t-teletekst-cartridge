@@ -52,6 +52,9 @@ Choose a starting point
 * **I am writing Z80 assembly.** See the :doc:`assembly` guide for reusable
   byte-transfer, framing, CRC, and transaction routines from the production
   cartridge ROM.
+* **I am maintaining the Z88DK C port.** See the :doc:`c-migration-handoff`
+  for its architecture and current status, and :doc:`c-size-optimization` for
+  measured ROM-size trade-offs.
 * **I am implementing compatible hardware or firmware.** Use the
   :doc:`protocol` as the normative reference. Its requirements define what a
   conforming P2WP endpoint must do.
@@ -86,5 +89,7 @@ Reference and implementation guides
    custom-server
    basic
    assembly
+   c-migration-handoff
+   c-size-optimization
 
 .. _project README: https://github.com/ifilot/p2000t-teletekst-cartridge#readme
