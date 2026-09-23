@@ -31,6 +31,8 @@ static uint8_t security[MAX_NETWORKS];
 static uint8_t password[MAX_PASSWORD];
 /** Number of populated bytes in password. */
 static uint8_t password_length;
+/** Shared heading for scan progress and result screens. */
+static const char wifi_title[] = " P2000T  WIFI-INSTELLING";
 
 /**
  * @brief Reads one translated key while preserving the dedicated STOP event.
@@ -132,7 +134,7 @@ static uint8_t try_profile(p2wp_session_t *s) {
  */
 void wifi_show_scanning(void) {
   platform_clear_screen();
-  ui_title(1u, " P2000T  WIFI-INSTELLING");
+  ui_title(1u, wifi_title);
   ui_action(2u, "   WIFI-NETWERKEN ZOEKEN...");
   ui_panel(3u, " LINK ACTIEF - POLL 0000 |");
   ui_panel(4u, " NETWERKEN GEVONDEN: 0");
@@ -158,7 +160,7 @@ static uint8_t scan_networks(p2wp_session_t *s) {
   }
   if (r.payload[0] != 2u) return 0u;
   count = r.payload[1] > MAX_NETWORKS ? MAX_NETWORKS : r.payload[1];
-  ui_title(1u, " P2000T  WIFI-INSTELLING");
+  ui_title(1u, wifi_title);
   ui_action(2u, "N  SIGNAAL B  NETWERK");
   for (index = 0u; index != MAX_NETWORKS; ++index)
     ui_panel((uint8_t)(3u + index), "");
