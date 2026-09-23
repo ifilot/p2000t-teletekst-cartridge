@@ -27,6 +27,7 @@ def run_emulator(
     auto_keys: str | None = None,
     password_visible: bool = False,
     pause_frame: int | None = None,
+    resume_frame: int | None = None,
     fixture: Path | None = None,
     auto_source: int | None = None,
     custom_server: str | None = None,
@@ -36,6 +37,9 @@ def run_emulator(
     fail_page: int = 0,
     fail_error: int = 0,
     repeat_fixture_subpage: bool = False,
+    stall_fetch: bool = False,
+    stall_fetch_after: int | None = None,
+    clock_valid: bool = True,
 ) -> bytes:
     command = [
         str(binary),
@@ -57,6 +61,12 @@ def run_emulator(
         command.append("--auto")
     if repeat_fixture_subpage:
         command.append("--fixture-repeat-subpage")
+    if stall_fetch:
+        command.append("--stall-fetch")
+    if stall_fetch_after is not None:
+        command.extend(("--stall-fetch-after", str(stall_fetch_after)))
+    if not clock_valid:
+        command.append("--clock-invalid")
     if auto_source is not None:
         command.extend(("--auto-source", str(auto_source)))
     if custom_server is not None:
@@ -88,6 +98,8 @@ def run_emulator(
         command.extend(("--auto-keys", auto_keys))
     if pause_frame is not None:
         command.extend(("--auto-pause-frame", str(pause_frame)))
+    if resume_frame is not None:
+        command.extend(("--auto-resume-frame", str(resume_frame)))
     subprocess.run(
         command,
         check=True,
@@ -280,6 +292,34 @@ def main() -> int:
         assert b"NOS Telet" in fetching
         assert b"PAGINA WORDT OPGEHAALD" not in fetching
 
+        graphics_page = bytearray(b" " * 960)
+        graphics_page[:40] = bytes((0x17,)) + bytes((0x70,)) * 39
+        graphics_page[80:90] = b"NOS Telet "
+        graphics_fixture = temp / "graphics-header.json"
+        graphics_fixture.write_text(
+            json.dumps(
+                {
+                    "nextPage": "101",
+                    "nextSubPage": "",
+                    "binaryDisplay": base64.b64encode(graphics_page).decode("ascii"),
+                }
+            )
+        )
+        graphics_fetching = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "graphics-fetching.bin",
+            198,
+            True,
+            auto_keys="RIGHT",
+            fixture=graphics_fixture,
+            stall_fetch_after=1,
+            clock_valid=False,
+        )
+        assert graphics_fetching[4:40] == b" " * 36, \
+            ("graphics header leaked behind the fetch indicator: " +
+             repr(graphics_fetching[:40]))
+
         rotating_fetches = temp / "rotating-fetches.bin"
         run_emulator(
             build / "p2000t-emulator",
@@ -303,6 +343,20 @@ def main() -> int:
         )
         assert paused_fetches.read_bytes() == bytes((0,))
         assert paused[39] == ord("A")
+
+        resumed_fetches = temp / "resumed-fetches.bin"
+        run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "resumed.bin",
+            1050,
+            True,
+            fetches=resumed_fetches,
+            pause_frame=350,
+            resume_frame=450,
+        )
+        assert resumed_fetches.read_bytes()[:2] == bytes((0, 2)), \
+            "A did not resume automatic subpage progression"
 
         manual_fetches = temp / "manual-fetches.bin"
         run_emulator(
@@ -503,6 +557,17 @@ def main() -> int:
         assert b"FOUTCODE: 0C" in timeout
         assert b"FOUT: SERVER REAGEERT NIET" in timeout
         assert b"DETAIL: HTTP 000 LWIP 00 NET 00" in timeout
+
+        fallback_timeout = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "fallback-timeout.bin",
+            8000,
+            True,
+            stall_fetch=True,
+        )
+        assert b"FOUTCODE: 81" in fallback_timeout
+        assert b"FOUT: TIMEOUT" in fallback_timeout
 
         wifi_return = run_emulator(
             build / "p2000t-emulator",

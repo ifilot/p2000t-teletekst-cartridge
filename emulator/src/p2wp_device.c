@@ -32,6 +32,9 @@ static uint8_t profile_state;
 static uint8_t wifi_security;
 static uint8_t protocol_maximum = P2WP_MAX_VERSION;
 static uint8_t status_length_override;
+static int fetch_stall_after = -1;
+static unsigned fetch_start_count;
+static bool clock_valid = true;
 static const char *flash_path;
 static char stored_custom_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
 static uint8_t stored_custom_url_length;
@@ -210,6 +213,14 @@ static uint8_t teletekst_fetch_start(
     }
     previous_page = 0u;
     next_page = 0u;
+    if (fetch_stall_after >= 0 &&
+        fetch_start_count >= (unsigned)fetch_stall_after) {
+        fetch_error = 0u;
+        fetch_state = 1u;
+        response->payload_length = 0u;
+        return P2WP_FIRMWARE_COMMAND_OK;
+    }
+    fetch_start_count++;
     fetch_error = fetch_page != NULL ? fetch_page(
         fetch_context,
         request->payload[3],
@@ -241,7 +252,7 @@ static uint8_t teletekst_fetch_status(
     response->payload[4] = next_subpage;
     if (request->version >= 3u || status_length_override >= 9u) {
         memcpy(response->payload + 5u, local_clock, 3u);
-        response->payload[8] = fetch_error != 0u ? 0u : 1u;
+        response->payload[8] = fetch_error != 0u || !clock_valid ? 0u : 1u;
         memcpy(response->payload + 9u, local_clock + 3u, 4u);
         if (request->version >= 4u) {
             response->payload[13] = (uint8_t)previous_page;
@@ -428,6 +439,15 @@ void p2wp_device_set_protocol_range(uint8_t minimum, uint8_t maximum) {
 
 void p2wp_device_set_status_length(uint8_t length) {
     status_length_override = length;
+}
+
+void p2wp_device_set_fetch_stall_after(int successful_fetches) {
+    fetch_stall_after = successful_fetches;
+    fetch_start_count = 0u;
+}
+
+void p2wp_device_set_clock_valid(int valid) {
+    clock_valid = valid != 0;
 }
 
 void p2wp_device_set_profile_present(int present) {

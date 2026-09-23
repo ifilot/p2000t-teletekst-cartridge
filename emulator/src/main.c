@@ -34,6 +34,8 @@ static const char *dump_path, *dump_frame_path, *dump_fetches_path,
 static const char *flash_path;
 static int fail_page, fail_error;
 static int fixture_repeats_next_subpage;
+static int fetch_stall_after = -1;
+static int clock_valid = 1;
 static uint8_t queued_keys[16];
 static size_t queued_head, queued_tail;
 
@@ -457,6 +459,12 @@ int main(int argc, char **argv) {
       fixture = argv[i];
     else if (!strcmp(argv[i], "--fixture-repeat-subpage"))
       fixture_repeats_next_subpage = 1;
+    else if (!strcmp(argv[i], "--stall-fetch"))
+      fetch_stall_after = 0;
+    else if (!strcmp(argv[i], "--stall-fetch-after") && ++i < argc)
+      fetch_stall_after = atoi(argv[i]);
+    else if (!strcmp(argv[i], "--clock-invalid"))
+      clock_valid = 0;
     else if (!strcmp(argv[i], "--live"))
       live = 1;
     else if (!strcmp(argv[i], "--headless"))
@@ -520,13 +528,16 @@ int main(int argc, char **argv) {
       (status_length != 0 && status_length != 5 && status_length != 9 &&
        status_length != 13 && status_length != 17 && status_length != 21) ||
       fail_page < 0 || fail_page > 899 || fail_error < 0 || fail_error > 255 ||
+      fetch_stall_after < -1 ||
       ((fail_page == 0) != (fail_error == 0))) {
     fprintf(stderr,
             "Usage: p2000t-emulator --monitor ROM --cartridge ROM "
             "[--live|--fixture JSON] [--auto-source 0|1|2|3 --custom-server "
             "URL] [--flash FILE] [--p2wp-version N] [--p2wp-status-length "
             "5|9|13|17|21] [--wifi-profile] [--wifi-security 0|1] "
-            "[--wifi-password-visible] [--fail-page PAGE --fail-error CODE]\n");
+            "[--wifi-password-visible] [--clock-invalid] "
+            "[--stall-fetch|--stall-fetch-after N] "
+            "[--fail-page PAGE --fail-error CODE]\n");
     return 2;
   }
   uint8_t m[4096], c[16384];
@@ -566,6 +577,8 @@ int main(int argc, char **argv) {
                                    (uint8_t)protocol_version);
   if (status_length)
     p2wp_device_set_status_length((uint8_t)status_length);
+  p2wp_device_set_fetch_stall_after(fetch_stall_after);
+  p2wp_device_set_clock_valid(clock_valid);
   p2wp_device_set_profile_present(wifi_profile);
   p2wp_device_set_wifi_security((uint8_t)wifi_security);
   OutputReg |= 0x40;

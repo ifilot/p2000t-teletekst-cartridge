@@ -15,7 +15,7 @@ sys.path.insert(0,str(ROOT/'server'))
 from server import page_response
 with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
     temp=Path(directory); build=temp/'build'; monitor=temp/'monitor.bin'; intro_screen=temp/'intro-screen.bin'; intro_hidden_screen=temp/'intro-hidden-screen.bin'; intro_countdown_screen=temp/'intro-countdown-screen.bin'; source_screen=temp/'source-screen.bin'; screen=temp/'screen.bin'; custom_dialog_screen=temp/'custom-dialog-screen.bin'; custom_screen=temp/'custom-screen.bin'; restored_custom_screen=temp/'restored-custom-screen.bin'; emulated_flash=temp/'pico-flash.bin'; auto_flash=temp/'auto-flash.bin'; auto_screen=temp/'auto-screen.bin'; archive_screen=temp/'archive-screen.bin'; cancel_screen=temp/'cancel-screen.bin'; custom_concealed_screen=temp/'custom-concealed-screen.bin'; custom_revealed_screen=temp/'custom-revealed-screen.bin'; custom_conceal_fixture=temp/'custom-conceal.json'; zoom_screen=temp/'zoom-screen.bin'; reveal_fixture=temp/'reveal.json'; reveal_screen=temp/'reveal-screen.bin'; help_screen=temp/'help-screen.bin'; p2000_screen=temp/'p2000-screen.bin'; legacy_warning_screen=temp/'legacy-warning-screen.bin'; legacy_screen=temp/'legacy-screen.bin'; legacy_clock_screen=temp/'legacy-clock-screen.bin'; legacy_p2000_screen=temp/'legacy-p2000-screen.bin'; incompatible_screen=temp/'incompatible-screen.bin'; frame=temp/'frame.bin'; loop_fetches=temp/'loop-fetches.bin'; pause_fetches=temp/'pause-fetches.bin'; resume_fetches=temp/'resume-fetches.bin'; keypad_pages=temp/'keypad-pages.txt'; arrow_pages=temp/'arrow-pages.txt'; auto_pages=temp/'auto-pages.txt'
-    cycle_screen=temp/'cycle-screen.bin'; archive_sources=temp/'archive-sources.bin'; legacy_archive_sources=temp/'legacy-archive-sources.bin'; auto_skip_pages=temp/'auto-skip-pages.txt'; timeout_screen=temp/'timeout-screen.bin'; legacy_timeout_screen=temp/'legacy-timeout-screen.bin'; paused_clock_screen=temp/'paused-clock-screen.bin'; input_clock_screen=temp/'input-clock-screen.bin'
+    cycle_screen=temp/'cycle-screen.bin'; archive_sources=temp/'archive-sources.bin'; legacy_archive_sources=temp/'legacy-archive-sources.bin'; auto_skip_pages=temp/'auto-skip-pages.txt'; timeout_screen=temp/'timeout-screen.bin'; legacy_timeout_screen=temp/'legacy-timeout-screen.bin'; fallback_timeout_screen=temp/'fallback-timeout-screen.bin'; paused_clock_screen=temp/'paused-clock-screen.bin'; input_clock_screen=temp/'input-clock-screen.bin'
     bundled_monitor=EMU/'assets/P2000ROM.bin'
     assert bundled_monitor.stat().st_size == 4096
     assert hashlib.sha256(bundled_monitor.read_bytes()).hexdigest() == \
@@ -85,6 +85,20 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         '--cartridge',str(ROOT/'src/p2wp-cartridge.bin'),'--fixture',
         str(EMU/'tests/fixtures/nos-100.json'),'--font',str(EMU/'assets/Default.fnt'),
         '--headless','--auto']
+    graphics_page=bytearray(b' '*960)
+    graphics_page[:40]=bytes((0x17,))+bytes((0x70,))*39
+    graphics_page[80:90]=b'NOS Telet '
+    graphics_fixture=temp/'graphics-header.json'
+    graphics_fixture.write_text(json.dumps({
+        'nextPage':'101', 'nextSubPage':'',
+        'binaryDisplay':base64.b64encode(graphics_page).decode('ascii')}))
+    graphics_fetching=temp/'graphics-fetching.bin'
+    subprocess.run(common+['--fixture',str(graphics_fixture),'--clock-invalid',
+        '--stall-fetch-after','1','--auto-key','RIGHT',
+        '--frames','198','--dump-screen',str(graphics_fetching)],check=True)
+    graphics_fetching_row=graphics_fetching.read_bytes()[:40]
+    assert graphics_fetching_row[4:40] == b' '*36, \
+        'graphics header leaked behind the fetch indicator: '+repr(graphics_fetching_row)
     subprocess.run(common+['--auto-source-cycles','4','--frames','198',
         '--dump-screen',str(cycle_screen)],check=True)
     cycle=cycle_screen.read_bytes()
@@ -131,6 +145,11 @@ with tempfile.TemporaryDirectory(prefix='p2000t-emulator-') as directory:
         b'FOUT: ONBEKENDE NETWERKFOUT' in legacy_timeout
     assert b'DETAIL:' not in legacy_timeout, \
         'P2WP/6 exposed P2WP/7-only error diagnostics'
+    subprocess.run(common+['--stall-fetch','--frames','4300',
+        '--dump-screen',str(fallback_timeout_screen)],check=True)
+    fallback_timeout=fallback_timeout_screen.read_bytes()
+    assert b'FOUTCODE: 81' in fallback_timeout
+    assert b'FOUT: TIMEOUT' in fallback_timeout
     subprocess.run(common+['--auto-keys','W,STOP','--frames','650',
         '--dump-screen',str(cancel_screen)],check=True)
     assert b'KIES BRON (0-3)' in cancel_screen.read_bytes(), \
