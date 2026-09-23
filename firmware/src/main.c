@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "hardware/gpio.h"
+#include "lwip/altcp_tcp.h"
 #include "lwip/altcp_tls.h"
 #include "lwip/apps/http_client.h"
 #include "lwip/dns.h"
@@ -59,6 +60,7 @@ enum {
 #define TELETEKST_NOS_PORT 443u
 #define TELETEKST_P2000T_PORT 443u
 #define TELETEKST_ARCHIVE_PORT 443u
+#define TELETEKST_FETCH_TIMEOUT_MS 60000u
 #define TELETEKST_ROWS_PER_CHUNK 6u
 #define TELETEKST_CHUNK_SIZE \
     (TELETEKST_COLUMNS * TELETEKST_ROWS_PER_CHUNK)
@@ -210,6 +212,10 @@ static uint16_t teletekst_http_status;
 static bool teletekst_fetch_requested;
 static bool teletekst_http_overflow;
 static bool teletekst_tls_cleanup_pending;
+static bool teletekst_http_active;
+static bool teletekst_forced_timeout;
+static absolute_time_t teletekst_fetch_deadline;
+static struct altcp_pcb *teletekst_http_connection;
 static size_t teletekst_http_length;
 static char teletekst_http_body[TELETEKST_HTTP_BODY_MAX + 1u];
 static uint8_t teletekst_screen[TELETEKST_SCREEN_SIZE];
@@ -524,7 +530,15 @@ static struct altcp_pcb *teletekst_tls_alloc(void *arg, u8_t ip_type) {
     if (teletekst_tls_insecure) {
         mbedtls_ssl_set_hs_authmode(context, MBEDTLS_SSL_VERIFY_NONE);
     }
+    teletekst_http_connection = connection;
     return connection;
+}
+
+/** Allocate and retain a plain TCP connection so timed-out HTTP can abort. */
+static struct altcp_pcb *teletekst_tcp_alloc(void *arg, u8_t ip_type) {
+    (void)arg;
+    teletekst_http_connection = altcp_tcp_new_ip_type(ip_type);
+    return teletekst_http_connection;
 }
 
 /**
@@ -623,7 +637,9 @@ static void teletekst_request_done(
     (void)argument;
     (void)received_length;
 
+    teletekst_http_connection = NULL;
     mutex_enter_blocking(&wifi_mutex);
+    teletekst_http_active = false;
     teletekst_http_result = (uint8_t)result;
     teletekst_lwip_error = (int8_t)error;
     teletekst_http_status = server_status <= UINT16_MAX
@@ -632,6 +648,11 @@ static void teletekst_request_done(
     mutex_exit(&wifi_mutex);
 
     teletekst_tls_cleanup_pending = true;
+    if (teletekst_forced_timeout) {
+        teletekst_forced_timeout = false;
+        teletekst_set_failed(TELETEKST_ERROR_TIMEOUT);
+        return;
+    }
     if (result != HTTPC_RESULT_OK) {
         teletekst_set_failed(teletekst_http_error(result));
         return;
@@ -787,6 +808,8 @@ static void teletekst_start_requested_fetch(void) {
     teletekst_tls_hostname = host;
     teletekst_tls_insecure = source == P2WP_TELETEKST_SOURCE_CUSTOM;
     teletekst_tls_config = NULL;
+    teletekst_http_connection = NULL;
+    teletekst_forced_timeout = false;
     if (tls) {
         teletekst_tls_config = altcp_tls_create_config_client(
             root_ca,
@@ -799,6 +822,10 @@ static void teletekst_start_requested_fetch(void) {
         teletekst_tls_allocator.alloc = teletekst_tls_alloc;
         teletekst_tls_allocator.arg = teletekst_tls_config;
         teletekst_http_settings.altcp_allocator = &teletekst_tls_allocator;
+    } else {
+        teletekst_tls_allocator.alloc = teletekst_tcp_alloc;
+        teletekst_tls_allocator.arg = NULL;
+        teletekst_http_settings.altcp_allocator = &teletekst_tls_allocator;
     }
     teletekst_http_settings.result_fn = teletekst_request_done;
     teletekst_http_settings.headers_done_fn = teletekst_headers_done;
@@ -810,6 +837,10 @@ static void teletekst_start_requested_fetch(void) {
     teletekst_lwip_error = 0;
     teletekst_http_status = 0u;
     mutex_exit(&wifi_mutex);
+    mutex_enter_blocking(&wifi_mutex);
+    teletekst_http_active = true;
+    mutex_exit(&wifi_mutex);
+    teletekst_fetch_deadline = make_timeout_time_ms(TELETEKST_FETCH_TIMEOUT_MS);
     const err_t result = httpc_get_file_dns(
         host,
         port,
@@ -820,7 +851,9 @@ static void teletekst_start_requested_fetch(void) {
         NULL
     );
     if (result != ERR_OK) {
+        teletekst_http_connection = NULL;
         mutex_enter_blocking(&wifi_mutex);
+        teletekst_http_active = false;
         teletekst_lwip_error = (int8_t)result;
         mutex_exit(&wifi_mutex);
         if (teletekst_tls_config != NULL) {
@@ -829,6 +862,24 @@ static void teletekst_start_requested_fetch(void) {
         }
         teletekst_set_failed(teletekst_request_start_error(result));
     }
+}
+
+/** Abort an HTTP request that exceeded the complete fetch deadline. */
+static void teletekst_check_fetch_deadline(void) {
+    if (!teletekst_http_active || teletekst_forced_timeout ||
+        !time_reached(teletekst_fetch_deadline)) {
+        return;
+    }
+    teletekst_forced_timeout = true;
+    if (teletekst_http_connection != NULL) {
+        struct altcp_pcb *connection = teletekst_http_connection;
+        teletekst_http_connection = NULL;
+        altcp_abort(connection);
+        return;
+    }
+    // DNS is still pending. Keep the request active so its eventual callback
+    // can release the HTTP state, but expose a terminal timeout immediately.
+    teletekst_set_failed(TELETEKST_ERROR_TIMEOUT);
 }
 
 /** Publish a terminal firmware-version lookup error. */
@@ -1128,6 +1179,7 @@ static void wifi_sort_results(void) {
  */
 static void wifi_service(void) {
     cyw43_arch_poll();
+    teletekst_check_fetch_deadline();
     // A completed HTTP callback runs inside poll(). The connection has been
     // released when poll returns, so its TLS configuration is now safe to free.
     teletekst_cleanup_tls();
@@ -1915,7 +1967,7 @@ static uint8_t pico_teletekst_fetch_start(
         mutex_exit(&wifi_mutex);
         return P2WP_ERROR_WIFI_UNAVAILABLE;
     }
-    if (teletekst_fetch_requested ||
+    if (teletekst_fetch_requested || teletekst_http_active ||
         teletekst_fetch_state == TELETEKST_FETCH_CONNECTING ||
         teletekst_fetch_state == TELETEKST_FETCH_RECEIVING) {
         mutex_exit(&wifi_mutex);

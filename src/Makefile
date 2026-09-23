@@ -34,7 +34,7 @@ $(C_ROM): $(C_SOURCES) $(C_HEADERS) make_cartridge_rom.py $(SIGNER)
 	mkdir -p $(C_BUILD)
 	$(Z88DK_DOCKER) /opt/z88dk/bin/zcc +embedded \
 		-compiler=sdcc -clib=default --opt-code-size \
-		--max-allocs-per-node200000 -SO3 \
+		--max-allocs-per-node10000 -SO3 \
 		-crt0=cartridge-c/crt0.asm \
 		-m -s --list \
 		-o $(C_BUILD)/p2wp-cartridge-c \

@@ -41,9 +41,16 @@ and release diffs.
 ### Changed
 
 - Moved pause/resume from `P` to `A` so `P` can mean previous page.
+- Reduced the Z88DK optimizer allocation limit to shorten C-cartridge builds.
 
 ### Fixed
 
+- Bound Teletekst HTTP work to 60 seconds in the Pico firmware, aborting the
+  active connection so a timed-out request cannot block later fetches. Both
+  cartridges retain a 75-second fallback for an unresponsive Pico.
+- Prevent graphics-mode page headers from appearing as a row of `p` characters
+  while the fetch indicator is active, and label fallback error `0x81` as
+  `TIMEOUT`.
 - Keep the live clock updating while subpage rotation is paused, a page number
   is being entered, or either double-height zoom view is active.
 - Clear the complete auto-start setting row before drawing a shorter value, so

@@ -419,6 +419,11 @@ Source `3`, introduced in P2WP/7, uses `teletekstarchief.nl` over verified
 HTTPS. Its trust store includes both ISRG Root X1 and X2 because the service can
 present either its RSA or ECDSA Let's Encrypt chain.
 
+The reference peripheral applies a 60-second overall deadline to every HTTP
+fetch. On expiry it aborts and releases the active connection before reporting
+`TIMEOUT`, so a later fetch is not blocked behind stale network work. Hosts use
+a longer fallback deadline for an unresponsive peripheral.
+
 For a built-in source, a `TELETEKST_FETCH_START` request contains four bytes:
 
 | Offset | Field |

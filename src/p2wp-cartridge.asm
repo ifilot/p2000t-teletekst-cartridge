@@ -115,6 +115,7 @@ TELETEKST_ERROR_LOCAL_ABORT: equ 15
 TELETEKST_CHUNK_COUNT: equ 4
 TELETEKST_CHUNK_SIZE:  equ 240
 TELETEKST_ROTATE_TICKS: equ 500
+TELETEKST_FETCH_TIMEOUT_TICKS: equ 3750 ; 75-second host fallback
 TELETEKST_AUTOSTART_TICKS: equ 3000 ; one minute at 20 ms per tick
 TELETEKST_CLOCK_TICKS:  equ 50
 TELETEKST_BLINK_TICKS:  equ 25
@@ -2600,6 +2601,10 @@ teletekst_fetch_request_ready:
         call validate_empty_response
         jp c,teletekst_fetch_failed
         call next_sequence
+        ld hl,(MONITOR_CLOCK)
+        ld de,TELETEKST_FETCH_TIMEOUT_TICKS
+        add hl,de
+        ld (teletekst_fetch_deadline),hl
 
 teletekst_fetch_poll:
         call poll_delay
@@ -2648,9 +2653,9 @@ teletekst_fetch_poll_length_ok:
         call next_sequence
         ld a,(RX_BUFFER+6)
         cp TELETEKST_CONNECTING
-        jr z,teletekst_fetch_poll
+        jr z,teletekst_fetch_poll_running
         cp TELETEKST_RECEIVING
-        jr z,teletekst_fetch_poll
+        jr z,teletekst_fetch_poll_running
         cp TELETEKST_COMPLETE
         jr z,teletekst_fetch_rows
         cp TELETEKST_FAILED
@@ -2672,6 +2677,17 @@ teletekst_fetch_error_details_ready:
         call teletekst_indicator_restore
         scf
         ret
+
+teletekst_fetch_poll_running:
+        ld hl,(MONITOR_CLOCK)
+        ld de,(teletekst_fetch_deadline)
+        or a
+        sbc hl,de
+        bit 7,h
+        jp nz,teletekst_fetch_poll
+        ld a,081h
+        ld (teletekst_error_code),a
+        jp teletekst_fetch_error_details_ready
 
 teletekst_fetch_rows:
         ld a,(RX_BUFFER+10)
@@ -3303,13 +3319,46 @@ wait_for_vsync_tick:
         ret
 
 ; A graphics colour control must occupy column zero before an SAA5050 mosaic
-; can be shown. Put the rotating block in column one, the leftmost physically
-; possible mosaic position, then restore the normal graphics and alpha modes.
+; can be shown. Put the rotating block in column one. If the saved row is in
+; graphics mode at column four, blank its remaining graphics bytes first so
+; the indicator's final alpha control cannot render them as letters.
 teletekst_indicator_begin:
         ld hl,VIDEO_RAM
         ld de,TELETEXT_INDICATOR_SAVED
-        ld bc,4
+        ld bc,40
         ldir
+        ld hl,TELETEXT_INDICATOR_SAVED
+        ld b,4
+        ld c,0
+teletekst_indicator_mode_loop:
+        ld a,(hl)
+        inc hl
+        cp 001h
+        jr c,teletekst_indicator_mode_next
+        cp 008h
+        jr c,teletekst_indicator_mode_alpha
+        cp 011h
+        jr c,teletekst_indicator_mode_next
+        cp 018h
+        jr c,teletekst_indicator_mode_graphics
+teletekst_indicator_mode_next:
+        djnz teletekst_indicator_mode_loop
+        ld a,c
+        or a
+        jr z,teletekst_indicator_row_ready
+        ld hl,VIDEO_RAM
+        ld (hl),020h
+        ld de,VIDEO_RAM+1
+        ld bc,39
+        ldir
+        jr teletekst_indicator_row_ready
+teletekst_indicator_mode_alpha:
+        ld c,0
+        jr teletekst_indicator_mode_next
+teletekst_indicator_mode_graphics:
+        ld c,1
+        jr teletekst_indicator_mode_next
+teletekst_indicator_row_ready:
         xor a
         ld (teletekst_indicator_phase),a
         jp teletekst_indicator_draw
@@ -3339,7 +3388,7 @@ teletekst_indicator_draw:
 teletekst_indicator_restore:
         ld hl,TELETEXT_INDICATOR_SAVED
         ld de,VIDEO_RAM
-        ld bc,4
+        ld bc,40
         ldir
         ret
 
@@ -3394,6 +3443,9 @@ show_teletekst_error_no_details:
 ; Return a short Dutch explanation for every stable fetch error code.
 teletekst_error_description:
         ld a,(teletekst_error_code)
+        cp 081h
+        ld hl,teletekst_error_fetch_timeout_text
+        ret z
         cp TELETEKST_ERROR_NOT_CONNECTED
         ld hl,teletekst_error_not_connected_text
         ret z
@@ -4767,6 +4819,8 @@ teletekst_error_abort_text:
         defb "AANVRAAG AFGEBROKEN",0
 teletekst_error_unknown_text:
         defb "ONBEKENDE FOUT",0
+teletekst_error_fetch_timeout_text:
+        defb "TIMEOUT",0
 page_not_found_header_text:
         defb 004h,01dh,007h," P2000T  TELETEKST"
         defs 40-($-page_not_found_header_text),020h
@@ -4970,7 +5024,7 @@ teletekst_screen_pointer: equ 07469h
 teletekst_error_code:   equ 0746bh
 TELETEXT_INPUT_BUFFER:  equ 0746ch
 teletekst_indicator_phase: equ 0746fh
-TELETEXT_INDICATOR_SAVED: equ 07470h
+TELETEXT_INDICATOR_SAVED: equ 074b0h
 wifi_profile_state:      equ 07474h
 wifi_profile_error:      equ 07475h
 wifi_profile_mode:       equ 07476h
@@ -5016,6 +5070,7 @@ teletekst_auto_retry_pending: equ 074a7h
 teletekst_http_result: equ 074a8h
 teletekst_lwip_error: equ 074a9h
 teletekst_http_status: equ 074aah
+teletekst_fetch_deadline: equ 074ach
 TELETEXT_SCREEN_BUFFER: equ 07500h
 custom_url_length:       equ 078c0h
 teletekst_previous_page: equ 078c1h

@@ -79,8 +79,8 @@ static uint8_t custom_url[MAX_CUSTOM_URL];
 static uint8_t custom_url_length;
 /** Saved source-menu digit, or AUTOSTART_DISABLED. */
 static uint8_t auto_start_source = AUTOSTART_DISABLED;
-/** Video bytes temporarily covered by the fetch indicator. */
-static uint8_t indicator_saved[4];
+/** Video row temporarily replaced by the fetch indicator. */
+static uint8_t indicator_saved[P2000T_SCREEN_COLUMNS];
 /** Current frame index in indicator_frames. */
 static uint8_t indicator_phase;
 /** RAM workspace receiving decompressed error descriptions. */
@@ -432,7 +432,15 @@ static void indicator_draw(void) {
  * @brief Saves the page corner and starts the fetch animation.
  */
 static void indicator_begin(void) {
+  uint8_t column;
+  uint8_t graphics = 0u;
   platform_read_bytes(0u, 0u, indicator_saved, sizeof(indicator_saved));
+  for (column = 0u; column != 4u; ++column) {
+    uint8_t value = indicator_saved[column];
+    if (value >= 1u && value <= 7u) graphics = 0u;
+    if (value >= 0x11u && value <= 0x17u) graphics = 1u;
+  }
+  if (graphics) platform_clear_line(0u);
   indicator_phase = 0u;
   indicator_draw();
 }
@@ -447,7 +455,7 @@ static void indicator_next(void) {
 }
 
 /**
- * @brief Restores the four screen bytes covered by the fetch animation.
+ * @brief Restores the screen row temporarily used by the fetch animation.
  */
 static void indicator_restore(void) {
   platform_write_bytes(0u, 0u, indicator_saved, sizeof(indicator_saved));
@@ -551,7 +559,7 @@ static uint8_t fetch_page(p2wp_session_t *session, viewer_state_t *state) {
   uint8_t chunk;
   uint8_t request_length = 4u;
   uint8_t *destination = page_screen;
-  uint16_t tries = 750u;
+  uint16_t tries = 1875u;
   p2wp_response_t reply;
   enum p2wp_result result;
 
@@ -672,6 +680,11 @@ static void show_fetch_error(viewer_state_t *state) {
   ui_panel(4u, "FOUTCODE: 00");
   platform_write_hex(4u, 13u, state->error);
   ui_panel(5u, "FOUT:");
+  if (state->error == 0x81u) {
+    platform_write_text(5u, 9u, "TIMEOUT");
+    ui_action(8u, "PROBEER OPNIEUW OF KIES ANDERE BRON");
+    return;
+  }
   lz4_decompress(error_text_lz4, error_text, sizeof(error_text_lz4));
   description = (const char *)error_text;
   index = state->error >= 1u && state->error <= 15u
