@@ -13,7 +13,8 @@ matching `lz4_z80.asm`.
 
 ## Implemented compression
 
-- The 560-byte opening mosaic is stored as a 259-byte raw-LZ4 block.
+- The 960-byte opening-screen base is stored as a 383-byte raw-LZ4 block. The
+  blinking prompt, countdown, and shared version footer remain overlays.
 - The 341-byte error-description table is stored as a raw-LZ4 block.
 - The complete 960-byte help screen is stored as a 418-byte raw-LZ4 block.
   This replaces its procedural drawing function and separate string literals.
