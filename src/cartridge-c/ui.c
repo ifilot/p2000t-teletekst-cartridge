@@ -145,13 +145,6 @@ void ui_panel(uint8_t row, const char *text) {
 }
 
 /**
- * @brief Writes a white-on-blue full-width action row.
- */
-void ui_action(uint8_t row, const char *text) {
-  styled_line(row, SAA_ALPHA_BLUE, SAA_ALPHA_WHITE, text);
-}
-
-/**
  * @brief Draws a blue mosaic separator across one row.
  */
 void ui_rule(uint8_t row) {

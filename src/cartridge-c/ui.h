@@ -43,12 +43,8 @@ void ui_title(uint8_t row, const char *text);
  */
 void ui_panel(uint8_t row, const char *text);
 
-/**
- * @brief Writes a white-on-blue full-width action row.
- * @param row Screen row.
- * @param text Null-terminated text after the control-byte prefix.
- */
-void ui_action(uint8_t row, const char *text);
+/** Action rows use the same white-on-blue style as title rows. */
+#define ui_action ui_title
 
 /**
  * @brief Draws a blue mosaic separator across one row.
