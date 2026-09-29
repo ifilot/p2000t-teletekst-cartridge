@@ -13,6 +13,7 @@ enum {
     STATUS_PORT = 0x42,
     SCREEN_SIZE = 960,
     CHUNK_SIZE = 240,
+    FETCH_TIMEOUT_TICKS = 3000,
 };
 
 static p2wp_parser_t parser;
@@ -34,6 +35,8 @@ static uint8_t protocol_maximum = P2WP_MAX_VERSION;
 static uint8_t status_length_override;
 static int fetch_stall_after = -1;
 static unsigned fetch_start_count;
+static unsigned fetch_stall_ticks;
+static bool fetch_timeout_enabled = true;
 static bool clock_valid = true;
 static const char *flash_path;
 static char stored_custom_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
@@ -217,6 +220,7 @@ static uint8_t teletekst_fetch_start(
         fetch_start_count >= (unsigned)fetch_stall_after) {
         fetch_error = 0u;
         fetch_state = 1u;
+        fetch_stall_ticks = 0u;
         response->payload_length = 0u;
         return P2WP_FIRMWARE_COMMAND_OK;
     }
@@ -444,6 +448,11 @@ void p2wp_device_set_status_length(uint8_t length) {
 void p2wp_device_set_fetch_stall_after(int successful_fetches) {
     fetch_stall_after = successful_fetches;
     fetch_start_count = 0u;
+    fetch_stall_ticks = 0u;
+}
+
+void p2wp_device_set_fetch_timeout_enabled(int enabled) {
+    fetch_timeout_enabled = enabled != 0;
 }
 
 void p2wp_device_set_clock_valid(int valid) {
@@ -518,12 +527,21 @@ void p2wp_device_reset(void) {
     encoded_position = 0u;
     fetch_state = 0u;
     fetch_error = 0u;
+    fetch_stall_ticks = 0u;
     next_subpage = 0u;
     previous_page = 0u;
     next_page = 0u;
     profile_state = 0u;
     wifi_security = 0u;
     memset(screen, 0, sizeof(screen));
+}
+
+void p2wp_device_tick(void) {
+    if (fetch_timeout_enabled && fetch_state == 1u &&
+        ++fetch_stall_ticks >= FETCH_TIMEOUT_TICKS) {
+        fetch_state = 4u;
+        fetch_error = P2WP_TELETEKST_ERROR_TIMEOUT;
+    }
 }
 
 void p2wp_device_out(uint8_t port, uint8_t value) {

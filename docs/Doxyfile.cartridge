@@ -1,7 +1,7 @@
 # Doxygen validation for the maintainable C cartridge implementation.
 # SPDX-License-Identifier: GPL-3.0-only
 
-PROJECT_NAME = "P2000T Teletekst cartridge C port"
+PROJECT_NAME = "P2000T Teletekst cartridge"
 OUTPUT_DIRECTORY = /tmp/p2000t-cartridge-doxygen
 INPUT = src/cartridge-c
 FILE_PATTERNS = *.c *.h
@@ -15,6 +15,8 @@ OPTIMIZE_OUTPUT_FOR_C = YES
 PREDEFINED = __z88dk_fastcall=
 WARNINGS = YES
 WARN_IF_UNDOCUMENTED = YES
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_NO_PARAMDOC = YES
 WARN_IF_DOC_ERROR = YES
 WARN_AS_ERROR = FAIL_ON_WARNINGS
 GENERATE_HTML = NO

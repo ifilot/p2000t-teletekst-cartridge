@@ -10,13 +10,15 @@ and release diffs.
 
 ### Added
 
-- Added P2WP/7 archive transport with hostname- and certificate-verified HTTPS,
-  while retaining a P2WP/4–6 custom-source compatibility fallback.
+- Added P2WP/7 archive transport with hostname- and certificate-verified HTTPS;
+  Archive now requires P2WP/7 rather than using unverified custom transport.
 - Added stable DNS, connection, closed-connection, timeout, memory,
   content-length, and local-abort fetch errors with raw HTTP/lwIP diagnostics.
 - Added TeletekstArchief.nl as a predefined source.
 - Added numeric-keypad page entry, Backspace correction, and left/right arrow
   aliases for previous/next page navigation.
+- Added `<`/`>` previous/next subpage navigation and native P2000T arrow glyphs
+  to the on-screen help page.
 - Added Shift-STOP cancellation to Wi-Fi and custom-server input.
 - Added a persistent P2WP/6 60-second auto-start source setting and automatic
   next-page mode, enabled automatically after a timed start, plus a visible
@@ -40,14 +42,23 @@ and release diffs.
 
 ### Changed
 
+- Made the Z88DK C cartridge the sole production and release ROM, removing the
+  legacy monolithic assembly implementation and its duplicate build/test paths.
 - Moved pause/resume from `P` to `A` so `P` can mean previous page.
 - Reduced the Z88DK optimizer allocation limit to shorten C-cartridge builds.
+- Made the emulator reproduce the Pico firmware's 60-second stalled-fetch
+  timeout while retaining an explicit cartridge-fallback test mode.
 
 ### Fixed
 
+- Reassert SAA5050 graphics mode at the start of the opening mosaic, restoring
+  the top stroke and preventing mosaic bytes from appearing as `P` characters
+  on real hardware.
+- Keep a compact live clock clear of the missing-page number-entry cells in
+  the C cartridge.
 - Bound Teletekst HTTP work to 60 seconds in the Pico firmware, aborting the
-  active connection so a timed-out request cannot block later fetches. Both
-  cartridges retain a 75-second fallback for an unresponsive Pico.
+  active connection so a timed-out request cannot block later fetches. The
+  cartridge retains a 75-second fallback for an unresponsive Pico.
 - Prevent graphics-mode page headers from appearing as a row of `p` characters
   while the fetch indicator is active, and label fallback error `0x81` as
   `TIMEOUT`.

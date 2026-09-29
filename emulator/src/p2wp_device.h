@@ -13,6 +13,8 @@ void p2wp_device_set_protocol_range(uint8_t minimum, uint8_t maximum);
 void p2wp_device_set_status_length(uint8_t length);
 /** Keep fetches in CONNECTING after the given number of successful starts. */
 void p2wp_device_set_fetch_stall_after(int successful_fetches);
+/** Enable the Pico firmware's 60-second terminal timeout for stalled fetches. */
+void p2wp_device_set_fetch_timeout_enabled(int enabled);
 /** Control whether successful fetch status reports a valid network clock. */
 void p2wp_device_set_clock_valid(int valid);
 /** Start the emulated Pico with a usable encrypted Wi-Fi profile. */
@@ -22,6 +24,8 @@ void p2wp_device_set_wifi_security(uint8_t security);
 /** Use a small file as persistent emulated flash for the custom URL. */
 void p2wp_device_set_flash_path(const char *path);
 void p2wp_device_reset(void);
+/** Advance emulated firmware timers by one 20 ms video frame. */
+void p2wp_device_tick(void);
 void p2wp_device_out(uint8_t port, uint8_t value);
 uint8_t p2wp_device_in(uint8_t port);
 

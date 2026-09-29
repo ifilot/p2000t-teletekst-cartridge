@@ -23,9 +23,7 @@ static const uint8_t keymap[144] = {
     '"', 0,   'L', 0,   0,   0,   '+', 'I', '*',
 };
 
-/**
- * @brief Translates a P2000T matrix/monitor key code into cartridge input.
- */
+/* Public API contract: see platform.h. */
 uint8_t platform_translate_key(uint8_t key) {
   if (key == 0u) return P2000T_KEY_LEFT;
   if (key == 23u) return P2000T_KEY_RIGHT;
@@ -33,25 +31,19 @@ uint8_t platform_translate_key(uint8_t key) {
   return key < sizeof(keymap) ? keymap[key] : 0u;
 }
 
-/**
- * @brief Converts an uppercase ASCII letter to lowercase.
- */
+/* Public API contract: see platform.h. */
 uint8_t platform_lower_ascii(uint8_t key) {
   return key >= 'A' && key <= 'Z' ? (uint8_t)(key + ('a' - 'A')) : key;
 }
 
-/**
- * @brief Busy-waits for a number of 20 ms monitor ticks.
- */
+/* Public API contract: see platform.h. */
 void platform_wait_ticks(uint8_t ticks) {
   uint16_t end = platform_clock() + ticks;
   while ((int16_t)(platform_clock() - end) < 0) {
   }
 }
 
-/**
- * @brief Reads the next translated non-START/non-STOP character.
- */
+/* Public API contract: see platform.h. */
 uint8_t platform_read_ascii(void) {
   uint8_t key;
   do {

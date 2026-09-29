@@ -14,8 +14,9 @@
 
 /**
  * @brief Runs source selection and the interactive page viewer indefinitely.
- * @param session Active negotiated and network-connected protocol session.
- * @param opening_timed_out Whether the opening countdown selected autostart.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in] opening_timed_out Whether the opening countdown selected
+ * autostart.
  */
 void teletekst_start(p2wp_session_t *session, uint8_t opening_timed_out);
 

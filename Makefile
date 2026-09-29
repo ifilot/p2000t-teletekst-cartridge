@@ -1,13 +1,12 @@
 # Convenience entry points that build and run the complete project.
 #
-# The emulator needs CMake, Ninja, SDL2 and libcurl; the assembly cartridge
-# needs z80asm and the C cartridge needs Docker for the pinned z88dk toolchain.
+# The emulator needs CMake, Ninja, SDL2 and libcurl; the cartridge needs
+# Docker for the pinned Z88DK toolchain.
 
 EMULATOR := emulator/build/p2000t-emulator
 MONITOR ?= $(if $(P2000_MONITOR_ROM),$(P2000_MONITOR_ROM),emulator/assets/P2000ROM.bin)
 FONT := emulator/assets/Default.fnt
-C_CARTRIDGE := src/p2wp-cartridge-c.bin
-ASM_CARTRIDGE := src/p2wp-cartridge.bin
+CARTRIDGE := src/p2wp-cartridge.bin
 
 # Emulator options: EMUFLAGS replaces the network mode, ARGS appends extras
 # such as --auto-key or --p2wp-version.
@@ -18,17 +17,13 @@ ARGS ?=
 run_emulator = $(EMULATOR) --monitor $(MONITOR) --cartridge $(1) --font $(FONT) \
 	$(EMUFLAGS) $(ARGS)
 
-.PHONY: all run run-asm emulator check-emulator-deps rom c-rom test clean
+.PHONY: all run emulator check-emulator-deps rom test clean
 
 all: emulator rom
 
-# Build the emulator and the C cartridge, then boot the C cartridge.
-run: emulator c-rom
-	$(call run_emulator,$(C_CARTRIDGE))
-
-# Build the emulator and the assembly cartridge, then boot the assembly cartridge.
-run-asm: emulator rom
-	$(call run_emulator,$(ASM_CARTRIDGE))
+# Build the emulator and cartridge, then boot the cartridge.
+run: emulator rom
+	$(call run_emulator,$(CARTRIDGE))
 
 emulator: check-emulator-deps
 	$(MAKE) -C emulator
@@ -44,9 +39,6 @@ check-emulator-deps:
 
 rom:
 	$(MAKE) -C src
-
-c-rom:
-	$(MAKE) -C src c-rom
 
 test: emulator rom
 	$(MAKE) -C emulator test

@@ -17,7 +17,7 @@ adds the checks, acknowledgements, and retry rules needed to make that exchange
 reliable.
 
 You do not need to understand every electrical signal or frame field to begin.
-The BASIC and assembly guides provide working implementations; the protocol
+The BASIC guide provides a working diagnostic implementation; the protocol
 specification is available when you need the exact details.
 
 How the pieces fit together
@@ -49,12 +49,8 @@ Choose a starting point
 * **I want to communicate from BASIC.** Follow the :doc:`basic` guide. It
   includes a complete ``HELLO`` and ``ECHO`` diagnostic that can be entered or
   loaded on a P2000T.
-* **I am writing Z80 assembly.** See the :doc:`assembly` guide for reusable
-  byte-transfer, framing, CRC, and transaction routines from the production
-  cartridge ROM.
-* **I am maintaining the Z88DK C port.** See the :doc:`c-migration-handoff`
-  for its architecture and current status, and :doc:`c-size-optimization` for
-  measured ROM-size trade-offs.
+* **I am maintaining the cartridge.** See :doc:`c-size-optimization` for its
+  architecture and measured ROM-size trade-offs.
 * **I am implementing compatible hardware or firmware.** Use the
   :doc:`protocol` as the normative reference. Its requirements define what a
   conforming P2WP endpoint must do.
@@ -88,8 +84,6 @@ Reference and implementation guides
    protocol
    custom-server
    basic
-   assembly
-   c-migration-handoff
    c-size-optimization
 
 .. _project README: https://github.com/ifilot/p2000t-teletekst-cartridge#readme

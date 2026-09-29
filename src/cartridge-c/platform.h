@@ -42,14 +42,14 @@ uint8_t platform_read_ascii(void);
 
 /**
  * @brief Converts a P2000T matrix/monitor key code into ASCII or a control key.
- * @param key Raw key code.
+ * @param[in] key Raw key code.
  * @return Translated byte, or zero when unmapped.
  */
 uint8_t platform_translate_key(uint8_t key);
 
 /**
  * @brief Converts an uppercase ASCII letter to lowercase.
- * @param key Input byte.
+ * @param[in] key Input byte.
  * @return Lowercase letter or the unchanged byte.
  */
 uint8_t platform_lower_ascii(uint8_t key);
@@ -67,7 +67,7 @@ uint16_t platform_clock(void);
 
 /**
  * @brief Busy-waits for a number of 20 ms monitor ticks.
- * @param ticks Number of ticks to wait.
+ * @param[in] ticks Number of ticks to wait.
  */
 void platform_wait_ticks(uint8_t ticks);
 
@@ -85,7 +85,7 @@ uint8_t platform_link_receive(void);
 
 /**
  * @brief Writes one byte to the Pico link transmit port.
- * @param value Byte to send.
+ * @param[in] value Byte to send.
  */
 void platform_link_send(uint8_t value) __z88dk_fastcall;
 
@@ -96,71 +96,71 @@ void platform_clear_screen(void);
 
 /**
  * @brief Clears one visible row.
- * @param row Screen row.
+ * @param[in] row Screen row.
  */
 void platform_clear_line(uint8_t row);
 
 /**
  * @brief Writes a clipped null-terminated string to video RAM.
- * @param row Screen row.
- * @param column Starting column.
- * @param text Text to write.
+ * @param[in] row Screen row.
+ * @param[in] column Starting column.
+ * @param[in] text Text to write.
  */
 void platform_write_text(uint8_t row, uint8_t column, const char *text);
 
 /**
  * @brief Writes clipped display bytes to video RAM.
- * @param row Screen row.
- * @param column Starting column.
- * @param data Bytes to write.
- * @param length Number of bytes.
+ * @param[in] row Screen row.
+ * @param[in] column Starting column.
+ * @param[in] data Bytes to write.
+ * @param[in] length Number of bytes.
  */
 void platform_write_bytes(uint8_t row, uint8_t column, const uint8_t *data,
                           uint8_t length);
 
 /**
  * @brief Reads clipped display bytes from video RAM.
- * @param row Screen row.
- * @param column Starting column.
+ * @param[in] row Screen row.
+ * @param[in] column Starting column.
  * @param[out] data Destination buffer.
- * @param length Number of bytes.
+ * @param[in] length Number of bytes.
  */
 void platform_read_bytes(uint8_t row, uint8_t column, uint8_t *data,
                          uint8_t length);
 
 /**
  * @brief Writes an unsigned byte in compact decimal notation.
- * @param row Screen row.
- * @param column Starting column.
- * @param value Value to format.
+ * @param[in] row Screen row.
+ * @param[in] column Starting column.
+ * @param[in] value Value to format.
  */
 void platform_write_u8(uint8_t row, uint8_t column, uint8_t value);
 
 /**
  * @brief Writes one byte as two uppercase hexadecimal digits.
- * @param row Screen row.
- * @param column Starting column.
- * @param value Value to format.
+ * @param[in] row Screen row.
+ * @param[in] column Starting column.
+ * @param[in] value Value to format.
  */
 void platform_write_hex(uint8_t row, uint8_t column, uint8_t value);
 
 /**
  * @brief Writes a page/status number as three fixed-width decimal digits.
- * @param row Screen row.
- * @param column Starting column.
- * @param value Value from zero through 999.
+ * @param[in] row Screen row.
+ * @param[in] column Starting column.
+ * @param[in] value Value from zero through 999.
  */
 void platform_write_page(uint8_t row, uint8_t column, uint16_t value);
 
 /**
  * @brief Atomically copies a packed 40-by-24 buffer to video RAM.
- * @param screen Packed display buffer.
+ * @param[in] screen Packed display buffer.
  */
 void platform_present_screen(const uint8_t *screen);
 
 /**
  * @brief Formats date/time fields from the viewer-state layout.
- * @param state Byte view of the viewer state.
+ * @param[in] state Byte view of the viewer state.
  * @param[out] out Destination display-byte buffer.
  * @return Number of formatted bytes.
  */
@@ -168,23 +168,24 @@ uint8_t platform_format_clock(const uint8_t *state, uint8_t *out);
 
 /**
  * @brief Advances viewer clock fields when their deadline expires.
- * @param state Mutable byte view of the viewer state.
+ * @param[in,out] state Mutable byte view of the viewer state.
  * @return One when the visible clock should be redrawn.
  */
 uint8_t platform_advance_clock(uint8_t *state) __z88dk_fastcall;
 
 /**
  * @brief Updates conceal controls directly in an already visible normal page.
- * @param screen Raw 40-by-24 page buffer.
- * @param reveal Whether concealed text should be revealed.
+ * @param[in] screen Raw 40-by-24 page buffer.
+ * @param[in] reveal Whether concealed text should be revealed.
  */
 void platform_commit_reveal(const uint8_t *screen, uint8_t reveal);
 
 /**
  * @brief Renders SAA5050 page bytes into a packed buffer.
- * @param raw Raw 40-by-24 page bytes.
+ * @param[in] raw Raw 40-by-24 page bytes.
  * @param[out] display Packed output display.
- * @param reveal Whether conceal controls should be replaced by current colour.
+ * @param[in] reveal Whether conceal controls should be replaced by current
+ * colour.
  */
 void platform_render_page(const uint8_t *raw, uint8_t *display, uint8_t reveal);
 

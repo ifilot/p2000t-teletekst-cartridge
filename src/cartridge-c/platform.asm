@@ -30,8 +30,9 @@ PUBLIC _platform_render_page
 PUBLIC fputc_cons_native
 PUBLIC _fputc_cons_native
 
-; The P2000T monitor's blocking keyboard routine returns its key code in A.
-; The sccz80 ABI returns an unsigned char in HL.
+; @brief Blocks in the monitor until a regular key or STOP is available.
+; @return HL contains the monitor key code; STOP is normalized to 0xfe.
+; @note The monitor returns its key code in A; the C ABI returns uint8_t in HL.
 _platform_read_key:
     call $0026
     jr nc,platform_read_key_ready
@@ -41,7 +42,8 @@ platform_read_key_ready:
     ld h,0
     ret
 
-; Return 0 when the monitor FIFO is empty, 1 for a regular key and 2 for STOP.
+; @brief Queries the monitor keyboard FIFO without consuming a key.
+; @return HL is 0 when empty, 1 for a regular key, or 2 for STOP.
 _platform_key_status:
     call $0029
     jr c,platform_key_status_stop
@@ -57,31 +59,40 @@ platform_key_status_ready:
     ld h,0
     ret
 
-; The monitor updates this 16-bit, 20 ms tick count from its interrupt handler.
+; @brief Reads the monitor's interrupt-driven 20 ms tick counter.
+; @return HL contains the wrapping 16-bit tick count.
 _platform_clock:
     ld hl,($6010)
     ret
 
+; @brief Reads the Pico link status port.
+; @return HL contains the unsigned status byte read from port 0x42.
 _platform_link_status:
     in a,($42)
     ld l,a
     ld h,0
     ret
 
+; @brief Reads one byte from the Pico link receive port.
+; @return HL contains the unsigned byte read from port 0x41.
 _platform_link_receive:
     in a,($41)
     ld l,a
     ld h,0
     ret
 
-; __z88dk_fastcall supplies the byte in L.
+; @brief Writes one byte to the Pico link transmit port.
+; @param[in] L Byte supplied by the __z88dk_fastcall ABI.
+; @return No value; AF is clobbered.
 _platform_link_send:
     ld a,l
     out ($40),a
     ret
 
-; Return the first visible byte of screen row A in HL. The P2000T uses an
-; 80-byte stride even though this cartridge displays only the first 40 bytes.
+; @brief Resolves a screen-row number to its first visible video-RAM byte.
+; @param[in] A Zero-based row number.
+; @return HL points at the row in video RAM; DE and flags are clobbered.
+; @note Rows have an 80-byte stride although only 40 bytes are visible.
 platform_row_address:
     ld l,a
     ld h,0
@@ -98,6 +109,8 @@ platform_row_address:
     add hl,de
     ret
 
+; @brief Replaces all 40 visible bytes in each of the 24 rows with spaces.
+; @return No value; AF, BC, DE, and HL are clobbered.
 _platform_clear_screen:
     ld hl,$5000
     ld c,24
@@ -114,7 +127,9 @@ platform_clear_screen_byte:
     jr nz,platform_clear_screen_row
     ret
 
-; sccz80 passes row at SP+2.
+; @brief Replaces one visible screen row with spaces.
+; @param[in] SP+2 row: zero-based screen row supplied by SDCC.
+; @return No value; AF, B, and HL are clobbered.
 _platform_clear_line:
     ld hl,2
     add hl,sp
@@ -128,8 +143,12 @@ platform_clear_line_byte:
     djnz platform_clear_line_byte
     ret
 
-; SDCC packs the byte arguments: row is at SP+2, column at SP+3 and text at
-; SP+4. IX is pushed before the arguments are addressed, adding two bytes.
+; @brief Writes a null-terminated string, clipped at the visible row edge.
+; @param[in] SP+2 row: zero-based screen row.
+; @param[in] SP+3 column: zero-based starting column.
+; @param[in] SP+4 text: pointer to the source string.
+; @return No value; IX is restored and other working registers are clobbered.
+; @note Pushing IX moves the accessed argument offsets two bytes higher.
 _platform_write_text:
     push ix
     ld ix,0
@@ -159,9 +178,12 @@ platform_write_text_done:
     pop ix
     ret
 
-; SDCC packs row at SP+2, column at SP+3 and value at SP+4. Decimal conversion
-; is deliberately limited to uint8_t and uses subtraction, avoiding stdio and
-; the general-purpose division/modulo runtime.
+; @brief Writes an unsigned byte in compact decimal notation.
+; @param[in] SP+2 row: zero-based screen row.
+; @param[in] SP+3 column: zero-based starting column.
+; @param[in] SP+4 value: byte to format.
+; @return No value; IX is restored and other working registers are clobbered.
+; @note Subtraction avoids pulling division, modulo, or stdio into the ROM.
 _platform_write_u8:
     push ix
     ld ix,0
@@ -215,7 +237,11 @@ platform_write_u8_ones:
     pop ix
     ret
 
-; Fixed-width hexadecimal byte, using the same packed SDCC byte arguments.
+; @brief Writes one byte as two fixed-width uppercase hexadecimal digits.
+; @param[in] SP+2 row: zero-based screen row.
+; @param[in] SP+3 column: zero-based starting column.
+; @param[in] SP+4 value: byte to format.
+; @return No value; IX is restored and other working registers are clobbered.
 _platform_write_hex:
     push ix
     ld ix,0
@@ -239,6 +265,9 @@ _platform_write_hex:
     ld (hl),a
     pop ix
     ret
+; @brief Converts the low nibble of A to an uppercase hexadecimal digit.
+; @param[in] A Byte whose low nibble is converted.
+; @return A contains the ASCII digit; flags are clobbered.
 platform_hex_digit:
     and $0f
     add a,'0'
@@ -247,7 +276,11 @@ platform_hex_digit:
     add a,'A'-'9'-1
     ret
 
-; Fixed-width three digit number (page and HTTP status are both <= 999).
+; @brief Writes a 16-bit value as three fixed-width decimal digits.
+; @param[in] SP+2 row: zero-based screen row.
+; @param[in] SP+3 column: zero-based starting column.
+; @param[in] SP+4 value: number in the supported range zero through 999.
+; @return No value; IX is restored and other working registers are clobbered.
 _platform_write_page:
     push ix
     ld ix,0
@@ -297,7 +330,12 @@ platform_page_ones:
     pop ix
     ret
 
-; SDCC packs row at SP+2, column at SP+3, data at SP+4 and length at SP+6.
+; @brief Copies display bytes into one row and clips them at column 40.
+; @param[in] SP+2 row: zero-based screen row.
+; @param[in] SP+3 column: zero-based starting column.
+; @param[in] SP+4 data: pointer to source bytes.
+; @param[in] SP+6 length: requested byte count.
+; @return No value; IX is restored and other working registers are clobbered.
 _platform_write_bytes:
     push ix
     ld ix,0
@@ -329,7 +367,12 @@ platform_write_bytes_done:
     pop ix
     ret
 
-; SDCC packs row at SP+2, column at SP+3, data at SP+4 and length at SP+6.
+; @brief Copies visible row bytes to a caller buffer, clipped at column 40.
+; @param[in] SP+2 row: zero-based screen row.
+; @param[in] SP+3 column: zero-based starting column.
+; @param[out] SP+4 data: pointer to the destination buffer.
+; @param[in] SP+6 length: requested byte count.
+; @return No value; IX is restored and other working registers are clobbered.
 _platform_read_bytes:
     push ix
     ld ix,0
@@ -361,8 +404,8 @@ platform_read_bytes_done:
     pop ix
     ret
 
-; Synchronise full-page changes with the monitor's 20 ms video tick. Blanking
-; during the copy prevents a half-old/half-new Teletext frame from being shown.
+; @brief Waits until the monitor's 20 ms video tick changes.
+; @return No value; A and HL are clobbered.
 platform_wait_vsync:
     ld hl,$6010
     ld a,(hl)
@@ -371,7 +414,10 @@ platform_wait_vsync_tick:
     jr z,platform_wait_vsync_tick
     ret
 
-; screen is at SP+2. Copy 40 visible bytes, then skip the hidden half-row.
+; @brief Atomically presents a packed 40-by-24 display buffer.
+; @param[in] SP+2 screen: pointer to the packed source buffer.
+; @return No value; working registers are clobbered.
+; @note Video output is blanked during the synchronized copy to prevent tears.
 _platform_present_screen:
     call platform_wait_vsync
     ld a,$80
@@ -396,8 +442,11 @@ platform_present_screen_row:
     out ($30),a
     ret
 
-; Compact formatter for viewer_state_t's clock fields. SDCC passes the state
-; pointer at SP+2 and the destination at SP+4. Return the byte count in HL.
+; @brief Formats the date/time fields stored in viewer_state_t.
+; @param[in] SP+2 state: pointer to the viewer state byte layout.
+; @param[out] SP+4 out: destination display-byte buffer.
+; @return HL contains the number of bytes written.
+; @note IX is restored; the other working registers are clobbered.
 _platform_format_clock:
     push ix
     ld ix,0
@@ -476,6 +525,9 @@ platform_clock_done:
     pop ix
     ret
 
+; @brief Copies two lookup-table bytes into the clock output stream.
+; @param[in] HL Source address; DE destination; B current output length.
+; @return HL and DE advance by two and B increases by two.
 platform_clock_copy2:
     ld a,(hl)
     call platform_clock_put
@@ -483,6 +535,9 @@ platform_clock_copy2:
     ld a,(hl)
     jr platform_clock_put
 
+; @brief Emits A as exactly two decimal digits into the clock output stream.
+; @param[in] A Value from zero through 99; DE destination; B output length.
+; @return DE advances by two and B increases by two; AF and C are clobbered.
 platform_clock_two_digits:
     ld c,'0'
 platform_clock_tens:
@@ -497,6 +552,9 @@ platform_clock_digits:
     call platform_clock_put
     pop af
     add a,'0'
+; @brief Appends one byte to the clock output stream.
+; @param[in] A Byte to write; DE destination; B current output length.
+; @return DE advances by one and B increases by one.
 platform_clock_put:
     ld (de),a
     inc de
@@ -508,8 +566,10 @@ platform_weekdays:
 platform_months:
     defb "janfebmrtaprmeijunjulaugsepoktnovdec"
 
-; Advance viewer_state_t's cached clock at each half-second boundary. HL is a
-; fastcall state pointer; return one only when the displayed clock changed.
+; @brief Advances viewer_state_t's cached clock at each half-second boundary.
+; @param[in,out] HL Fastcall pointer to mutable viewer state.
+; @return HL is one when the displayed clock changed, otherwise zero.
+; @note IX is restored; AF, BC, and DE are clobbered.
 _platform_advance_clock:
     push ix
     push hl
@@ -595,8 +655,11 @@ platform_clock_unchanged:
 platform_month_days:
     defb 31,28,31,30,31,30,31,31,30,31,30,31
 
-; Update only conceal controls on a normal-size page, avoiding a full blanked
-; commit (and therefore visible flicker) for the reveal key.
+; @brief Updates only conceal controls in an already-visible normal page.
+; @param[in] SP+2 screen: pointer to the raw 40-by-24 page buffer.
+; @param[in] SP+4 reveal: nonzero to reveal concealed text.
+; @return No value; IX is restored and other working registers are clobbered.
+; @note Avoids the visible flicker of a full blanked-screen commit.
 _platform_commit_reveal:
     push ix
     ld ix,0
@@ -654,8 +717,11 @@ platform_reveal_next:
     pop ix
     ret
 
-; Render a raw 40x24 SAA5050 page, replacing conceal controls when requested.
-; SDCC packs raw at SP+2, display at SP+4 and reveal at SP+6.
+; @brief Renders raw SAA5050 bytes and optionally replaces conceal controls.
+; @param[in] SP+2 raw: pointer to the raw 40-by-24 page.
+; @param[out] SP+4 display: pointer to the packed destination buffer.
+; @param[in] SP+6 reveal: nonzero to render concealed text visibly.
+; @return No value; IX is restored and other working registers are clobbered.
 _platform_render_page:
     push ix
     ld ix,0
@@ -676,6 +742,10 @@ platform_render_normal_row:
     pop ix
     ret
 
+; @brief Renders the current 40-byte row into the packed display buffer.
+; @param[in,out] HL Raw source pointer and DE display destination pointer.
+; @param[in] IX Viewer arguments; C current SAA5050 foreground colour.
+; @return HL and DE advance by 40; B reaches zero; AF and C are clobbered.
 platform_render_copy:
     ld a,(hl)
     inc hl
@@ -709,14 +779,17 @@ platform_render_store:
     djnz platform_render_copy
     ret
 
-; Cartridge applications do not return to a caller.  Keeping this terminal
-; loop in assembly also avoids pulling exit handling into the C program.
+; @brief Enters the cartridge's terminal halt loop.
+; @return Never returns.
+; @note Assembly implementation avoids linking C exit handling.
 _platform_halt:
     halt
     jr _platform_halt
 
-; The classic embedded CRT aliases this symbol even with stdio disabled.
-; P2000T output always uses the explicit video-RAM routines above.
+; @brief Satisfies the classic CRT's unused console-output hook.
+; @param[in] ABI-specific character argument, intentionally ignored.
+; @return No value; all registers are preserved.
+; @note P2000T output always uses the explicit video-RAM routines above.
 fputc_cons_native:
 _fputc_cons_native:
     ret

@@ -39,9 +39,7 @@ static uint8_t response[P2WP_MAX_BODY_SIZE];
 /** Number of bytes in the last validated response frame. */
 static uint16_t response_length;
 
-/**
- * @brief Calculates the P2WP CRC-16/CCITT-FALSE checksum.
- */
+/* Public API contract: see p2wp.h. */
 uint16_t p2wp_crc16(const uint8_t *data, uint16_t length) {
   uint16_t crc = 0xffffu;
   uint8_t bit;
@@ -58,7 +56,7 @@ uint16_t p2wp_crc16(const uint8_t *data, uint16_t length) {
 
 /**
  * @brief Tests a wrapping 16-bit monitor-clock deadline.
- * @param deadline Absolute 20 ms tick at which the operation expires.
+ * @param[in] deadline Absolute 20 ms tick at which the operation expires.
  * @return Nonzero when the current tick has reached or passed the deadline.
  */
 static uint8_t deadline_reached(uint16_t deadline) {
@@ -67,8 +65,8 @@ static uint8_t deadline_reached(uint16_t deadline) {
 
 /**
  * @brief Waits for the Pico transmit port and sends one byte.
- * @param value Byte to send.
- * @param deadline Absolute transaction deadline in monitor ticks.
+ * @param[in] value Byte to send.
+ * @param[in] deadline Absolute transaction deadline in monitor ticks.
  * @return One on success, or zero when the deadline expires.
  */
 static uint8_t send_byte(uint8_t value, uint16_t deadline) {
@@ -84,7 +82,7 @@ static uint8_t send_byte(uint8_t value, uint16_t deadline) {
 /**
  * @brief Waits for and receives one byte from the Pico.
  * @param[out] value Destination for the received byte.
- * @param deadline Absolute transaction deadline in monitor ticks.
+ * @param[in] deadline Absolute transaction deadline in monitor ticks.
  * @return One on success, or zero when the deadline expires.
  */
 static uint8_t receive_byte(uint8_t *value, uint16_t deadline) {
@@ -99,8 +97,8 @@ static uint8_t receive_byte(uint8_t *value, uint16_t deadline) {
 
 /**
  * @brief Escapes and sends one P2WP frame byte.
- * @param value Unescaped byte to send.
- * @param deadline Absolute transaction deadline in monitor ticks.
+ * @param[in] value Unescaped byte to send.
+ * @param[in] deadline Absolute transaction deadline in monitor ticks.
  * @return One on success, or zero when the deadline expires.
  */
 static uint8_t send_escaped(uint8_t value, uint16_t deadline) {
@@ -115,9 +113,9 @@ static uint8_t send_escaped(uint8_t value, uint16_t deadline) {
 
 /**
  * @brief Sends a complete delimiter-framed and CRC-protected P2WP body.
- * @param body Unescaped header and payload bytes.
- * @param length Number of body bytes, excluding the CRC.
- * @param deadline Absolute transaction deadline in monitor ticks.
+ * @param[in] body Unescaped header and payload bytes.
+ * @param[in] length Number of body bytes, excluding the CRC.
+ * @param[in] deadline Absolute transaction deadline in monitor ticks.
  * @return One on success, or zero when transmission times out.
  */
 static uint8_t send_frame(const uint8_t *body, uint16_t length,
@@ -140,7 +138,7 @@ static uint8_t send_frame(const uint8_t *body, uint16_t length,
 
 /**
  * @brief Receives, unescapes, bounds-checks, and CRC-checks one P2WP frame.
- * @param deadline Absolute transaction deadline in monitor ticks.
+ * @param[in] deadline Absolute transaction deadline in monitor ticks.
  * @return One for a valid frame, or zero for timeout or malformed input.
  */
 static uint8_t receive_frame(uint16_t deadline) {
@@ -194,11 +192,11 @@ static uint8_t receive_frame(uint16_t deadline) {
 
 /**
  * @brief Builds the unescaped P2WP request header and payload.
- * @param version Negotiated protocol version.
- * @param type Request type byte.
- * @param sequence Request sequence byte.
- * @param payload Optional request payload.
- * @param payload_length Number of payload bytes.
+ * @param[in] version Negotiated protocol version.
+ * @param[in] type Request type byte.
+ * @param[in] sequence Request sequence byte.
+ * @param[in] payload Optional request payload.
+ * @param[in] payload_length Number of payload bytes.
  */
 static void build_request(uint8_t version, uint8_t type, uint8_t sequence,
                           const uint8_t *payload, uint16_t payload_length) {
@@ -217,9 +215,9 @@ static void build_request(uint8_t version, uint8_t type, uint8_t sequence,
 
 /**
  * @brief Validates a received response against its request identifiers.
- * @param version Expected protocol version.
- * @param type Expected response type.
- * @param sequence Expected sequence byte.
+ * @param[in] version Expected protocol version.
+ * @param[in] type Expected response type.
+ * @param[in] sequence Expected sequence byte.
  * @param[out] reply Parsed response view on valid input.
  * @return The protocol result, including a decoded remote-error result.
  */
@@ -257,11 +255,11 @@ static enum p2wp_result validate_response(uint8_t version, uint8_t type,
 
 /**
  * @brief Executes one retried P2WP request-response transaction.
- * @param version Protocol version to put in the request.
- * @param type Request type byte.
- * @param sequence Request sequence byte.
- * @param payload Optional request payload.
- * @param payload_length Number of payload bytes.
+ * @param[in] version Protocol version to put in the request.
+ * @param[in] type Request type byte.
+ * @param[in] sequence Request sequence byte.
+ * @param[in] payload Optional request payload.
+ * @param[in] payload_length Number of payload bytes.
  * @param[out] reply Parsed response view.
  * @return Transaction status.
  */
@@ -290,7 +288,7 @@ static enum p2wp_result transact(uint8_t version, uint8_t type,
 /**
  * @brief Validates HELLO capabilities and initializes a session.
  * @param[out] session Session to initialize.
- * @param reply Successful HELLO response to inspect.
+ * @param[in] reply Successful HELLO response to inspect.
  * @return P2WP_OK when the advertised protocol is usable, otherwise invalid.
  */
 static enum p2wp_result validate_hello(p2wp_session_t *session,
@@ -318,9 +316,7 @@ static enum p2wp_result validate_hello(p2wp_session_t *session,
   return P2WP_OK;
 }
 
-/**
- * @brief Negotiates and initializes a P2WP session with the Pico.
- */
+/* Public API contract: see p2wp.h. */
 enum p2wp_result p2wp_hello(p2wp_session_t *session) {
   static const uint8_t payload[8] = {
       'P', '2', 'W', 'P', P2WP_MIN_VERSION, P2WP_MAX_VERSION, P2WP_HOST_LIMIT,
@@ -341,9 +337,7 @@ enum p2wp_result p2wp_hello(p2wp_session_t *session) {
   return result == P2WP_OK ? validate_hello(session, &reply) : result;
 }
 
-/**
- * @brief Executes a sequenced request on an active P2WP session.
- */
+/* Public API contract: see p2wp.h. */
 enum p2wp_result p2wp_request(p2wp_session_t *session, uint8_t type,
                               const uint8_t *payload, uint16_t payload_length,
                               p2wp_response_t *reply) {

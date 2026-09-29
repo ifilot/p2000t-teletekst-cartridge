@@ -9,7 +9,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 EMU = ROOT / "emulator"
-CARTRIDGE = ROOT / "src" / "p2wp-cartridge-c.bin"
+CARTRIDGE = ROOT / "src" / "p2wp-cartridge.bin"
 
 
 def run_emulator(
@@ -39,6 +39,7 @@ def run_emulator(
     repeat_fixture_subpage: bool = False,
     stall_fetch: bool = False,
     stall_fetch_after: int | None = None,
+    firmware_fetch_timeout: bool = True,
     clock_valid: bool = True,
 ) -> bytes:
     command = [
@@ -65,6 +66,8 @@ def run_emulator(
         command.append("--stall-fetch")
     if stall_fetch_after is not None:
         command.extend(("--stall-fetch-after", str(stall_fetch_after)))
+    if not firmware_fetch_timeout:
+        command.append("--no-firmware-fetch-timeout")
     if not clock_valid:
         command.append("--clock-invalid")
     if auto_source is not None:
@@ -107,8 +110,8 @@ def run_emulator(
     return screen.read_bytes()
 
 
-def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="p2000t-c-smoke-") as directory:
+def test_cartridge_end_to_end() -> None:
+    with tempfile.TemporaryDirectory(prefix="p2000t-cartridge-") as directory:
         temp = Path(directory)
         build = temp / "build"
         monitor = temp / "monitor.bin"
@@ -128,7 +131,9 @@ def main() -> int:
         )
         assert before[0:3] == bytes((0x04, 0x1D, 0x07))
         assert b"P2000T  INTERNET TELETEKST" in before
-        assert before[3 * 40 : 3 * 40 + 3] == bytes((0x04, 0x1D, 0x17))
+        assert before[3 * 40 : 3 * 40 + 6] == bytes(
+            (0x04, 0x1D, 0x17, 0x04, 0x1D, 0x17)
+        )
         assert before[5 * 40 + 13 : 5 * 40 + 15] == bytes((0x7F, 0x7F))
         assert before[9 * 40 + 3] == 0x3C
         assert before[10 * 40 : 10 * 40 + 4] == bytes((0x04, 0x1D, 0x17, 0x35))
@@ -161,7 +166,9 @@ def main() -> int:
             100,
             True,
         )
-        assert source_menu[:3] == bytes((0x04, 0x1D, 0x17))
+        assert source_menu[:6] == bytes(
+            (0x04, 0x1D, 0x17, 0x04, 0x1D, 0x17)
+        )
         assert b"KIES UW TELETEKSTBRON" in source_menu[14 * 40 : 15 * 40]
         assert b"0\x07  EIGEN SERVER" in source_menu
         assert b"A\x07 AUTOSTART NA 60S: UIT" in source_menu[20 * 40 : 21 * 40]
@@ -212,18 +219,33 @@ def main() -> int:
         assert sources.read_bytes() == bytes((0,))
         assert b"za 05.sep 12:" in after[:40]
 
-        legacy_archive_sources = temp / "legacy-archive-sources.bin"
-        run_emulator(
+        old_archive_sources = temp / "old-archive-sources.bin"
+        old_archive = run_emulator(
             build / "p2000t-emulator",
             monitor,
-            temp / "legacy-archive.bin",
+            temp / "old-archive.bin",
             500,
             True,
             protocol_version=6,
-            sources=legacy_archive_sources,
+            sources=old_archive_sources,
             auto_source=3,
         )
-        assert legacy_archive_sources.read_bytes() == bytes((2,))
+        assert old_archive_sources.read_bytes() == b""
+        assert b"ARCHIEF VEREIST P2WP/7" in old_archive
+
+        archive_sources = temp / "archive-sources.bin"
+        archive = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "archive.bin",
+            500,
+            True,
+            protocol_version=7,
+            sources=archive_sources,
+            auto_source=3,
+        )
+        assert archive_sources.read_bytes() == bytes((3,))
+        assert b"NOS Telet" in archive
 
         settings_flash = temp / "settings-flash.bin"
         run_emulator(
@@ -370,6 +392,19 @@ def main() -> int:
         )
         assert manual_fetches.read_bytes()[:2] == bytes((0, 2))
 
+        stepped_fetches = temp / "stepped-fetches.bin"
+        run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "stepped.bin",
+            700,
+            True,
+            fetches=stepped_fetches,
+            auto_keys=">,<,STOP",
+        )
+        stepped_subpages = stepped_fetches.read_bytes()
+        assert stepped_subpages[:3] == bytes((0, 2, 1)), stepped_subpages
+
         zoom_removed = run_emulator(
             build / "p2000t-emulator",
             monitor,
@@ -408,12 +443,12 @@ def main() -> int:
             encoded = text.encode("ascii")[:37]
             expected_help[offset + 3:offset + 3 + len(encoded)] = encoded
 
-        def help_row(row: int, *parts: tuple[int, str]) -> None:
+        def help_row(row: int, *parts: tuple[int, str | bytes]) -> None:
             offset = row * 40
             for colour, text in parts:
                 expected_help[offset] = colour
                 offset += 1
-                encoded = text.encode("ascii")
+                encoded = text if isinstance(text, bytes) else text.encode("ascii")
                 expected_help[offset:offset + len(encoded)] = encoded
                 offset += len(encoded)
 
@@ -421,12 +456,13 @@ def main() -> int:
         help_row(2, (0x03, " PAGINA"))
         help_row(3, (0x06, " 100-899"), (0x07, "  KIES PAGINA"))
         help_row(4, (0x06, " START / I"), (0x07, " INDEX PAGINA 100"))
-        help_row(5, (0x06, " <- / P"), (0x07, " VORIGE  "),
-                 (0x06, "-> / N"), (0x07, " VOLGENDE"))
+        help_row(5, (0x06, b"\x5b / P"), (0x07, " VORIGE  "),
+                 (0x06, b"\x5d / N"), (0x07, " VOLGENDE"))
         help_row(6, (0x06, " V"), (0x07, " AUTO VOLGENDE PAGINA"))
         help_row(8, (0x03, " SUBPAGINA'S"))
-        help_row(9, (0x06, " S"), (0x07, " KIES EEN SUBPAGINA"))
-        help_row(10, (0x06, " A"), (0x07, " PAUZE / DOORGAAN"))
+        help_row(9, (0x06, " < / >"), (0x07, " VORIGE / VOLGENDE"))
+        help_row(10, (0x06, " S"), (0x07, " KIES EEN SUBPAGINA"))
+        help_row(11, (0x06, " A"), (0x07, " PAUZE / DOORGAAN"))
         help_row(12, (0x03, " WEERGAVE"))
         help_row(13, (0x06, " ? / R"), (0x07, " VERBORGEN TEKST TONEN"))
         help_row(15, (0x03, " VERBINDING"))
@@ -558,6 +594,34 @@ def main() -> int:
         assert b"FOUT: SERVER REAGEERT NIET" in timeout
         assert b"DETAIL: HTTP 000 LWIP 00 NET 00" in timeout
 
+        not_found_input = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "not-found-input.bin",
+            650,
+            True,
+            auto_keys="KP1,KP0,KP1,KP2",
+            fail_page=101,
+            fail_error=8,
+        )
+        assert not_found_input[36] == ord("2"), \
+            "the not-found clock overwrote page-number entry"
+        assert not_found_input[29] == ord(":")
+        assert not_found_input[32] == ord(":")
+        assert not_found_input[35] == ord(" "), \
+            "the compact error-screen clock overlapped page-number entry"
+
+        firmware_timeout = run_emulator(
+            build / "p2000t-emulator",
+            monitor,
+            temp / "firmware-timeout.bin",
+            3400,
+            True,
+            stall_fetch=True,
+        )
+        assert b"FOUTCODE: 0C" in firmware_timeout
+        assert b"FOUT: SERVER REAGEERT NIET" in firmware_timeout
+
         fallback_timeout = run_emulator(
             build / "p2000t-emulator",
             monitor,
@@ -565,6 +629,7 @@ def main() -> int:
             8000,
             True,
             stall_fetch=True,
+            firmware_fetch_timeout=False,
         )
         assert b"FOUTCODE: 81" in fallback_timeout
         assert b"FOUT: TIMEOUT" in fallback_timeout
@@ -640,10 +705,3 @@ def main() -> int:
             1,
         )
         assert b"GEEN GEDEELDE P2WP-VERSIE" in incompatible
-
-    print("Z88DK cartridge smoke test passed")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

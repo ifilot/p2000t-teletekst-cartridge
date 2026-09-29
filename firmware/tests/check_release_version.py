@@ -14,9 +14,9 @@ firmware_version = tuple(
     int(re.search(rf"#define P2WP_FIRMWARE_VERSION_{name} (\d+)u", firmware).group(1))
     for name in ("MAJOR", "MINOR", "PATCH")
 )
-cartridge = (ROOT / "src/p2wp-cartridge.asm").read_text()
+cartridge = (ROOT / "src/cartridge-c/version.h").read_text()
 cartridge_version = tuple(
-    int(re.search(rf"CARTRIDGE_VERSION_{name}: equ (\d+)", cartridge).group(1))
+    int(re.search(rf"#define P2WP_CARTRIDGE_VERSION_{name} (\d+)u", cartridge).group(1))
     for name in ("MAJOR", "MINOR", "PATCH")
 )
 if firmware_version != expected or cartridge_version != expected:

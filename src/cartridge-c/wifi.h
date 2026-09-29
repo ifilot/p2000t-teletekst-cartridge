@@ -19,14 +19,14 @@ void wifi_show_scanning(void);
 
 /**
  * @brief Connects a saved profile or performs interactive Wi-Fi onboarding.
- * @param session Active negotiated protocol session.
+ * @param[in,out] session Active session; requests advance its sequence.
  * @return One after connecting, otherwise zero.
  */
 uint8_t wifi_startup(p2wp_session_t *session);
 
 /**
  * @brief Discards password state and interactively chooses another network.
- * @param session Active negotiated protocol session.
+ * @param[in,out] session Active session; requests advance its sequence.
  * @return One after connecting, otherwise zero.
  */
 uint8_t wifi_reconfigure(p2wp_session_t *session);

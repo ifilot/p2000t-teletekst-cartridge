@@ -4,8 +4,8 @@ cmake-build-*/
 CMakeUserPresets.json
 compile_commands.json
 
-# Z80 assembler intermediates and generated cartridge ROMs. Release workflows
-# build the ROM from source and publish it as an artifact instead.
+# Z88DK intermediates and generated cartridge ROMs. Release workflows build
+# the ROM from source and publish it as an artifact instead.
 *.lst
 *.lab
 *.lis

@@ -117,31 +117,34 @@ static const uint8_t error_text_lz4[] = {
 static const uint8_t help_screen_lz4[] =
     "\xff\x0c\x04\x1d\x07\x20\x50\x32\x30\x30\x30\x54\x20\x54\x45\x4c"
     "\x45\x54\x45\x4b\x53\x54\x20\x20\x48\x55\x4c\x50\x20\x01\x00\x22"
-    "\x8f\x03\x20\x50\x41\x47\x49\x4e\x41\x28\x00\x0d\xfe\x01\x06\x20"
+    "\x8f\x03\x20\x50\x41\x47\x49\x4e\x41\x3d\x00\x0d\xff\x01\x06\x20"
     "\x31\x30\x30\x2d\x38\x39\x39\x07\x20\x20\x4b\x49\x45\x53\x37\x00"
-    "\x04\x28\x00\xf3\x01\x53\x54\x41\x52\x54\x20\x2f\x20\x49\x07\x20"
-    "\x49\x4e\x44\x45\x58\x2a\x00\x00\x40\x00\x09\x28\x00\xf0\x08\x3c"
-    "\x2d\x20\x2f\x20\x50\x07\x20\x56\x4f\x52\x49\x47\x45\x20\x20\x06"
-    "\x2d\x3e\x20\x2f\x20\x4e\x11\x00\x63\x4c\x47\x45\x4e\x44\x45\x28"
-    "\x00\x76\x56\x07\x20\x41\x55\x54\x4f\x17\x00\x0e\xb1\x00\x0f\xf0"
-    "\x00\x1a\x32\x53\x55\x42\x42\x00\x2f\x27\x53\xf0\x00\x0a\x22\x53"
-    "\x07\xe9\x00\x36\x45\x45\x4e\x34\x00\x1e\x20\x28\x00\xff\x04\x41"
-    "\x07\x20\x50\x41\x55\x5a\x45\x20\x2f\x20\x44\x4f\x4f\x52\x47\x41"
-    "\x41\x4e\x9c\x00\x24\x02\xa0\x00\x8f\x57\x45\x45\x52\x47\x41\x56"
-    "\x45\x90\x01\x0d\xf2\x02\x3f\x20\x2f\x20\x52\x07\x20\x56\x45\x52"
-    "\x42\x4f\x52\x47\x45\x4e\x20\x0c\x02\x5f\x54\x4f\x4e\x45\x4e\x78"
-    "\x00\x21\x00\x49\x00\x6f\x49\x4e\x44\x49\x4e\x47\x78\x00\x0b\x17"
-    "\x57\x18\x01\xf8\x03\x41\x4e\x44\x45\x52\x20\x57\x49\x46\x49\x2d"
-    "\x4e\x45\x54\x57\x45\x52\x4b\x08\x02\x32\x4f\x50\x07\x22\x00\x16"
-    "\x45\xac\x02\x4f\x42\x52\x4f\x4e\x18\x01\x23\x00\x3a\x00\x4e\x4b"
-    "\x45\x55\x5a\x19\x01\x0d\x90\x01\x00\x30\x02\x01\x87\x02\x01\x6e"
-    "\x00\x50\x57\x49\x4a\x5a\x49\x21\x01\x0a\x28\x00\x22\x48\x07\x37"
-    "\x03\x8f\x56\x41\x4e\x41\x46\x20\x44\x45\x61\x00\x03\x00\x70\x03"
-    "\x41\x44\x52\x55\x4b\xef\x00\xf4\x03\x54\x4f\x45\x54\x53\x20\x4f"
-    "\x4d\x20\x54\x45\x52\x55\x47\x20\x54\x45\x20\xee\x01\x00\x28\x00"
-    "\x04\x97\x03\xf0\x0e\x65\x6c\x65\x74\x65\x6b\x73\x74\x20\x43\x61"
-    "\x72\x74\x72\x69\x64\x67\x65\x20\x20\x20\x20\x20\x76\x30\x2e\x35"
-    "\x2e\x30";
+    "\x05\xf4\x03\x06\x20\x53\x54\x41\x52\x54\x20\x2f\x20\x49\x07\x20"
+    "\x49\x4e\x44\x45\x58\x2a\x00\x37\x31\x30\x30\x65\x00\xf0\x07\x06"
+    "\x5b\x20\x2f\x20\x50\x07\x20\x56\x4f\x52\x49\x47\x45\x20\x20\x06"
+    "\x5d\x20\x2f\x20\x4e\x10\x00\x64\x4c\x47\x45\x4e\x44\x45\x2b\x00"
+    "\x96\x06\x20\x56\x07\x20\x41\x55\x54\x4f\x1a\x00\x0f\xb1\x00\x13"
+    "\x0f\x02\x00\x04\x52\x03\x20\x53\x55\x42\x42\x00\x2f\x27\x53\x24"
+    "\x00\x04\x00\x02\x00\x70\x06\x20\x3c\x20\x2f\x20\x3e\x91\x00\x01"
+    "\xa1\x00\x16\x2f\x80\x00\x00\x1f\x00\x05\x02\x00\x42\x06\x20\x53"
+    "\x07\x11\x01\x36\x45\x45\x4e\x5c\x00\x05\x20\x00\x04\x02\x00\x90"
+    "\x06\x20\x41\x07\x20\x50\x41\x55\x5a\x4b\x00\x84\x44\x4f\x4f\x52"
+    "\x47\x41\x41\x4e\x1d\x00\x07\x02\x00\x9b\x03\x20\x57\x45\x45\x52"
+    "\x47\x41\x56\x68\x00\x0c\x02\x00\xf2\x04\x06\x20\x3f\x20\x2f\x20"
+    "\x52\x07\x20\x56\x45\x52\x42\x4f\x52\x47\x45\x4e\x20\x0c\x02\x4f"
+    "\x54\x4f\x4e\x45\x59\x00\x01\x0f\x02\x00\x0c\x11\x03\x49\x00\x6f"
+    "\x49\x4e\x44\x49\x4e\x47\x2b\x00\x09\x37\x06\x20\x57\xf0\x00\xf4"
+    "\x03\x41\x4e\x44\x45\x52\x20\x57\x49\x46\x49\x2d\x4e\x45\x54\x57"
+    "\x45\x52\x4b\x3c\x00\x00\x08\x02\x32\x4f\x50\x07\x22\x00\x16\x45"
+    "\xac\x02\x3f\x42\x52\x4f\x9e\x00\x20\x00\xa0\x00\x00\x3a\x00\x20"
+    "\x4b\x45\x41\x01\x00\x10\x00\x0f\x02\x00\x05\x01\x68\x01\x00\x30"
+    "\x02\x01\x87\x02\x00\x34\x00\x60\x20\x57\x49\x4a\x5a\x49\x21\x01"
+    "\x08\x34\x00\x42\x06\x20\x48\x07\x37\x03\x90\x56\x41\x4e\x41\x46"
+    "\x20\x44\x45\x20\x2d\x00\x0d\x61\x00\x00\x70\x03\x41\x44\x52\x55"
+    "\x4b\xdf\x01\xf5\x03\x54\x4f\x45\x54\x53\x20\x4f\x4d\x20\x54\x45"
+    "\x52\x55\x47\x20\x54\x45\x20\xc6\x01\x34\x04\x1d\x07\x97\x03\xf0"
+    "\x0e\x65\x6c\x65\x74\x65\x6b\x73\x74\x20\x43\x61\x72\x74\x72\x69"
+    "\x64\x67\x65\x20\x20\x20\x20\x20\x76\x30\x2e\x35\x2e\x30";
 
 /** Six animation frames for the top-left page-fetch indicator. */
 static const uint8_t indicator_frames[6][4] = {
@@ -154,19 +157,20 @@ static void present_page(const viewer_state_t *state);
 
 /**
  * @brief Shows the compressed resident help page and restores viewer content.
- * @param state Viewer state to restore, or null when called from a menu.
+ * @param[in] state Viewer state to restore, or null when called from a menu.
  */
 static void show_help(const viewer_state_t *state) {
   lz4_decompress(help_screen_lz4, display_screen,
                  (uint16_t)(sizeof(help_screen_lz4) - 1u));
   platform_present_screen(display_screen);
+  ui_footer();
   (void)platform_read_key();
   if (state != 0) present_page(state);
 }
 
 /**
  * @brief Loads the persisted custom URL when supported by the protocol.
- * @param session Active protocol session.
+ * @param[in,out] session Active session; requests advance its sequence.
  */
 static void load_custom_url(p2wp_session_t *session) {
   p2wp_response_t reply;
@@ -185,7 +189,7 @@ static void load_custom_url(p2wp_session_t *session) {
 
 /**
  * @brief Persists the current custom URL when supported by the protocol.
- * @param session Active protocol session.
+ * @param[in,out] session Active session; requests advance its sequence.
  */
 static void save_custom_url(p2wp_session_t *session) {
   p2wp_response_t reply;
@@ -200,7 +204,7 @@ static void save_custom_url(p2wp_session_t *session) {
 
 /**
  * @brief Loads the source-menu autostart setting from Pico flash.
- * @param session Active protocol session.
+ * @param[in,out] session Active session; requests advance its sequence.
  */
 static void load_settings(p2wp_session_t *session) {
   p2wp_response_t reply;
@@ -211,11 +215,13 @@ static void load_settings(p2wp_session_t *session) {
       reply.payload_length == 1u &&
       (reply.payload[0] < 4u || reply.payload[0] == AUTOSTART_DISABLED))
     auto_start_source = reply.payload[0];
+  if (session->version < 7u && auto_start_source == 3u)
+    auto_start_source = AUTOSTART_DISABLED;
 }
 
 /**
  * @brief Saves the current source-menu autostart setting.
- * @param session Active protocol session.
+ * @param[in] session Active protocol session.
  */
 static void save_settings(p2wp_session_t *session) {
   p2wp_response_t reply;
@@ -225,7 +231,7 @@ static void save_settings(p2wp_session_t *session) {
 
 /**
  * @brief Renders the current persistent autostart choice on the source menu.
- * @param session Active protocol session.
+ * @param[in] session Active protocol session.
  */
 static void show_auto_start(p2wp_session_t *session) {
   const char *text = "\006A\007 AUTOSTART VEREIST P2WP/6";
@@ -248,18 +254,16 @@ static void show_auto_start(p2wp_session_t *session) {
 /**
  * @brief Converts a source-menu digit into a wire source identifier.
  *
- * Stored settings use menu digits rather than wire identifiers. Protocols 4-6
- * route the Archive service through the compatible custom-source request.
+ * Stored settings use menu digits rather than wire identifiers. Archive
+ * requires P2WP/7 because earlier revisions have no verified Archive source.
  *
- * @param session Active protocol session.
- * @param menu Source-menu digit from zero through three.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in] menu Source-menu digit from zero through three.
  * @param[out] source Selected wire source identifier.
  * @return One when the menu source is supported, otherwise zero.
  */
 static uint8_t select_menu_source(p2wp_session_t *session, uint8_t menu,
                                   uint8_t *source) {
-  static const uint8_t archive_url[] = "https://teletekstarchief.nl";
-  uint8_t index;
   if (menu == 1u) {
     *source = SOURCE_NOS;
     return 1u;
@@ -269,15 +273,8 @@ static uint8_t select_menu_source(p2wp_session_t *session, uint8_t menu,
     return 1u;
   }
   if (menu == 3u) {
-    if (session->version >= 7u) {
-      *source = SOURCE_ARCHIVE;
-      return 1u;
-    }
-    if (session->version < 4u) return 0u;
-    custom_url_length = (uint8_t)(sizeof(archive_url) - 1u);
-    for (index = 0u; index != custom_url_length; ++index)
-      custom_url[index] = archive_url[index];
-    *source = SOURCE_CUSTOM;
+    if (session->version < 7u) return 0u;
+    *source = SOURCE_ARCHIVE;
     return 1u;
   }
   if (menu == 0u && session->version >= 4u) {
@@ -292,7 +289,7 @@ static uint8_t select_menu_source(p2wp_session_t *session, uint8_t menu,
 
 /**
  * @brief Edits and optionally persists a custom server base URL.
- * @param session Active protocol session.
+ * @param[in,out] session Active session; requests advance its sequence.
  * @return One when a nonempty URL is accepted, or zero when cancelled.
  */
 static uint8_t choose_custom_url(p2wp_session_t *session) {
@@ -358,8 +355,8 @@ static uint8_t choose_custom_url(p2wp_session_t *session) {
 
 /**
  * @brief Shows the source menu or resolves a configured automatic source.
- * @param session Active protocol session.
- * @param use_autostart Whether the saved autostart source may be used.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in] use_autostart Whether the saved autostart source may be used.
  * @param[out] started_automatically Set when no menu interaction was needed.
  * @return Selected wire source identifier.
  */
@@ -379,7 +376,10 @@ draw_menu:
   ui_action(14u, "       KIES UW TELETEKSTBRON");
   platform_write_text(15u, 0u, "\0061\007  NOS TELETEKST");
   platform_write_text(16u, 0u, "\0062\007  P2000T TELETEKST");
-  platform_write_text(17u, 0u, "\0063\007  TELETEKSTARCHIEF.NL");
+  platform_write_text(17u, 0u,
+                      session->version >= 7u
+                          ? "\0063\007  TELETEKSTARCHIEF.NL"
+                          : "\0063\007  ARCHIEF VEREIST P2WP/7");
   platform_write_text(18u, 0u, "\0060\007  EIGEN SERVER");
   show_auto_start(session);
   platform_write_text(21u, 0u, "\006H\007 HULP");
@@ -387,8 +387,8 @@ draw_menu:
   for (;;) {
     key = platform_read_ascii();
     key = platform_lower_ascii(key);
-    if (key == '1') return SOURCE_NOS;
-    if (key == '2') return SOURCE_P2000T;
+    if (key == '1' && select_menu_source(session, 1u, &source)) return source;
+    if (key == '2' && select_menu_source(session, 2u, &source)) return source;
     if (key == '3' && select_menu_source(session, 3u, &source)) return source;
     if (key == '0' && session->version >= 4u && choose_custom_url(session))
       return SOURCE_CUSTOM;
@@ -397,7 +397,9 @@ draw_menu:
         auto_start_source = 1u;
       else if (auto_start_source == 0u)
         auto_start_source = AUTOSTART_DISABLED;
-      else if (++auto_start_source == 4u)
+      else if (++auto_start_source == 3u && session->version < 7u)
+        auto_start_source = 0u;
+      else if (auto_start_source == 4u)
         auto_start_source = 0u;
       save_settings(session);
       show_auto_start(session);
@@ -411,7 +413,7 @@ draw_menu:
 
 /**
  * @brief Returns the fetch-status payload size for a protocol revision.
- * @param version Negotiated P2WP version.
+ * @param[in] version Negotiated P2WP version.
  * @return Exact expected status payload length.
  */
 static uint8_t expected_status_length(uint8_t version) {
@@ -463,8 +465,8 @@ static void indicator_restore(void) {
 
 /**
  * @brief Records a page-fetch error and removes the fetch animation.
- * @param state Viewer state to update.
- * @param error Cartridge or remote error code.
+ * @param[in,out] state Viewer state to update.
+ * @param[in] error Cartridge or remote error code.
  * @return Always zero for direct use in failure returns.
  */
 static uint8_t fail_fetch(viewer_state_t *state, uint8_t error) {
@@ -475,9 +477,9 @@ static uint8_t fail_fetch(viewer_state_t *state, uint8_t error) {
 
 /**
  * @brief Converts a local or remote P2WP failure into viewer error state.
- * @param state Viewer state to update.
- * @param result P2WP transaction result.
- * @param reply Response containing an optional remote error code.
+ * @param[in,out] state Viewer state to update.
+ * @param[in] result P2WP transaction result.
+ * @param[in] reply Response containing an optional remote error code.
  * @return Always zero for direct use in failure returns.
  */
 static uint8_t request_failure(viewer_state_t *state, enum p2wp_result result,
@@ -489,7 +491,7 @@ static uint8_t request_failure(viewer_state_t *state, enum p2wp_result result,
 
 /**
  * @brief Formats the viewer's compact date/time metadata.
- * @param state Viewer state containing clock fields.
+ * @param[in] state Viewer state containing clock fields.
  * @param[out] out Destination text buffer.
  * @return Number of formatted display bytes.
  */
@@ -499,7 +501,7 @@ static uint8_t clock_text(const viewer_state_t *state, uint8_t *out) {
 
 /**
  * @brief Inserts valid provider clock metadata into the raw page header.
- * @param state Viewer state containing clock fields.
+ * @param[in] state Viewer state containing clock fields.
  */
 static void clock_overlay_raw(const viewer_state_t *state) {
   if (!state->clock_valid) return;
@@ -509,14 +511,24 @@ static void clock_overlay_raw(const viewer_state_t *state) {
 
 /**
  * @brief Advances and redraws the live clock when its deadline expires.
- * @param state Viewer state and clock metadata to update.
+ * @param[in,out] state Viewer state and clock metadata to update.
+ * @param[in] input_active Whether page-number entry is using the right edge.
  */
-static void clock_update(viewer_state_t *state) {
+static void clock_update(viewer_state_t *state, uint8_t input_active) {
   uint8_t text[20];
   uint8_t length;
   if (!platform_advance_clock((uint8_t *)state)) return;
   length = clock_text(state, text);
   if (!state->page_visible) {
+    if (input_active) {
+      uint8_t clock_has_date = state->clock_has_date;
+      platform_write_text(0u, 21u, "               ");
+      state->clock_has_date = 0u;
+      length = clock_text(state, text);
+      state->clock_has_date = clock_has_date;
+      platform_write_bytes(0u, 27u, text, length);
+      return;
+    }
     platform_write_bytes(0u, (uint8_t)(40u - length), text, length);
     return;
   }
@@ -532,7 +544,7 @@ static void clock_update(viewer_state_t *state) {
 
 /**
  * @brief Renders the raw page into the packed display buffer.
- * @param state Viewer state selecting reveal mode.
+ * @param[in] state Viewer state selecting reveal mode.
  */
 static void render_page(const viewer_state_t *state) {
   platform_render_page(page_screen, display_screen, state->reveal);
@@ -540,7 +552,7 @@ static void render_page(const viewer_state_t *state) {
 
 /**
  * @brief Renders and atomically presents the current page and mode markers.
- * @param state Current viewer state.
+ * @param[in] state Current viewer state.
  */
 static void present_page(const viewer_state_t *state) {
   render_page(state);
@@ -551,8 +563,8 @@ static void present_page(const viewer_state_t *state) {
 
 /**
  * @brief Fetches page metadata and four display chunks from the Pico.
- * @param session Active protocol session.
- * @param state Requested page state, updated with metadata and errors.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in,out] state Requested page state, updated with metadata and errors.
  * @return One after presenting a complete page, otherwise zero.
  */
 static uint8_t fetch_page(p2wp_session_t *session, viewer_state_t *state) {
@@ -660,7 +672,7 @@ static uint8_t fetch_page(p2wp_session_t *session, viewer_state_t *state) {
 
 /**
  * @brief Presents a missing-page or diagnostic fetch-error screen.
- * @param state Viewer state containing page and error details.
+ * @param[in] state Viewer state containing page and error details.
  */
 static void show_fetch_error(viewer_state_t *state) {
   const char *description;
@@ -713,9 +725,9 @@ static void clear_page_input(void) {
 
 /**
  * @brief Requests a manually chosen page and displays any error.
- * @param session Active protocol session.
- * @param state Viewer state to reset and update.
- * @param page Page number from 100 through 899.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in,out] state Viewer state to reset and update.
+ * @param[in] page Page number from 100 through 899.
  */
 static void request_page(p2wp_session_t *session, viewer_state_t *state,
                          uint16_t page) {
@@ -728,7 +740,7 @@ static void request_page(p2wp_session_t *session, viewer_state_t *state,
 
 /**
  * @brief Schedules automatic retry or numeric skip after a fetch failure.
- * @param state Viewer state containing the failed page and error.
+ * @param[in] state Viewer state containing the failed page and error.
  */
 static void handle_auto_failure(viewer_state_t *state) {
   if (state->page == 100u) {
@@ -745,9 +757,9 @@ static void handle_auto_failure(viewer_state_t *state) {
 
 /**
  * @brief Requests a page as part of automatic navigation.
- * @param session Active protocol session.
- * @param state Viewer state to reset and update.
- * @param page Page number to request.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in,out] state Viewer state to reset and update.
+ * @param[in] page Page number to request.
  */
 static void request_auto_page(p2wp_session_t *session, viewer_state_t *state,
                               uint16_t page) {
@@ -759,7 +771,7 @@ static void request_auto_page(p2wp_session_t *session, viewer_state_t *state,
 
 /**
  * @brief Restores navigation cells after cancelled subpage entry.
- * @param state Viewer state controlling the pause marker.
+ * @param[in] state Viewer state controlling the pause marker.
  */
 static void restore_header(const viewer_state_t *state) {
   platform_write_bytes(0u, 36u, page_screen + 36u, 4u);
@@ -768,8 +780,8 @@ static void restore_header(const viewer_state_t *state) {
 
 /**
  * @brief Reads a one- or two-digit subpage and requests it.
- * @param session Active protocol session.
- * @param state Viewer state to update.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in,out] state Viewer state to update.
  */
 static void select_subpage(p2wp_session_t *session, viewer_state_t *state) {
   uint8_t first;
@@ -815,8 +827,30 @@ static void select_subpage(p2wp_session_t *session, viewer_state_t *state) {
 }
 
 /**
+ * @brief Moves to the numerically previous or advertised next subpage.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in,out] state Viewer state to update.
+ * @param[in] forwards Nonzero for next; zero for previous.
+ */
+static void step_subpage(p2wp_session_t *session, viewer_state_t *state,
+                         uint8_t forwards) {
+  uint8_t target;
+  if (forwards) {
+    target = state->next_subpage;
+    if (target == 0u && state->subpage == 0u) return;
+  } else {
+    if (state->subpage == 0u) return;
+    target = state->subpage == 1u ? 0u : (uint8_t)(state->subpage - 1u);
+  }
+  state->subpage = target;
+  state->rotation_paused = 1u;
+  state->cycle_started = 0u;
+  if (!fetch_page(session, state)) show_fetch_error(state);
+}
+
+/**
  * @brief Toggles automatic subpage rotation and its visible marker.
- * @param state Viewer state to update.
+ * @param[in,out] state Viewer state to update.
  */
 static void toggle_rotation(viewer_state_t *state) {
   state->rotation_paused ^= 1u;
@@ -831,7 +865,7 @@ static void toggle_rotation(viewer_state_t *state) {
 
 /**
  * @brief Toggles automatic page navigation and its visible marker.
- * @param state Viewer state to update.
+ * @param[in,out] state Viewer state to update.
  */
 static void toggle_auto_page(viewer_state_t *state) {
   state->auto_page ^= 1u;
@@ -845,8 +879,8 @@ static void toggle_auto_page(viewer_state_t *state) {
 
 /**
  * @brief Requests the next subpage or wraps to the provider default.
- * @param session Active protocol session.
- * @param state Viewer state to update.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in,out] state Viewer state to update.
  */
 static void rotate_subpage(p2wp_session_t *session, viewer_state_t *state) {
   if (state->next_subpage != 0u && state->next_subpage > state->subpage) {
@@ -867,8 +901,8 @@ static void rotate_subpage(p2wp_session_t *session, viewer_state_t *state) {
 
 /**
  * @brief Processes page-viewer keys, timers, navigation, and Wi-Fi escape.
- * @param session Active protocol session.
- * @param state Viewer state to update.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @param[in,out] state Viewer state to update.
  * @return One to reconfigure Wi-Fi, or zero to return to source selection.
  */
 static uint8_t viewer_loop(p2wp_session_t *session, viewer_state_t *state) {
@@ -879,7 +913,7 @@ static uint8_t viewer_loop(p2wp_session_t *session, viewer_state_t *state) {
   uint8_t status;
 
   for (;;) {
-    clock_update(state);
+    clock_update(state, input_count != 0u);
     status = platform_key_status();
     if (status == 2u) return 0u;
     if (status == 0u) {
@@ -934,6 +968,16 @@ static uint8_t viewer_loop(p2wp_session_t *session, viewer_state_t *state) {
       select_subpage(session, state);
       continue;
     }
+    if (key == '<') {
+      input_count = 0u;
+      step_subpage(session, state, 0u);
+      continue;
+    }
+    if (key == '>') {
+      input_count = 0u;
+      step_subpage(session, state, 1u);
+      continue;
+    }
     if (key == 'r' || key == '?') {
       input_count = 0u;
       state->reveal ^= 1u;
@@ -981,9 +1025,7 @@ static uint8_t viewer_loop(p2wp_session_t *session, viewer_state_t *state) {
   }
 }
 
-/**
- * @brief Runs source selection and the interactive page viewer indefinitely.
- */
+/* Public API contract: see teletekst.h. */
 void teletekst_start(p2wp_session_t *session, uint8_t opening_timed_out) {
   viewer_state_t state;
   uint8_t started_automatically;

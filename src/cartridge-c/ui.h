@@ -14,7 +14,7 @@
 
 /**
  * @brief Draws the 14-row cartridge mosaic at the requested screen row.
- * @param row First destination row.
+ * @param[in] row First destination row.
  */
 void ui_draw_logo(uint8_t row);
 
@@ -31,15 +31,15 @@ uint8_t ui_wait_opening(void);
 
 /**
  * @brief Writes a white-on-blue full-width title row.
- * @param row Screen row.
- * @param text Null-terminated text after the control-byte prefix.
+ * @param[in] row Screen row.
+ * @param[in] text Null-terminated text after the control-byte prefix.
  */
 void ui_title(uint8_t row, const char *text);
 
 /**
  * @brief Writes a blue-on-white full-width content row.
- * @param row Screen row.
- * @param text Null-terminated text after the control-byte prefix.
+ * @param[in] row Screen row.
+ * @param[in] text Null-terminated text after the control-byte prefix.
  */
 void ui_panel(uint8_t row, const char *text);
 
@@ -48,7 +48,7 @@ void ui_panel(uint8_t row, const char *text);
 
 /**
  * @brief Draws a blue mosaic separator across one row.
- * @param row Screen row.
+ * @param[in] row Screen row.
  */
 void ui_rule(uint8_t row);
 

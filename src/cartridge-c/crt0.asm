@@ -44,6 +44,8 @@ defw 0
 defw 0
 defm "P2WP C DEV "
 
+; @brief Initializes the C runtime and transfers control to main().
+; @return Does not return; main() ultimately enters platform_halt().
 start:
     INCLUDE "crt/classic/crt_init_sp.inc"
     call crt0_init
@@ -52,9 +54,14 @@ start:
     ei
     call _main
 
+; @brief Traps an unexpected return from the freestanding application.
+; @return Never returns.
 __Exit:
     jp __Exit
 
+; @brief Implements Z88DK's indirect-call trampoline.
+; @param[in] HL Address of the routine to call.
+; @return Whatever registers and flags the target routine returns.
 l_dcal:
     jp (hl)
 

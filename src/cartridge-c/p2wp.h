@@ -67,10 +67,10 @@ enum p2wp_result p2wp_hello(p2wp_session_t *session);
 
 /**
  * @brief Executes one request using the session's next sequence number.
- * @param session Active negotiated session.
- * @param type Request type byte.
- * @param payload Optional request payload.
- * @param payload_length Number of payload bytes, at most 240.
+ * @param[in,out] session Active negotiated session; its sequence advances.
+ * @param[in] type Request type byte.
+ * @param[in] payload Optional request payload, or NULL for an empty request.
+ * @param[in] payload_length Number of payload bytes, at most 240.
  * @param[out] reply Parsed response view backed by the shared receive buffer.
  * @return Transaction or remote-error status.
  */
@@ -80,8 +80,8 @@ enum p2wp_result p2wp_request(p2wp_session_t *session, uint8_t type,
 
 /**
  * @brief Calculates the P2WP CRC-16/CCITT-FALSE checksum.
- * @param data Bytes to checksum.
- * @param length Number of bytes.
+ * @param[in] data Bytes to checksum.
+ * @param[in] length Number of bytes.
  * @return Calculated 16-bit checksum.
  */
 uint16_t p2wp_crc16(const uint8_t *data, uint16_t length);

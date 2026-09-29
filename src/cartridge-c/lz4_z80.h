@@ -19,9 +19,9 @@
  * The decoder intentionally omits framing and output-size checks to remain
  * small enough for the cartridge ROM.
  *
- * @param source Address of the raw LZ4 block in ROM.
- * @param destination Address of the output buffer in RAM.
- * @param compressed_size Number of compressed input bytes.
+ * @param[in] source Address of the raw LZ4 block in ROM.
+ * @param[out] destination Address of the output buffer in RAM.
+ * @param[in] compressed_size Number of compressed input bytes.
  */
 void lz4_decompress(const uint8_t *source, uint8_t *destination,
                     uint16_t compressed_size);

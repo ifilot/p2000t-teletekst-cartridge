@@ -35,6 +35,7 @@ static const char *flash_path;
 static int fail_page, fail_error;
 static int fixture_repeats_next_subpage;
 static int fetch_stall_after = -1;
+static int firmware_fetch_timeout = 1;
 static int clock_valid = 1;
 static uint8_t queued_keys[16];
 static size_t queued_head, queued_tail;
@@ -242,6 +243,10 @@ static int ascii_keycode(char value) {
     return 47;
   case '?':
     return 133;
+  case '<':
+    return 26;
+  case '>':
+    return 98;
   default:
     return -1;
   }
@@ -332,8 +337,10 @@ static void automatic_keyboard(int frame) {
     }
   } else if (stage == 5 && auto_action &&
              (screen_has("NOS Telet") || screen_has("TYP PAGINA") ||
+              screen_has("TYP EEN NIEUW") ||
               screen_has("FOUTCODE:") ||
               (screen_has("S:") && !screen_has("AUTOSTART")) ||
+              screen_has("KIES UW TELETEKSTBRON") ||
               screen_has("DRUK EEN TOETS OM TERUG") ||
               previous_action_code == ascii_keycode('w')) &&
              frame >=
@@ -463,6 +470,8 @@ int main(int argc, char **argv) {
       fetch_stall_after = 0;
     else if (!strcmp(argv[i], "--stall-fetch-after") && ++i < argc)
       fetch_stall_after = atoi(argv[i]);
+    else if (!strcmp(argv[i], "--no-firmware-fetch-timeout"))
+      firmware_fetch_timeout = 0;
     else if (!strcmp(argv[i], "--clock-invalid"))
       clock_valid = 0;
     else if (!strcmp(argv[i], "--live"))
@@ -537,6 +546,7 @@ int main(int argc, char **argv) {
             "5|9|13|17|21] [--wifi-profile] [--wifi-security 0|1] "
             "[--wifi-password-visible] [--clock-invalid] "
             "[--stall-fetch|--stall-fetch-after N] "
+            "[--no-firmware-fetch-timeout] "
             "[--fail-page PAGE --fail-error CODE]\n");
     return 2;
   }
@@ -578,6 +588,7 @@ int main(int argc, char **argv) {
   if (status_length)
     p2wp_device_set_status_length((uint8_t)status_length);
   p2wp_device_set_fetch_stall_after(fetch_stall_after);
+  p2wp_device_set_fetch_timeout_enabled(firmware_fetch_timeout);
   p2wp_device_set_clock_valid(clock_valid);
   p2wp_device_set_profile_present(wifi_profile);
   p2wp_device_set_wifi_security((uint8_t)wifi_security);
@@ -590,6 +601,7 @@ int main(int argc, char **argv) {
     if (auto_keys)
       automatic_keyboard(frame);
     Z80_Execute();
+    p2wp_device_tick();
     if (!headless)
       SDL_Delay(20);
   }

@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Pad a linked cartridge payload to the P2000T's 16 KiB ROM size."""
+"""@file make_cartridge_rom.py
+@brief Assemble linked code/data into a padded 16 KiB P2000T ROM image.
+
+The Z88DK ROM memory model emits initialized RAM separately from code and
+read-only data. This tool joins those outputs and validates the cartridge
+marker before padding unused EPROM space with erased bytes.
+
+SPDX-License-Identifier: GPL-3.0-only
+"""
 
 from __future__ import annotations
 
@@ -11,6 +19,10 @@ ERASED_BYTE = 0xFF
 
 
 def main() -> int:
+    """@brief Build one complete cartridge image from command-line inputs.
+
+    @return Zero after writing a valid image; argparse exits on invalid input.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--data",

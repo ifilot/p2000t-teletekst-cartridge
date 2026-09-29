@@ -23,14 +23,13 @@ and run it via
 emulator/run
 ```
 
-From the repository root, `make run-asm` performs both steps and starts the
-emulator with the assembly cartridge, while `make run` does the same with the
-Z88DK C cartridge (`src/p2wp-cartridge-c.bin`). Extra emulator options go in
-`ARGS`, and `EMUFLAGS` replaces the default `--live` network mode:
+From the repository root, `make run` performs both steps and starts the
+emulator with the cartridge (`src/p2wp-cartridge.bin`). Extra emulator options
+go in `ARGS`, and `EMUFLAGS` replaces the default `--live` network mode:
 
 ```sh
 make run ARGS="--auto-key Z"
-make run-asm EMUFLAGS="--fixture emulator/tests/fixtures/nos-100.json"
+make run EMUFLAGS="--fixture emulator/tests/fixtures/nos-100.json"
 ```
 
 The emulator presents one open network named `Emulated WiFi`; select it with
@@ -43,23 +42,30 @@ keys are mapped to the P2000T keyboard matrix. Press `F11` for a warm reset or
 
 Page shortcuts are `START`/`I` (page 100), `?`/`R` (reveal), `Z` (top, bottom, and
 normal size), arrow left/`P` and arrow right/`N` (previous/next page), `V`
-(automatic next page), `A` (pause subpages), `S` (choose subpage), `W` (Wi-Fi),
+(automatic next page), `<`/`>` (previous/next subpage), `A` (pause subpages),
+`S` (choose subpage), `W` (Wi-Fi),
 `H` (help), and P2000 `STOP` (source selection). The host
 keypad Enter key maps to `STOP`; `I` is the convenient host equivalent for
 `START`.
 
-The integration test uses a tiny generated monitor shim and a recorded NOS
-response, so it is deterministic and does not need proprietary ROMs or network:
+The pytest integration suite uses a tiny generated monitor shim and a recorded
+NOS response, so it is deterministic and does not need proprietary ROMs or
+network. Install its Python dependency once, then run it from the repository
+root:
 
 ```sh
-make -C emulator test
+python3 -m pip install -r emulator/tests/requirements.txt
+make test
 ```
+
+Pytest captures the emulator's automatic-key trace on successful runs and
+includes it in the failure report when a test fails.
 
 It executes the production cartridge, completes negotiated P2WP HELLO, fictitious Wi-Fi
 scan/connect, source selection, live-code JSON decoding, four chunk transfers,
 and asserts that built-in and custom page content reached emulated video RAM.
 It also exercises keypad entry, Backspace, arrows, Shift-STOP cancellation,
-persisted auto-start, stale-label cleanup, archive compatibility, auto-page
+persisted auto-start, stale-label cleanup, P2WP/7 Archive gating, auto-page
 error recovery, detailed P2WP/7 errors, the expanded help screen, and zoom mode.
 
 For a deterministic custom-source boot from the repository root, run:
@@ -97,6 +103,11 @@ compatibility warning, or `--p2wp-version 1` to exercise the no-common-version
 error screen. Without this option the emulator negotiates the current P2WP/7.
 The intermediate pre-release clock firmware can be reproduced with
 `--p2wp-version 2 --p2wp-status-length 9`.
+
+Stalled fetches reproduce the Pico firmware's 60-second HTTP timeout. Pass
+`--stall-fetch` (or `--stall-fetch-after N`) to exercise it. The diagnostic
+`--no-firmware-fetch-timeout` switch disables that emulation so cartridge-side
+75-second fallback handling can be tested independently.
 
 The vendored M2000 core retains its upstream copyright and is GPL-3.0; see
 `LICENSE` and `vendor/m2000/UPSTREAM.md`.

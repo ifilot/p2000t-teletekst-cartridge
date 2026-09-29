@@ -46,7 +46,7 @@ static uint8_t read_event(void) {
 
 /**
  * @brief Maps an ASCII byte to the equivalent Viewdata display glyph.
- * @param value ASCII byte to display.
+ * @param[in] value ASCII byte to display.
  * @return Display-memory byte for the character.
  */
 static uint8_t display_byte(uint8_t value) {
@@ -55,10 +55,10 @@ static uint8_t display_byte(uint8_t value) {
 
 /**
  * @brief Sends a request and accepts only a successful P2WP result.
- * @param s Active protocol session.
- * @param type Request type.
- * @param p Optional payload.
- * @param n Payload length.
+ * @param[in,out] s Active session; successful requests advance its sequence.
+ * @param[in] type Request type.
+ * @param[in] p Optional payload.
+ * @param[in] n Payload length.
  * @param[out] r Response descriptor.
  * @return One for P2WP_OK, otherwise zero.
  */
@@ -79,7 +79,7 @@ static void wipe_password(void) {
 
 /**
  * @brief Polls until a manually selected network connects or fails.
- * @param s Active protocol session.
+ * @param[in,out] s Active session; polling advances its sequence.
  * @return One after acquiring an address, otherwise zero.
  */
 static uint8_t poll_connection(p2wp_session_t *s) {
@@ -97,7 +97,7 @@ static uint8_t poll_connection(p2wp_session_t *s) {
 
 /**
  * @brief Polls asynchronous saved-profile storage or connection work.
- * @param s Active protocol session.
+ * @param[in,out] s Active session; polling advances its sequence.
  * @return One when the profile operation completes successfully.
  */
 static uint8_t poll_profile(p2wp_session_t *s) {
@@ -114,7 +114,7 @@ static uint8_t poll_profile(p2wp_session_t *s) {
 
 /**
  * @brief Attempts startup using the Pico's encrypted saved profile.
- * @param s Active protocol session.
+ * @param[in,out] s Active session; requests advance its sequence.
  * @return Zero if absent, one if connected, or two if the profile failed.
  */
 static uint8_t try_profile(p2wp_session_t *s) {
@@ -129,9 +129,7 @@ static uint8_t try_profile(p2wp_session_t *s) {
   return poll_profile(s) && poll_connection(s) ? 1u : 2u;
 }
 
-/**
- * @brief Draws the initial Wi-Fi scan progress screen.
- */
+/* Public API contract: see wifi.h. */
 void wifi_show_scanning(void) {
   platform_clear_screen();
   ui_title(1u, wifi_title);
@@ -144,7 +142,7 @@ void wifi_show_scanning(void) {
 
 /**
  * @brief Runs a scan and renders up to nine validated network records.
- * @param s Active protocol session.
+ * @param[in,out] s Active session; scan requests advance its sequence.
  * @return Number of displayed networks, or zero on failure.
  */
 static uint8_t scan_networks(p2wp_session_t *s) {
@@ -199,7 +197,7 @@ static uint8_t scan_networks(p2wp_session_t *s) {
 
 /**
  * @brief Waits for a displayed network selection or cancellation.
- * @param count Number of selectable network rows.
+ * @param[in] count Number of selectable network rows.
  * @return Zero-based network index, or 0xff when cancelled.
  */
 static uint8_t choose_network(uint8_t count) {
@@ -281,8 +279,8 @@ static uint8_t read_password(void) {
 
 /**
  * @brief Makes three connection attempts with the selected network.
- * @param s Active protocol session.
- * @param index Zero-based scan-result index.
+ * @param[in,out] s Active session; connection requests advance its sequence.
+ * @param[in] index Zero-based scan-result index.
  * @return One on connection, otherwise zero.
  */
 static uint8_t connect_selected(p2wp_session_t *s, uint8_t index) {
@@ -306,7 +304,7 @@ static uint8_t connect_selected(p2wp_session_t *s, uint8_t index) {
 
 /**
  * @brief Offers to encrypt and save the successful manual connection.
- * @param s Active protocol session.
+ * @param[in,out] s Active session; save requests advance its sequence.
  */
 static void offer_save(p2wp_session_t *s) {
   uint8_t payload[1 + MAX_PASSWORD], n, key;
@@ -331,7 +329,7 @@ static void offer_save(p2wp_session_t *s) {
 
 /**
  * @brief Performs scanning, selection, authentication, and optional saving.
- * @param session Active protocol session.
+ * @param[in,out] session Active session; requests advance its sequence.
  * @return One when connected, otherwise zero.
  */
 static uint8_t manual_startup(p2wp_session_t *session) {
@@ -362,9 +360,7 @@ static uint8_t manual_startup(p2wp_session_t *session) {
   return 1u;
 }
 
-/**
- * @brief Connects a saved profile or starts interactive Wi-Fi onboarding.
- */
+/* Public API contract: see wifi.h. */
 uint8_t wifi_startup(p2wp_session_t *session) {
   p2wp_response_t reply;
   uint8_t result;
@@ -394,9 +390,7 @@ retry_profile:
   return manual_startup(session);
 }
 
-/**
- * @brief Clears credentials and interactively selects another network.
- */
+/* Public API contract: see wifi.h. */
 uint8_t wifi_reconfigure(p2wp_session_t *session) {
   wipe_password();
   wifi_show_scanning();

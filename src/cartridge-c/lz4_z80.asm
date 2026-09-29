@@ -13,8 +13,12 @@
 SECTION code_user
 PUBLIC _lz4_decompress
 
-; void lz4_decompress(const uint8_t *source, uint8_t *destination,
-;                     uint16_t compressed_size)
+; @brief Decompresses one raw LZ4 block into a caller-owned RAM buffer.
+; @param[in] SP+2 Return address followed by the SDCC argument area.
+; @param[in] SP+4 source: address of the compressed ROM bytes.
+; @param[out] SP+6 destination: address of the caller-sized RAM buffer.
+; @param[in] SP+8 compressed_size: exact number of source bytes.
+; @return No value; IX is restored and other working registers are clobbered.
 _lz4_decompress:
     push ix
     ld ix,0

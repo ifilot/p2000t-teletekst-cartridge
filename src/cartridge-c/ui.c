@@ -11,11 +11,13 @@
 
 #include "lz4_z80.h"
 #include "platform.h"
+#include "version.h"
 
 enum {
   SAA_ALPHA_BLUE = 0x04,
   SAA_ALPHA_WHITE = 0x07,
   SAA_GRAPHICS_BLUE = 0x14,
+  SAA_GRAPHICS_WHITE = 0x17,
   SAA_NEW_BACKGROUND = 0x1d,
 };
 
@@ -59,12 +61,27 @@ static const uint8_t opening_screen_lz4[] = {
 /** RAM workspace receiving the decompressed opening screen. */
 static uint8_t opening_screen[24u * P2000T_SCREEN_COLUMNS];
 
+/**
+ * @brief Expands the opening screen and resets graphics mode on its first row.
+ *
+ * Real SAA5050 hardware can otherwise retain alpha mode at the start of the
+ * mosaic. Repeating the colour/background/graphics controls prevents the
+ * first graphics byte from appearing as `P` and restores the top stroke.
+ */
+static void prepare_opening_screen(void) {
+  lz4_decompress(opening_screen_lz4, opening_screen,
+                 sizeof(opening_screen_lz4));
+  opening_screen[3u * P2000T_SCREEN_COLUMNS + 3u] = SAA_ALPHA_BLUE;
+  opening_screen[3u * P2000T_SCREEN_COLUMNS + 4u] = SAA_NEW_BACKGROUND;
+  opening_screen[3u * P2000T_SCREEN_COLUMNS + 5u] = SAA_GRAPHICS_WHITE;
+}
+
 /* Uncompressed reference retained next to the generated block for review. */
 #if 0
-/* The original assembly cartridge's joined P2000T/TELETEKST mosaic. Each
- * entry is one complete, display-ready 40-column SAA5050 row. */
+/* Joined P2000T/TELETEKST mosaic. Each entry is one complete, display-ready
+ * 40-column SAA5050 row. */
 static const uint8_t opening_logo[14][40] = {
-    {0x04, 0x1d, 0x17, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x70,
+    {0x04, 0x1d, 0x17, 0x04, 0x1d, 0x17, 0x20, 0x20, 0x20, 0x70,
      0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70,
      0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70, 0x70,
      0x70, 0x70, 0x70, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20},
@@ -125,10 +142,10 @@ static const uint8_t opening_logo[14][40] = {
 
 /**
  * @brief Clears and writes one full-width styled text row.
- * @param row Screen row to update.
- * @param foreground SAA5050 colour control used as the new background.
- * @param text_colour SAA5050 alpha colour used for the text.
- * @param text Null-terminated row text, starting after the control prefix.
+ * @param[in] row Screen row to update.
+ * @param[in] foreground SAA5050 colour control used as the new background.
+ * @param[in] text_colour SAA5050 alpha colour used for the text.
+ * @param[in] text Null-terminated row text, starting after the control prefix.
  */
 static void styled_line(uint8_t row, uint8_t foreground, uint8_t text_colour,
                         const char *text) {
@@ -141,23 +158,17 @@ static void styled_line(uint8_t row, uint8_t foreground, uint8_t text_colour,
   platform_write_text(row, 3u, text);
 }
 
-/**
- * @brief Writes a white-on-blue full-width title row.
- */
+/* Public API contract: see ui.h. */
 void ui_title(uint8_t row, const char *text) {
   styled_line(row, SAA_ALPHA_BLUE, SAA_ALPHA_WHITE, text);
 }
 
-/**
- * @brief Writes a blue-on-white full-width content row.
- */
+/* Public API contract: see ui.h. */
 void ui_panel(uint8_t row, const char *text) {
   styled_line(row, SAA_ALPHA_WHITE, SAA_ALPHA_BLUE, text);
 }
 
-/**
- * @brief Draws a blue mosaic separator across one row.
- */
+/* Public API contract: see ui.h. */
 void ui_rule(uint8_t row) {
   static const uint8_t graphics_blue[] = {SAA_GRAPHICS_BLUE};
   static const uint8_t mosaic_rule[] = {0x73};
@@ -168,38 +179,30 @@ void ui_rule(uint8_t row) {
     platform_write_bytes(row, column, mosaic_rule, 1u);
 }
 
-/**
- * @brief Draws the standard cartridge version footer.
- */
-void ui_footer(void) { ui_title(23u, "P2000T Teletekst Cartridge     v0.5.0"); }
+/* Public API contract: see ui.h. */
+void ui_footer(void) {
+  ui_title(23u, "P2000T Teletekst Cartridge     v" P2WP_CARTRIDGE_VERSION);
+}
 
-/**
- * @brief Draws the 14-row cartridge mosaic at the requested screen row.
- */
+/* Public API contract: see ui.h. */
 void ui_draw_logo(uint8_t row) {
   uint8_t logo_row;
-  lz4_decompress(opening_screen_lz4, opening_screen,
-                 sizeof(opening_screen_lz4));
+  prepare_opening_screen();
   for (logo_row = 0u; logo_row != 14u; ++logo_row)
     platform_write_bytes((uint8_t)(row + logo_row), 0u,
                          opening_screen + (uint16_t)(logo_row + 3u) * 40u, 40u);
 }
 
-/**
- * @brief Draws the complete cartridge opening screen.
- */
+/* Public API contract: see ui.h. */
 void ui_opening_screen(void) {
-  lz4_decompress(opening_screen_lz4, opening_screen,
-                 sizeof(opening_screen_lz4));
+  prepare_opening_screen();
   platform_present_screen(opening_screen);
   platform_write_bytes(22u, 0u, (const uint8_t *)"\007   DRUK OP EEN TOETS",
                        22u);
   ui_footer();
 }
 
-/**
- * @brief Runs the key wait and 60-second opening countdown.
- */
+/* Public API contract: see ui.h. */
 uint8_t ui_wait_opening(void) {
   uint16_t next_second = (uint16_t)(platform_clock() + 50u);
   uint16_t deadline = (uint16_t)(platform_clock() + 3000u);
