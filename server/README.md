@@ -55,6 +55,45 @@ Run the dependency-free server tests with:
 ```sh
 python3 server/test_server.py
 ```
+## Converting P2000T disk images to teletext pages
+
+[`convdisk2teletext-pages.py`](convdisk2teletext-pages.py) reads P2000T disk
+images, extracts `PPP`/`PP2` viewdata files, and either writes `*.bin` pages
+or serves them directly as teletext cartridge own server. The
+disk format is detected automatically; use `-t jws` or `-t ppp` when detection
+needs to be overridden.
+
+Extract pages to a directory. Page numbering starts at 100 by default:
+
+```sh
+mkdir -p pages
+python3 convdisk2teletext-pages.py --file *.dsk -out pages --number 200
+```
+
+Use `--number 200` to choose another starting page. When multiple disk images are
+provided, each disk starts at the next number rounded up to a multiple of 50;
+the converter also creates index pages, including page 899 for the disk list.
+
+List the files on one or more disk images without extracting them:
+
+```sh
+python3 convdisk2teletext-pages.py --file diskimage.dsk --list
+```
+
+To serve the extracted disk contents directly from memory without writing `.bin` files:
+
+```sh
+python3 convdisk2teletext-pages.py --files image1.dsk --file image2.dsk --server
+```
+
+The server host on `127.0.0.1:8080` by default. Use `--host <ip>`
+and `--port <number>` when the P2000T needs connects to another address. Use
+`--nocolor` for plain listing output, and `--verbose` or `--debug` for more
+processing information. Run `python3 convdisk2teletext-pages.py --help` for
+all options.
+
+
+
 
 To exercise the production cartridge and this live server through the emulator,
 start the server in one terminal and follow the `--live` example in
