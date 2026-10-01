@@ -22,6 +22,8 @@ WARN_AS_ERROR = FAIL_ON_WARNINGS
 # Doxygen 1.9.8 needs an enabled documentation renderer for parameter/return
 # validation; XML-only output produces false WARN_NO_PARAMDOC failures.
 GENERATE_HTML = YES
+# This is a documentation lint job; graph rendering is unnecessary.
+HAVE_DOT = NO
 GENERATE_XML = YES
 GENERATE_LATEX = NO
 QUIET = YES
