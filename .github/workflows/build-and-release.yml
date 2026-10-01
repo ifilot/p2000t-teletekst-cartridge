@@ -70,19 +70,30 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Z80 assembler
-        run: sudo apt-get update && sudo apt-get install --yes z80asm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Install cartridge test dependencies
+        run: python -m pip install --requirement emulator/tests/requirements.txt
+
+      - name: Install cartridge and emulator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-format cmake doxygen ninja-build libsdl2-dev libcurl4-openssl-dev
 
       - name: Build and verify cartridge
         run: |
           make -C src
           make -C src verify
+          make -C src lint
+          make -C src smoke
           make -C firmware/tests test
 
       - uses: actions/upload-artifact@v4
         with:
           name: p2wp-cartridge
-          path: src/p2wp-cartridge.bin
+          path: build/p2wp-cartridge.bin
           if-no-files-found: error
 
   firmware:

@@ -6,7 +6,7 @@ all:
 	cmake --build $(BUILD)
 
 test:
-	python3 tests/test_integration.py
+	python3 -m pytest --verbose --tb=short tests
 
 clean:
 	cmake -E remove_directory $(BUILD)

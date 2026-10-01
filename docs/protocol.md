@@ -419,6 +419,11 @@ Source `3`, introduced in P2WP/7, uses `teletekstarchief.nl` over verified
 HTTPS. Its trust store includes both ISRG Root X1 and X2 because the service can
 present either its RSA or ECDSA Let's Encrypt chain.
 
+The reference peripheral applies a 60-second overall deadline to every HTTP
+fetch. On expiry it aborts and releases the active connection before reporting
+`TIMEOUT`, so a later fetch is not blocked behind stale network work. Hosts use
+a longer fallback deadline for an unresponsive peripheral.
+
 For a built-in source, a `TELETEKST_FETCH_START` request contains four bytes:
 
 | Offset | Field |
@@ -471,13 +476,12 @@ response. The auto-start source values are the cartridge menu identifiers:
 | `0x00` | Custom server URL retained through P2WP/5 |
 | `0x01` | NOS Teletekst |
 | `0x02` | P2000T Teletekst |
-| `0x03` | TeletekstArchief.nl (`https://teletekstarchief.nl`) |
+| `0x03` | TeletekstArchief.nl (`https://teletekstarchief.nl`), usable after negotiating P2WP/7 |
 | `0xff` | Auto-start disabled |
 
 All other values are invalid. These menu identifiers are deliberately separate
 from the `TELETEKST_FETCH_START` source field. In a P2WP/7 session the archive
-entry uses dedicated source `3`; with P2WP/4–6 firmware the cartridge retains
-compatibility by sending its fixed base URL as custom source `2`. The reference
+entry uses dedicated source `3` and therefore requires P2WP/7. The reference
 Pico stores the setting in the versioned custom-URL record in the penultimate
 flash sector, preserving the URL when only the setting changes and avoiding a
 flash write when the complete record is unchanged. A P2WP/5 record is accepted
@@ -486,8 +490,8 @@ and migrated when it is next updated.
 The reference firmware deliberately disables certificate-chain and hostname
 verification for source `2` HTTPS requests, allowing self-signed and private-CA
 certificates. This exception MUST NOT weaken verification of sources `0`, `1`,
-or `3`. Consequently, the P2WP/4–6 archive fallback has custom-source security
-semantics, while its P2WP/7 transport is verified. See
+or `3`; Archive is unavailable before P2WP/7 rather than being routed through
+the unverified custom transport. See
 [Hosting a custom Teletekst server](custom-server.md) for the HTTP/JSON contract
 and its security implications.
 
@@ -614,5 +618,5 @@ Before an implementation is considered conforming, verify that it:
 
 - {doc}`custom-server` defines the HTTP endpoint consumed by custom source `2`.
 - {doc}`basic` implements a portable link diagnostic in P2000T BASIC.
-- {doc}`assembly` explains the production Z80 implementation and reusable
-  transport routines.
+- The production cartridge under `src` is the reference host
+  implementation.

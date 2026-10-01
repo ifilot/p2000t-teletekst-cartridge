@@ -12,6 +12,6 @@ make -C "$script_dir"
 cd "$project_dir"
 exec "$script_dir/build/p2000t-emulator" \
     --monitor "$monitor_rom" \
-    --cartridge "$project_dir/src/p2wp-cartridge.bin" \
+    --cartridge "$project_dir/build/p2wp-cartridge.bin" \
     --font "$script_dir/assets/Default.fnt" \
     --live "$@"

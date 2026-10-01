@@ -133,12 +133,36 @@ opening screen has been left untouched for 60 seconds; cycle to `UIT` to disable
 auto-start. The opening prompt shows the remaining `AUTO-MODE` seconds beside
 `DRUK OP EEN TOETS`. An automatic start also enables automatic next-page mode.
 
-While viewing a page, the main controls are `START`/`I` for page 100, arrow
-left/`P` and arrow right/`N` for the previous and next server-advertised page,
-`V` for automatic next-page mode, `?`/`R` to reveal concealed text, and `Z` to
-cycle zoom. Page numbers can be typed on either the main number row or numeric
-keypad, and Backspace corrects the current three-digit entry. `W` reopens Wi-Fi
-setup; Shift-`STOP` cancels Wi-Fi or custom-server input.
+### Keymap
+
+The on-screen help uses the P2000T's native `←` and `→` display glyphs for the
+physical arrow keys. Those arrows and `P`/`N` select pages. The literal `<` and
+`>` keys select the previous and next subpage; `S` selects one directly and `A`
+pauses or resumes automatic rotation. `L` also toggles this subpage looping.
+While paused, automatic page navigation also waits, keeping the displayed
+page and subpage fixed until you resume.
+
+| Context | Key | Action |
+| --- | --- | --- |
+| Page | `100`–`899` | Type three digits to fetch a page; Backspace edits an unfinished number |
+| Page | `START` or `I` | Go to index page 100 |
+| Page | `←` or `P`; `→` or `N` | Follow the server's previous/next-page link |
+| Page | `<`; `>` | Fetch the numerically previous/advertised next subpage |
+| Page | `S` | Select a subpage (`00` asks for the default subpage) |
+| Page | `L` / `A` | Toggle automatic subpage looping (pause/resume) |
+| Page | `V` | Toggle automatic next-page mode |
+| Page | `?` or `R` | Reveal or conceal hidden text |
+| Page | `Z` | Cycle normal, upper-half, and lower-half zoom |
+| Page | `H` | Open the on-screen help page; any key returns |
+| Page | `W` | Return to Wi-Fi setup |
+| Page | `STOP` | Return to source selection |
+| Source menu | `1`, `2`, `3`, or `0` | Choose NOS, P2000T, P2WP/7 Archive, or a custom server |
+| Source menu | `A` | Cycle the persistent 60-second auto-start source |
+| Source menu | `H` | Open the on-screen help page |
+| Input dialog | Backspace | Delete the last character or digit |
+| Input dialog | Shift-`STOP` | Cancel Wi-Fi or custom-server input |
+
+The main number row and numeric keypad both work for page and subpage entry.
 
 Choose **0 - EIGEN SERVER** to enter an `http://` or `https://` URL of up to 96
 characters, including an optional port and base path. The address is retained
@@ -149,14 +173,12 @@ server](docs/custom-server.md) for the required routes and response fields.
 > [!WARNING]
 > Certificate and hostname verification is disabled for a custom HTTPS server,
 > so self-signed and private-CA certificates work. Use only a server and network
-> you trust. The built-in services continue to use verified HTTPS. With legacy
-> P2WP/4–6 firmware, the archive compatibility fallback uses the custom-source
-> transport and therefore has the same limitation.
+> you trust. The built-in services continue to use verified HTTPS. Archive
+> requires P2WP/7 so it always uses the dedicated, verified transport.
 
 [`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–7 interface
-specification. The Sphinx documentation adds implementation guides for
-[P2000T BASIC](docs/basic.rst) and
-[Z80 assembly](docs/assembly.rst).
+specification. The Sphinx documentation also includes a
+[P2000T BASIC](docs/basic.rst) client guide.
 
 Pushes to `master` publish the rendered documentation to
 [GitHub Pages](https://ifilot.github.io/p2000t-teletekst-cartridge/). Manual
@@ -173,9 +195,26 @@ make -C docs html
 
 ## Compilation
 
+### Quick start
+
+From the repository root, `make run` builds the emulator and cartridge and
+boots it in the emulator. This needs the dependencies listed in
+[`emulator/README.md`](emulator/README.md). Append emulator options with
+`ARGS`, for example `make run ARGS="--p2wp-version 2"`, or replace the network
+mode with `EMUFLAGS`.
+
 ### Cartridge
 
-Build the cartridge with `make -C src`. 
+Build the production C cartridge in the pinned Z88DK Docker toolchain and run
+its emulator integration test with:
+
+```sh
+make -C src
+make -C src smoke
+```
+
+This produces the sole release image, `build/p2wp-cartridge.bin`. See
+[`src/README.md`](src/README.md) for its architecture and memory map.
 
 ### PICO Firmware
 

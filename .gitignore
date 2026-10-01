@@ -4,11 +4,12 @@ cmake-build-*/
 CMakeUserPresets.json
 compile_commands.json
 
-# Z80 assembler intermediates and generated cartridge ROMs. Release workflows
-# build the ROM from source and publish it as an artifact instead.
+# Z88DK intermediates and generated cartridge ROMs. Release workflows build
+# the ROM from source and publish it as an artifact instead.
 *.lst
 *.lab
-/src/*.bin
+*.lis
+*.sym
 
 # Native protocol-test executable
 firmware/tests/p2wp-test

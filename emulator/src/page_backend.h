@@ -4,6 +4,7 @@
 struct page_backend {
     const char *fixture;
     int live;
+    int fixture_repeats_next_subpage;
     unsigned short fail_page;
     unsigned char fail_error;
     unsigned char requested_subpages[32];

@@ -184,8 +184,8 @@ Software and firmware therefore form part of the transport:
 * reset discards any byte or frame that was partly transferred.
 
 The :ref:`hardware transport section <hardware-transport>` defines the exact
-handshake sequence. The :doc:`basic` and :doc:`assembly` guides show how host
-software implements it.
+handshake sequence. The :doc:`basic` guide shows how host software implements
+it.
 
 .. _KiCad schematic: https://github.com/ifilot/p2000t-teletekst-cartridge/blob/master/pcb/p2000t-pico-web-interface.kicad_sch
 .. _standalone SVG: https://github.com/ifilot/p2000t-teletekst-cartridge/blob/master/pcb/p2000t-pico-web-interface.svg

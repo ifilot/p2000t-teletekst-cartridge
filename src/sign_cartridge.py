@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""Add or verify the P2000T cartridge additive checksum."""
+"""@file sign_cartridge.py
+@brief Add or verify the P2000T monitor's additive cartridge checksum.
+
+The command validates the fixed ROM layout and updates the five-byte header
+through a same-directory temporary file whenever the host filesystem permits.
+
+SPDX-License-Identifier: GPL-3.0-only
+"""
 
 from __future__ import annotations
 
 import argparse
+import errno
 import os
 from pathlib import Path
 import sys
@@ -17,8 +25,8 @@ ROM_SIZE = 16 * 1024
 def payload_sum(image: bytes, length: int) -> int:
     """@brief Calculate the monitor's additive checksum over a payload.
 
-    @param image Complete cartridge image including its five-byte header.
-    @param length Number of payload bytes to include after the header.
+    @param[in] image Complete cartridge image including its five-byte header.
+    @param[in] length Number of payload bytes to include after the header.
     @return Unsigned 16-bit payload sum.
     """
     return sum(image[HEADER_SIZE:HEADER_SIZE + length]) & 0xFFFF
@@ -27,8 +35,8 @@ def payload_sum(image: bytes, length: int) -> int:
 def sign(path: Path, length: int | None) -> tuple[int, int]:
     """@brief Atomically write a valid additive checksum header.
 
-    @param path Cartridge image to validate and update.
-    @param length Payload length override, or None for the complete image.
+    @param[in,out] path Cartridge image to validate and update.
+    @param[in] length Payload length override, or None for the complete image.
     @return Tuple containing the signed payload length and checksum value.
     @raise ValueError If the image structure or payload length is invalid.
     """
@@ -48,23 +56,44 @@ def sign(path: Path, length: int | None) -> tuple[int, int]:
     output[1:3] = payload_length.to_bytes(2, "little")
     output[3:5] = value.to_bytes(2, "little")
 
+    write_atomically(path, bytes(output))
+    return payload_length, value
+
+
+def write_atomically(path: Path, data: bytes) -> None:
+    """@brief Replace a file's contents through a temporary file and rename.
+
+    @param[in,out] path File to overwrite.
+    @param[in] data Complete new contents.
+    @return None after the replacement or fallback write succeeds.
+
+    WSL2 drvfs (9p) mounts occasionally refuse to rename over a file that was
+    written moments ago and report EXDEV even though both paths share a
+    filesystem. Atomicity is only a nicety here, so fall back to writing the
+    file in place when that happens.
+    """
+    path = path.resolve()
     with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as temporary:
-        temporary.write(output)
+        temporary.write(data)
         temporary.flush()
         os.fsync(temporary.fileno())
         temporary_path = Path(temporary.name)
     try:
         os.replace(temporary_path, path)
+    except OSError as error:
+        temporary_path.unlink(missing_ok=True)
+        if error.errno != errno.EXDEV:
+            raise
+        path.write_bytes(data)
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
-    return payload_length, value
 
 
 def verify(path: Path) -> tuple[int, int]:
     """@brief Verify the structure and additive checksum of an image.
 
-    @param path Cartridge image to read.
+    @param[in] path Cartridge image to read.
     @return Tuple containing the stored payload length and checksum value.
     @raise ValueError If the image or checksum is invalid.
     """

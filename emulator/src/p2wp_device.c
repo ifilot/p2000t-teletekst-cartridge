@@ -13,6 +13,7 @@ enum {
     STATUS_PORT = 0x42,
     SCREEN_SIZE = 960,
     CHUNK_SIZE = 240,
+    FETCH_TIMEOUT_TICKS = 3000,
 };
 
 static p2wp_parser_t parser;
@@ -29,8 +30,14 @@ static uint16_t previous_page, next_page;
 static uint8_t fetch_state;
 static uint8_t fetch_error;
 static uint8_t profile_state;
+static uint8_t wifi_security;
 static uint8_t protocol_maximum = P2WP_MAX_VERSION;
 static uint8_t status_length_override;
+static int fetch_stall_after = -1;
+static unsigned fetch_start_count;
+static unsigned fetch_stall_ticks;
+static bool fetch_timeout_enabled = true;
+static bool clock_valid = true;
 static const char *flash_path;
 static char stored_custom_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
 static uint8_t stored_custom_url_length;
@@ -111,7 +118,7 @@ static uint8_t wifi_scan_result(
     static const char ssid[] = "Emulated WiFi";
     response->payload[0] = request->payload[0];
     response->payload[1] = (uint8_t)-35;
-    response->payload[2] = 0u;
+    response->payload[2] = wifi_security;
     response->payload[3] = sizeof(ssid) - 1u;
     memcpy(response->payload + 4u, ssid, sizeof(ssid) - 1u);
     response->payload_length = 4u + sizeof(ssid) - 1u;
@@ -124,7 +131,10 @@ static uint8_t wifi_connect(
     p2wp_frame_t *response
 ) {
     (void)context;
-    (void)request;
+    if ((wifi_security == 0u && request->payload[1] != 0u) ||
+        (wifi_security == 1u && request->payload[1] < 8u)) {
+        return P2WP_ERROR_INVALID_PAYLOAD;
+    }
     response->payload_length = 0u;
     return P2WP_FIRMWARE_COMMAND_OK;
 }
@@ -206,6 +216,15 @@ static uint8_t teletekst_fetch_start(
     }
     previous_page = 0u;
     next_page = 0u;
+    if (fetch_stall_after >= 0 &&
+        fetch_start_count >= (unsigned)fetch_stall_after) {
+        fetch_error = 0u;
+        fetch_state = 1u;
+        fetch_stall_ticks = 0u;
+        response->payload_length = 0u;
+        return P2WP_FIRMWARE_COMMAND_OK;
+    }
+    fetch_start_count++;
     fetch_error = fetch_page != NULL ? fetch_page(
         fetch_context,
         request->payload[3],
@@ -237,7 +256,7 @@ static uint8_t teletekst_fetch_status(
     response->payload[4] = next_subpage;
     if (request->version >= 3u || status_length_override >= 9u) {
         memcpy(response->payload + 5u, local_clock, 3u);
-        response->payload[8] = fetch_error != 0u ? 0u : 1u;
+        response->payload[8] = fetch_error != 0u || !clock_valid ? 0u : 1u;
         memcpy(response->payload + 9u, local_clock + 3u, 4u);
         if (request->version >= 4u) {
             response->payload[13] = (uint8_t)previous_page;
@@ -426,6 +445,28 @@ void p2wp_device_set_status_length(uint8_t length) {
     status_length_override = length;
 }
 
+void p2wp_device_set_fetch_stall_after(int successful_fetches) {
+    fetch_stall_after = successful_fetches;
+    fetch_start_count = 0u;
+    fetch_stall_ticks = 0u;
+}
+
+void p2wp_device_set_fetch_timeout_enabled(int enabled) {
+    fetch_timeout_enabled = enabled != 0;
+}
+
+void p2wp_device_set_clock_valid(int valid) {
+    clock_valid = valid != 0;
+}
+
+void p2wp_device_set_profile_present(int present) {
+    profile_state = present ? 1u : 0u;
+}
+
+void p2wp_device_set_wifi_security(uint8_t security) {
+    wifi_security = security;
+}
+
 void p2wp_device_set_flash_path(const char *path) {
     flash_path = path;
     stored_custom_url_length = 0u;
@@ -486,11 +527,21 @@ void p2wp_device_reset(void) {
     encoded_position = 0u;
     fetch_state = 0u;
     fetch_error = 0u;
+    fetch_stall_ticks = 0u;
     next_subpage = 0u;
     previous_page = 0u;
     next_page = 0u;
     profile_state = 0u;
+    wifi_security = 0u;
     memset(screen, 0, sizeof(screen));
+}
+
+void p2wp_device_tick(void) {
+    if (fetch_timeout_enabled && fetch_state == 1u &&
+        ++fetch_stall_ticks >= FETCH_TIMEOUT_TICKS) {
+        fetch_state = 4u;
+        fetch_error = P2WP_TELETEKST_ERROR_TIMEOUT;
+    }
 }
 
 void p2wp_device_out(uint8_t port, uint8_t value) {

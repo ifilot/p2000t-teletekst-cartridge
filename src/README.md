@@ -1,12 +1,150 @@
 # P2000T slot-1 Teletekst cartridge
 
-`p2wp-cartridge.asm` is a standalone 16 KiB slot-1 ROM program. It starts at
-`0x1010`, communicates with the slot-2 Pico interface at ports `0x40` through
-`0x42`, and writes progress directly to the P2000T video RAM at `0x5000`.
+The `src` tree builds the project's sole 16 KiB slot-1 ROM. It starts
+at `0x1010`, communicates with the slot-2 Pico interface at ports `0x40`
+through `0x42`, and writes directly to the P2000T video RAM at `0x5000`.
+
+## Source layout for new contributors
+
+Execution flows from the small runtime shim into `main.c`, then through the
+following deliberately narrow modules:
+
+| Source | Responsibility |
+| --- | --- |
+| `main.c` | Startup orchestration: opening screen, P2WP negotiation, Wi-Fi, and entry into the viewer. |
+| `p2wp.c` / `p2wp.h` | Transport-independent P2WP framing, CRC, retries, HELLO negotiation, sequence numbers, and response validation. |
+| `wifi.c` / `wifi.h` | Saved-profile recovery and the interactive scan, password, connection, and profile-save workflow. |
+| `teletekst.c` / `teletekst.h` | Source/settings selection and the cohesive page-fetch/viewer state machine, including subpages, zoom, reveal, clock, and recovery. |
+| `ui.c` / `ui.h` | Stateless shared panels, rules, logo, opening screen, and footer. |
+| `platform.c` / `platform.h` | Portable key translation plus the public boundary for all P2000T-specific operations. |
+| `platform.asm` | Size-critical monitor, video-RAM, clock, and cartridge-port implementations behind `platform.h`; it contains no application policy. |
+| `crt0.asm` | Cartridge header, ROM/RAM map, C-runtime initialization, and terminal exit trap. |
+| `lz4_z80.asm` / `lz4_z80.h` | Isolated raw-LZ4 decoder used for resident screen assets. |
+| `make_cartridge_rom.py` | Joins Z88DK code and initialized data, validates the header, and pads the ROM. |
+| `sign_cartridge.py` | Writes and verifies the monitor-compatible additive checksum. |
+| `check_doxygen_style.py` | Enforces C, assembly, and Python documentation contracts used by `make lint`. |
+
+The larger `teletekst.c` module intentionally keeps the page buffers and
+viewer state machine together. Splitting individual viewer actions into more
+translation units would expose mutable state, add cross-module interfaces, and
+consume scarce ROM/RAM without creating an independent abstraction. New
+provider or navigation policy belongs there; reusable presentation belongs in
+`ui`, wire behaviour in `p2wp`, and hardware access in `platform`.
+
+Public C contracts are documented once in their headers, including parameter
+direction and return semantics. Private C functions are documented at their
+definitions. Assembly contracts describe stack/register inputs, outputs, and
+clobbers; the Python build tools use the same Doxygen tags in docstrings.
+
+## Z88DK C cartridge
+
+The application, protocol, Wi-Fi, and viewer state machines are implemented in
+C. Three focused Z80 support modules provide CRT startup, monitor/port/video
+primitives, and raw-LZ4 decoding. The build pads and signs the result and emits
+`p2wp-cartridge.bin`. The reusable P2WP layer implements framing, CRC, retry,
+sequence, protocol-error, and HELLO validation. `DEVICE_INFO` supplies the Pico
+version shown on the source menu.
+
+The fixed 40x24 video-memory operations and unsigned-byte decimal writer are
+implemented as compact Z80 routines. The latter uses repeated subtraction;
+the linked cartridge therefore contains no `sprintf`/`printf`, division,
+multiplication, or arithmetic-error support from the general C runtime.
+
+The current Wi-Fi vertical slice queries the encrypted-profile state and, when
+a profile exists, starts it and polls through acquisition of an IP address. If
+no usable profile exists, it starts an asynchronous scan, polls radio and scan
+state, validates and displays up to nine SSIDs, accepts network selection and a
+masked WPA/WPA2 password, connects, and optionally asks the Pico to encrypt and
+save that profile. Password storage is wiped after use. Unsupported security,
+short passwords, timeouts and connection failures produce explicit messages.
+
+After Wi-Fi connects, the C image presents the restored Teletekst-style source
+menu and can select NOS, P2000T, a custom server, or TeletekstArchief.nl.
+Archive requires P2WP/7 so it always uses its dedicated verified transport.
+The custom-server editor accepts 96 characters over three
+rows; P2WP/5 restores and saves the URL in Pico flash, while P2WP/4 retains it
+for the cartridge session. It starts an asynchronous request for page 100, validates
+the version-dependent status response, retrieves all four 240-byte display
+chunks, stages the complete 960-byte screen in RAM, and then displays it. Page
+state now persists in a viewer loop: three digits select pages 100-899,
+Backspace edits an unfinished number, `START`/`I` returns to page 100,
+`P`/left and `N`/right follow previous/next metadata, and `STOP` returns to
+source selection. Subpages advance automatically every ten seconds and wrap
+to the default first subpage; `<`/`>` move to the previous/next subpage, `A`
+pauses/resumes that sequence (`L` also toggles looping), and `S` selects a
+subpage manually. `R`/`?`
+reveals concealed text, `Z` cycles normal and both
+half-page zoom modes, `H` shows and dismisses the help page without refetching,
+`V` enables automatic next-page navigation, and `W` returns to Wi-Fi setup.
+Clock updates, the persistent source-menu autostart countdown, and detailed
+error/recovery behaviour are included in the C image.
+
+The Wi-Fi screen presents network results and password input. Protected
+networks first ask whether entry should be visible
+(`J`) or masked (`N`); the 63-character input spans two rows, supports
+Backspace, preserves the original protocol bytes, and displays `#` using its
+Viewdata glyph.
+
+The reusable C UI layer reintroduces SAA5050 blue-background headers,
+white-and-blue content panels, mosaic separator rules, the complete
+fourteen-row joined P2000T/TELETEKST mosaic, and the cartridge footer. The
+opening screen, source menu, and basic error recovery use this layer. Page
+requests preserve the current display and animate a six-phase mosaic tile in
+the upper-left corner until the complete replacement page has arrived.
+
+Build the image using the pinned Z88DK 2.4 Docker image. The build uses the
+SDCC frontend with `--opt-code-size -SO3` and
+`--max-allocs-per-node10000`. The Z80 platform entry points follow SDCC's
+packed-byte stack ABI:
+
+```sh
+make -C src
+```
+
+This produces `build/p2wp-cartridge.bin`. To test the runtime, keyboard shim,
+viewer, and P2WP/2–7 negotiation in the emulator, install
+`emulator/tests/requirements.txt` and run:
+
+```sh
+make -C src smoke
+```
+
+Startup redirects the monitor status pointer at `0x6014` to the hidden video
+columns at `0x5028`. The monitor's Shift/lock indicator otherwise writes over
+column 15 of the top row, corrupting the source-menu mosaic or clock. Its
+additional model-M attribute write is also kept outside the visible columns.
+The help page uses native SAA5050 left/right arrow glyphs (`0x5B`/`0x5D`).
+Press `2` from help to show compilation information and the GitHub address;
+press `1` to return to the controls, or another key to leave help. Build date
+and time are generated in the Europe/Amsterdam timezone, including automatic
+daylight-saving adjustment and a CET/CEST label. The build host needs Python's
+timezone database (system tzdata or the Python tzdata package).
+The 11-byte ROM name is `P2K-TELETXT`.
+
+Every C ROM build reports code/read-only-data bytes, initialized-data bytes,
+and the remaining padding capacity in the 16 KiB cartridge. The generated ROM
+itself is always exactly 16,384 bytes after padding and signing.
+
+The opening logo, help page, and error-description tables use a
+cartridge-resident raw-LZ4 decoder. Page rendering, clock
+arithmetic/formatting, fixed-width numeric formatting, atomic screen commits
+and reveal updates use focused Z80 routines; the protocol and viewer state
+machines remain in C for maintainability. `make -C src lint` verifies Google
+C formatting, readable multi-line Doxygen block layout, and all documentation
+headers.
+
+The generated map and intermediate binaries are placed in `build/cartridge`.
+The ROM is placed in `build/p2wp-cartridge.bin`. The ROM
+builder appends Z88DK's initialized-data image after code and read-only data so
+the CRT can copy it to RAM during startup. ROM code starts at `0x1000`,
+execution starts at `0x1010`, mutable sections start at `0x7000`, and the stack
+starts at `0x9ff0`. Keep platform-specific entry, monitor-call and port-I/O
+details in the Z80 shim; application and protocol logic belongs in C
+modules.
 
 `p2wp-cartridge.bin` is a generated ROM image and is not stored in Git. Build it
-with `make -C src`; this requires `z80asm` 1.8 or a compatible assembler.
-The build signs the image with the P2000T additive 16-bit cartridge checksum.
+with `make -C src`; this requires Docker and the pinned Z88DK image. The build
+signs the image with the P2000T additive 16-bit cartridge checksum.
 Use `make -C src verify` to validate it. This is an integrity checksum, not a
 cryptographic signature.
 The cartridge release version is `v0.5.0`. `../VERSION`, the cartridge
@@ -75,9 +213,8 @@ The custom URL may contain a DNS name, IPv4 address, port, and base path. With
 P2WP/5 it is restored from Pico flash when the dialog opens and saved only if
 the accepted value changed. P2WP/4 keeps it for the cartridge session. Custom
 HTTPS accepts self-signed or private-CA certificates
-by disabling certificate and hostname verification. P2WP/7 treats the archive
-as a dedicated built-in source with strict certificate and hostname checks;
-P2WP/4–6 uses the custom-source compatibility path for it. See
+by disabling certificate and hostname verification. Archive requires P2WP/7
+and uses strict certificate and hostname checks. See
 [`../docs/custom-server.md`](../docs/custom-server.md)
 for the server-side contract and security warning.
 The cartridge then requests page 100. Enter any page number from 100 through
@@ -87,7 +224,9 @@ If the selected API identifies another subpage, the cartridge retrieves it
 automatically after ten seconds and continues following the subpage sequence.
 After the last subpage reports no successor, an active loop requests subpage
 zero and returns to the first subpage. Pausing suppresses this wrap as well as
-ordinary advances; pressing `A` again resumes with a fresh ten-second interval.
+ordinary advances; pressing `L` or `A` resumes with a fresh ten-second interval.
+Pausing also holds automatic next-page mode: its setting remains enabled,
+but it cannot replace the displayed page or subpage until you resume.
 A newly entered page always starts at its default first subpage.
 Pressing the dedicated P2000T `STOP` key returns to the source-selection
 screen without reconnecting Wi-Fi. After choosing a new source, the cartridge
@@ -102,15 +241,16 @@ next-page mode: every ten seconds it follows subpages first, then advances to
 the advertised next page (or page 100 when none exists). Invalid, oversized,
 missing, or HTTP-error pages are skipped numerically; network failures retry
 the same page. A failure on page 100 remains visible and stops auto-page mode.
-`W` returns to Wi-Fi scanning, `A` pauses or resumes
-automatic subpage cycling, and `S` selects a subpage. Enter either two digits,
+`W` returns to Wi-Fi scanning, `L` or `A` pauses or resumes
+automatic subpage cycling, `<`/`>` selects the previous/next subpage, and `S`
+selects a subpage. Enter either two digits,
 or one digit followed by Enter. Subpage `0`/`00` asks the API for its default
 first subpage. A manual subpage choice pauses cycling so it remains visible
-until `A` is pressed. While cycling is paused, an `A` appears in the top-right
+until `L` or `A` is pressed. While cycling is paused, an `A` appears in the top-right
 corner; resuming restores the header cell that it covered.
 On the source menu, `A` cycles the persistent 60-second auto-start setting
-through off, NOS, P2000T, TeletekstArchief.nl, and the custom server. Auto-start
-also enables automatic next-page mode.
+through off, NOS, P2000T, TeletekstArchief.nl, and the custom server. Archive
+is included only under P2WP/7. Auto-start also enables automatic next-page mode.
 Pressing `H` opens a cartridge-resident Teletekst-style Dutch help page. It
 explains page entry, source and Wi-Fi selection, manual and automatic subpages,
 the pause marker, and error recovery. Any key restores the exact prior display
