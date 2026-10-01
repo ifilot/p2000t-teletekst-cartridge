@@ -138,7 +138,9 @@ auto-start. The opening prompt shows the remaining `AUTO-MODE` seconds beside
 The on-screen help uses the P2000T's native `←` and `→` display glyphs for the
 physical arrow keys. Those arrows and `P`/`N` select pages. The literal `<` and
 `>` keys select the previous and next subpage; `S` selects one directly and `A`
-pauses or resumes automatic rotation.
+pauses or resumes automatic rotation. `L` also toggles this subpage looping.
+While paused, automatic page navigation also waits, keeping the displayed
+page and subpage fixed until you resume.
 
 | Context | Key | Action |
 | --- | --- | --- |
@@ -147,7 +149,7 @@ pauses or resumes automatic rotation.
 | Page | `←` or `P`; `→` or `N` | Follow the server's previous/next-page link |
 | Page | `<`; `>` | Fetch the numerically previous/advertised next subpage |
 | Page | `S` | Select a subpage (`00` asks for the default subpage) |
-| Page | `A` | Pause or resume automatic subpage rotation |
+| Page | `L` / `A` | Toggle automatic subpage looping (pause/resume) |
 | Page | `V` | Toggle automatic next-page mode |
 | Page | `?` or `R` | Reveal or conceal hidden text |
 | Page | `Z` | Cycle normal, upper-half, and lower-half zoom |
@@ -211,7 +213,7 @@ make -C src
 make -C src smoke
 ```
 
-This produces the sole release image, `src/p2wp-cartridge.bin`. See
+This produces the sole release image, `build/p2wp-cartridge.bin`. See
 [`src/README.md`](src/README.md) for its architecture and memory map.
 
 ### PICO Firmware

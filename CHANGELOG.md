@@ -6,10 +6,15 @@ in this file. The format is based on [Keep a Changelog].
 Entries through version 0.2.0 were reconstructed from the tagged Git history
 and release diffs.
 
-## [Unreleased]
+## [0.5.0] - 2026-08-30
 
 ### Added
 
+- Added a second help page with compilation date/time, compiler, release
+  version, and the GitHub project address, using the same coloured headings
+  and blue title/footer bands as the controls page.
+- Added `L` to toggle automatic subpage looping, alongside the existing `A`
+  pause/resume shortcut.
 - Added P2WP/7 archive transport with hostname- and certificate-verified HTTPS;
   Archive now requires P2WP/7 rather than using unverified custom transport.
 - Added stable DNS, connection, closed-connection, timeout, memory,
@@ -39,9 +44,25 @@ and release diffs.
 - Added deterministic emulator coverage for custom URL entry and shortcuts.
 - Added a dependency-free Python example server with editable text or raw
   SAA5050 pages and localhost HTTP tests.
+- Added backward-compatible protocol commands for Pico W/Pico 2 W generation,
+  installed firmware version, and an asynchronous TLS-verified GitHub latest
+  release lookup.
+- Added post-login source-menu rows for cartridge, Pico, and online release
+  versions, plus a build/test guard that keeps cartridge and
+  firmware release numbers synchronized.
+- Bundled the 4096-byte P2000T monitor ROM with the emulator and made it the
+  launcher's default.
+- Added a portable production firmware core shared by the Pico builds and
+  emulator, with native tests for negotiation, retries, sequence conflicts,
+  command validation, dispatch, and sensitive-payload erasure.
 
 ### Changed
 
+- Renamed the cartridge header to `P2K-TELETXT` to fit its 11-character field.
+- Styled the Wi-Fi profile-save and fetch-error screens with shared panels,
+  separators, action hints, and version footers.
+- Flattened the cartridge sources into `src` and moved its generated ROM and
+  build intermediates into the root `build` directory.
 - Made the Z88DK C cartridge the sole production and release ROM, removing the
   legacy monolithic assembly implementation and its duplicate build/test paths.
 - Moved pause/resume from `P` to `A` so `P` can mean previous page.
@@ -51,6 +72,12 @@ and release diffs.
 
 ### Fixed
 
+- Use a continuous blue background on the Wi-Fi save screen,
+  and show build time in Europe/Amsterdam with automatic CET/CEST adjustment.
+- Hold automatic page navigation while subpage rotation is paused, preventing
+  autorun from replacing the paused page or restarting its subpage sequence.
+- Redirect monitor Shift/lock status writes into hidden video columns so they
+  cannot corrupt the source-menu mosaic or overwrite a live-clock digit.
 - Reassert SAA5050 graphics mode at the start of the opening mosaic, restoring
   the top stroke and preventing mosaic bytes from appearing as `P` characters
   on real hardware.
@@ -71,25 +98,6 @@ and release diffs.
   visible terminal health check.
 - Preserve older P2WP behavior by mapping new transport errors back to generic
   network error `0x04` in P2WP/2–6 sessions.
-
-## [0.5.0] - 2026-08-30
-
-### Added
-
-- Added backward-compatible protocol commands for Pico W/Pico 2 W generation,
-  installed firmware version, and an asynchronous TLS-verified GitHub latest
-  release lookup.
-- Added post-login source-menu rows for cartridge, Pico, and online release
-  versions, plus a build/test guard that keeps cartridge and
-  firmware release numbers synchronized.
-- Bundled the 4096-byte P2000T monitor ROM with the emulator and made it the
-  launcher's default.
-- Added a portable production firmware core shared by the Pico builds and
-  emulator, with native tests for negotiation, retries, sequence conflicts,
-  command validation, dispatch, and sensitive-payload erasure.
-
-### Fixed
-
 - Wrapped an active automatic subpage loop from its final subpage back to the
   API's default first subpage, while preserving pause and resume behavior.
 

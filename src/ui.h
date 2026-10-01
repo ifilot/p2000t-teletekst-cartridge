@@ -57,4 +57,14 @@ void ui_rule(uint8_t row);
  */
 void ui_footer(void);
 
+/**
+ * @brief Shows help page two with build information and the project URL.
+ */
+void ui_build_info(void);
+
+/**
+ * @brief Shows the styled Wi-Fi profile-save confirmation screen.
+ */
+void ui_save_prompt(void);
+
 #endif  // P2000T_UI_H_

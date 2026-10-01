@@ -308,7 +308,8 @@ static void automatic_keyboard(int frame) {
       code = ascii_keycode(wifi_password[wifi_password_position++]);
     else
       code = 52;
-  } else if (stage == 2 && screen_has("WIFI-PROFIEL BEWAREN")) {
+  } else if (stage == 2 && screen_has("WIFI-PROFIEL BEWAREN") &&
+             screen_has("Teletekst Cartridge")) {
     code = 25;
     stage++;
   } else if (stage == 3 && frame >= source_action_frame &&
@@ -342,6 +343,7 @@ static void automatic_keyboard(int frame) {
               (screen_has("S:") && !screen_has("AUTOSTART")) ||
               screen_has("KIES UW TELETEKSTBRON") ||
               screen_has("DRUK EEN TOETS OM TERUG") ||
+              screen_has("2: INFO") ||
               previous_action_code == ascii_keycode('w')) &&
              frame >=
                  next_action_frame) { /* assembly page-valid byte or C viewer */
@@ -593,6 +595,9 @@ int main(int argc, char **argv) {
   p2wp_device_set_profile_present(wifi_profile);
   p2wp_device_set_wifi_security((uint8_t)wifi_security);
   OutputReg |= 0x40;
+  // Cartridge entry bypasses monitor startup: seed its status-display pointer.
+  RAM[0x14] = 0x0e;
+  RAM[0x15] = 0x50;
   Z80_Regs regs;
   Z80_GetRegs(&regs);
   regs.PC.D = 0x1010;

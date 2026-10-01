@@ -6,7 +6,7 @@
 EMULATOR := emulator/build/p2000t-emulator
 MONITOR ?= $(if $(P2000_MONITOR_ROM),$(P2000_MONITOR_ROM),emulator/assets/P2000ROM.bin)
 FONT := emulator/assets/Default.fnt
-CARTRIDGE := src/p2wp-cartridge.bin
+CARTRIDGE := build/p2wp-cartridge.bin
 
 # Emulator options: EMUFLAGS replaces the network mode, ARGS appends extras
 # such as --auto-key or --p2wp-version.

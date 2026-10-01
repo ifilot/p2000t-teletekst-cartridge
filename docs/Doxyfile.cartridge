@@ -3,7 +3,7 @@
 
 PROJECT_NAME = "P2000T Teletekst cartridge"
 OUTPUT_DIRECTORY = /tmp/p2000t-cartridge-doxygen
-INPUT = src/cartridge-c
+INPUT = src
 FILE_PATTERNS = *.c *.h
 RECURSIVE = NO
 EXTRACT_ALL = NO

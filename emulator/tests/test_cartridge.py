@@ -6,10 +6,12 @@ import base64
 import json
 import subprocess
 import tempfile
+import runpy
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[2]
 EMU = ROOT / "emulator"
-CARTRIDGE = ROOT / "src" / "p2wp-cartridge.bin"
+CARTRIDGE = ROOT / "build" / "p2wp-cartridge.bin"
 
 
 def run_emulator(
@@ -110,7 +112,21 @@ def run_emulator(
     return screen.read_bytes()
 
 
+def test_build_timestamp_timezone() -> None:
+    timestamp = runpy.run_path(str(ROOT / "src/build_info.py"))["build_timestamp"]
+    for utc, expected in (
+        ("2026-01-15T12:00:00", "15-01-2026 13:00 CET"),
+        ("2026-07-15T12:00:00", "15-07-2026 14:00 CEST"),
+        ("2026-03-29T00:59:00", "29-03-2026 01:59 CET"),
+        ("2026-03-29T01:00:00", "29-03-2026 03:00 CEST"),
+        ("2026-10-25T00:59:00", "25-10-2026 02:59 CEST"),
+        ("2026-10-25T01:00:00", "25-10-2026 02:00 CET"),
+    ):
+        assert timestamp(datetime.fromisoformat(utc).replace(tzinfo=timezone.utc)) == expected
+
+
 def test_cartridge_end_to_end() -> None:
+    assert CARTRIDGE.read_bytes()[5:16] == b"P2K-TELETXT"
     with tempfile.TemporaryDirectory(prefix="p2000t-cartridge-") as directory:
         temp = Path(directory)
         build = temp / "build"
@@ -159,6 +175,25 @@ def test_cartridge_end_to_end() -> None:
         assert scanning[6 * 40 : 6 * 40 + 2] == bytes((0x14, 0x73))
         assert b"PICO TEST" not in scanning
 
+        # Capture the completed prompt before the automatic keyboard answers N.
+        for frame in range(24, 40):
+            save_prompt = run_emulator(
+                build / "p2000t-emulator", monitor, temp / "save-prompt.bin",
+                frame, True,
+            )
+            if (b"WIFI-PROFIEL BEWAREN? J/N" in save_prompt and
+                    b"v0.5.0" in save_prompt[23 * 40:]):
+                break
+        assert b"WIFI-PROFIEL BEWAREN? J/N" in save_prompt
+        assert save_prompt[6 * 40:6 * 40 + 3] == bytes((7, 29, 4))
+        assert b"J: BEWAREN VOOR VOLGENDE KEER" in save_prompt
+        assert b"N: ALLEEN DEZE SESSIE" in save_prompt
+        assert b"v0.5.0" in save_prompt[23 * 40:]
+        for row in range(24):
+            assert save_prompt[row * 40:row * 40 + 2] in (
+                bytes((4, 29)), bytes((7, 29)),
+            ), f"save prompt row {row} has no background control"
+
         source_menu = run_emulator(
             build / "p2000t-emulator",
             monitor,
@@ -173,6 +208,12 @@ def test_cartridge_end_to_end() -> None:
         assert b"0\x07  EIGEN SERVER" in source_menu
         assert b"A\x07 AUTOSTART NA 60S: UIT" in source_menu[20 * 40 : 21 * 40]
         assert b"H\x07 HULP" in source_menu[21 * 40 : 22 * 40]
+        shifted_menu = run_emulator(
+            build / "p2000t-emulator", monitor, temp / "shifted-menu.bin",
+            650, True, auto_keys="STOP,LSHIFT,RSHIFT",
+        )
+        # The monitor status cell overlaps the top stroke above the logo's 2.
+        assert shifted_menu[:14 * 40] == source_menu[:14 * 40]
         assert b"START/I INDEX" not in source_menu
 
         custom_sources = temp / "custom-sources.bin"
@@ -366,6 +407,22 @@ def test_cartridge_end_to_end() -> None:
         assert paused_fetches.read_bytes() == bytes((0,))
         assert paused[39] == ord("A")
 
+        loop_off_fetches = temp / "loop-off-fetches.bin"
+        loop_off = run_emulator(
+            build / "p2000t-emulator", monitor, temp / "loop-off.bin",
+            1450, True, fetches=loop_off_fetches, auto_keys="L",
+        )
+        assert loop_off_fetches.read_bytes() == bytes((0,))
+        assert loop_off[39] == ord("A")
+
+        loop_on_fetches = temp / "loop-on-fetches.bin"
+        run_emulator(
+            build / "p2000t-emulator", monitor, temp / "loop-on.bin",
+            1450, True, fetches=loop_on_fetches, auto_keys="L,L",
+        )
+        assert loop_on_fetches.read_bytes()[:3] == bytes((0, 2, 0)), \
+            "L did not resume looping back to the first subpage"
+
         resumed_fetches = temp / "resumed-fetches.bin"
         run_emulator(
             build / "p2000t-emulator",
@@ -462,7 +519,7 @@ def test_cartridge_end_to_end() -> None:
         help_row(8, (0x03, " SUBPAGINA'S"))
         help_row(9, (0x06, " < / >"), (0x07, " VORIGE / VOLGENDE"))
         help_row(10, (0x06, " S"), (0x07, " KIES EEN SUBPAGINA"))
-        help_row(11, (0x06, " A"), (0x07, " PAUZE / DOORGAAN"))
+        help_row(11, (0x06, " L / A"), (0x07, " LUSSEN AAN/UIT"))
         help_row(12, (0x03, " WEERGAVE"))
         help_row(13, (0x06, " ? / R"), (0x07, " VERBORGEN TEKST TONEN"))
         help_row(15, (0x03, " VERBINDING"))
@@ -471,9 +528,32 @@ def test_cartridge_end_to_end() -> None:
         help_row(19, (0x03, " BRONKEUZE"))
         help_row(20, (0x06, " A"), (0x07, " AUTOSTARTBRON WIJZIGEN"))
         help_row(21, (0x06, " H"), (0x07, " HULP VANAF DE BRONKEUZE"))
-        help_band(22, " DRUK EEN TOETS OM TERUG TE GAAN")
+        help_band(22, "2: INFO   ANDERE TOETS: TERUG")
         help_band(23, "P2000T Teletekst Cartridge     v0.5.0")
         assert help_page == expected_help
+
+        info_page = run_emulator(
+            build / "p2000t-emulator", monitor, temp / "info.bin",
+            650, True, auto_keys="H,2",
+        )
+        assert b"INFO 2/2" in info_page
+        assert b"Z88DK 2.4 / SDCC - Z80" in info_page
+        assert b"github.com/ifilot/" in info_page
+        assert b"p2000t-teletekst-cartridge" in info_page
+        assert b"CET" in info_page or b"CEST" in info_page
+        for row in (0, 22, 23):
+            assert info_page[row * 40:row * 40 + 3] == bytes((4, 29, 7))
+        for row in (2, 8, 13):
+            assert info_page[row * 40] == 3  # Same yellow section headings.
+        for row in (3, 15):
+            assert info_page[row * 40] == 6  # Cyan labels on black.
+        for row in (1, 5, 6, 7, 9, 11, 12, 14, 17, 18, 19, 21):
+            assert info_page[row * 40:(row + 1) * 40] == b" " * 40
+        help_back = run_emulator(
+            build / "p2000t-emulator", monitor, temp / "help-back.bin",
+            650, True, auto_keys="H,2,1",
+        )
+        assert help_back == expected_help
 
         help_pages = temp / "help-pages.txt"
         restored = run_emulator(
@@ -564,6 +644,31 @@ def test_cartridge_end_to_end() -> None:
         assert auto_pages.read_text().splitlines()[:3] == ["100", "100", "101"]
         assert automatic[35] == ord("V")
 
+        for pause_key in ("A", "L"):
+            held_pages = temp / f"held-{pause_key}-pages.txt"
+            held_fetches = temp / f"held-{pause_key}-fetches.bin"
+            held = run_emulator(
+                build / "p2000t-emulator", monitor,
+                temp / f"held-{pause_key}.bin", 1900, True,
+                pages=held_pages, fetches=held_fetches,
+                auto_keys=f"V,{pause_key}", repeat_fixture_subpage=True,
+            )
+            assert held_pages.read_text().splitlines() == ["100"], \
+                f"{pause_key} let autorun replace the held page"
+            assert held_fetches.read_bytes() == bytes((0,))
+            assert held[35] == ord("V")  # Autorun remains selected but held.
+            assert held[39] == ord("A")
+
+        resumed_auto_pages = temp / "resumed-auto-pages.txt"
+        run_emulator(
+            build / "p2000t-emulator", monitor, temp / "resumed-auto.bin",
+            1900, True, pages=resumed_auto_pages, auto_keys="V,L,L",
+            repeat_fixture_subpage=True,
+        )
+        assert resumed_auto_pages.read_text().splitlines()[:3] == [
+            "100", "100", "101",
+        ]
+
         auto_skip_pages = temp / "auto-skip-pages.txt"
         run_emulator(
             build / "p2000t-emulator",
@@ -632,6 +737,8 @@ def test_cartridge_end_to_end() -> None:
             firmware_fetch_timeout=False,
         )
         assert b"FOUTCODE: 81" in fallback_timeout
+        assert b"STOP: BRON" in fallback_timeout
+        assert b"v0.5.0" in fallback_timeout[23 * 40:]
         assert b"FOUT: TIMEOUT" in fallback_timeout
 
         wifi_return = run_emulator(

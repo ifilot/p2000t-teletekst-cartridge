@@ -1,6 +1,6 @@
 # P2000T slot-1 Teletekst cartridge
 
-The `cartridge-c` tree builds the project's sole 16 KiB slot-1 ROM. It starts
+The `src` tree builds the project's sole 16 KiB slot-1 ROM. It starts
 at `0x1010`, communicates with the slot-2 Pico interface at ports `0x40`
 through `0x42`, and writes directly to the P2000T video RAM at `0x5000`.
 
@@ -71,7 +71,8 @@ Backspace edits an unfinished number, `START`/`I` returns to page 100,
 `P`/left and `N`/right follow previous/next metadata, and `STOP` returns to
 source selection. Subpages advance automatically every ten seconds and wrap
 to the default first subpage; `<`/`>` move to the previous/next subpage, `A`
-pauses/resumes that sequence, and `S` selects a subpage manually. `R`/`?`
+pauses/resumes that sequence (`L` also toggles looping), and `S` selects a
+subpage manually. `R`/`?`
 reveals concealed text, `Z` cycles normal and both
 half-page zoom modes, `H` shows and dismisses the help page without refetching,
 `V` enables automatic next-page navigation, and `W` returns to Wi-Fi setup.
@@ -100,12 +101,25 @@ packed-byte stack ABI:
 make -C src
 ```
 
-This produces `src/p2wp-cartridge.bin`. To test the runtime, keyboard shim,
-viewer, and P2WP/2–7 negotiation in the emulator, run:
+This produces `build/p2wp-cartridge.bin`. To test the runtime, keyboard shim,
+viewer, and P2WP/2–7 negotiation in the emulator, install
+`emulator/tests/requirements.txt` and run:
 
 ```sh
 make -C src smoke
 ```
+
+Startup redirects the monitor status pointer at `0x6014` to the hidden video
+columns at `0x5028`. The monitor's Shift/lock indicator otherwise writes over
+column 15 of the top row, corrupting the source-menu mosaic or clock. Its
+additional model-M attribute write is also kept outside the visible columns.
+The help page uses native SAA5050 left/right arrow glyphs (`0x5B`/`0x5D`).
+Press `2` from help to show compilation information and the GitHub address;
+press `1` to return to the controls, or another key to leave help. Build date
+and time are generated in the Europe/Amsterdam timezone, including automatic
+daylight-saving adjustment and a CET/CEST label. The build host needs Python's
+timezone database (system tzdata or the Python tzdata package).
+The 11-byte ROM name is `P2K-TELETXT`.
 
 Every C ROM build reports code/read-only-data bytes, initialized-data bytes,
 and the remaining padding capacity in the 16 KiB cartridge. The generated ROM
@@ -119,7 +133,8 @@ machines remain in C for maintainability. `make -C src lint` verifies Google
 C formatting, readable multi-line Doxygen block layout, and all documentation
 headers.
 
-The generated map, symbols and listing are placed in `src/build-c`. The ROM
+The generated map and intermediate binaries are placed in `build/cartridge`.
+The ROM is placed in `build/p2wp-cartridge.bin`. The ROM
 builder appends Z88DK's initialized-data image after code and read-only data so
 the CRT can copy it to RAM during startup. ROM code starts at `0x1000`,
 execution starts at `0x1010`, mutable sections start at `0x7000`, and the stack
@@ -209,7 +224,9 @@ If the selected API identifies another subpage, the cartridge retrieves it
 automatically after ten seconds and continues following the subpage sequence.
 After the last subpage reports no successor, an active loop requests subpage
 zero and returns to the first subpage. Pausing suppresses this wrap as well as
-ordinary advances; pressing `A` again resumes with a fresh ten-second interval.
+ordinary advances; pressing `L` or `A` resumes with a fresh ten-second interval.
+Pausing also holds automatic next-page mode: its setting remains enabled,
+but it cannot replace the displayed page or subpage until you resume.
 A newly entered page always starts at its default first subpage.
 Pressing the dedicated P2000T `STOP` key returns to the source-selection
 screen without reconnecting Wi-Fi. After choosing a new source, the cartridge
@@ -224,12 +241,12 @@ next-page mode: every ten seconds it follows subpages first, then advances to
 the advertised next page (or page 100 when none exists). Invalid, oversized,
 missing, or HTTP-error pages are skipped numerically; network failures retry
 the same page. A failure on page 100 remains visible and stops auto-page mode.
-`W` returns to Wi-Fi scanning, `A` pauses or resumes
+`W` returns to Wi-Fi scanning, `L` or `A` pauses or resumes
 automatic subpage cycling, `<`/`>` selects the previous/next subpage, and `S`
 selects a subpage. Enter either two digits,
 or one digit followed by Enter. Subpage `0`/`00` asks the API for its default
 first subpage. A manual subpage choice pauses cycling so it remains visible
-until `A` is pressed. While cycling is paused, an `A` appears in the top-right
+until `L` or `A` is pressed. While cycling is paused, an `A` appears in the top-right
 corner; resuming restores the header cell that it covered.
 On the source menu, `A` cycles the persistent 60-second auto-start setting
 through off, NOS, P2000T, TeletekstArchief.nl, and the custom server. Archive

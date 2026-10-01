@@ -618,5 +618,5 @@ Before an implementation is considered conforming, verify that it:
 
 - {doc}`custom-server` defines the HTTP endpoint consumed by custom source `2`.
 - {doc}`basic` implements a portable link diagnostic in P2000T BASIC.
-- The production cartridge under `src/cartridge-c` is the reference host
+- The production cartridge under `src` is the reference host
   implementation.

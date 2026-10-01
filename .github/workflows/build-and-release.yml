@@ -86,7 +86,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: p2wp-cartridge
-          path: src/p2wp-cartridge.bin
+          path: build/p2wp-cartridge.bin
           if-no-files-found: error
 
   firmware:

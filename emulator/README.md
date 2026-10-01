@@ -24,7 +24,7 @@ emulator/run
 ```
 
 From the repository root, `make run` performs both steps and starts the
-emulator with the cartridge (`src/p2wp-cartridge.bin`). Extra emulator options
+emulator with the cartridge (`build/p2wp-cartridge.bin`). Extra emulator options
 go in `ARGS`, and `EMUFLAGS` replaces the default `--live` network mode:
 
 ```sh
@@ -72,7 +72,7 @@ For a deterministic custom-source boot from the repository root, run:
 
 ```sh
 emulator/build/p2000t-emulator \
-  --monitor /path/to/P2000ROM.bin --cartridge src/p2wp-cartridge.bin \
+  --monitor /path/to/P2000ROM.bin --cartridge build/p2wp-cartridge.bin \
   --font emulator/assets/Default.fnt \
   --fixture emulator/tests/fixtures/nos-100.json \
   --headless --auto --auto-source 0 --custom-server http://terra:8080 \

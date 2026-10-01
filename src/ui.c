@@ -9,8 +9,10 @@
 
 #include "ui.h"
 
+#include "build_info.h"
 #include "lz4_z80.h"
 #include "platform.h"
+#include "ui_screens.h"
 #include "version.h"
 
 enum {
@@ -182,6 +184,21 @@ void ui_rule(uint8_t row) {
 /* Public API contract: see ui.h. */
 void ui_footer(void) {
   ui_title(23u, "P2000T Teletekst Cartridge     v" P2WP_CARTRIDGE_VERSION);
+}
+
+/* Public API contract: see ui.h. */
+void ui_build_info(void) {
+  lz4_decompress(build_info_lz4, opening_screen, sizeof(build_info_lz4));
+  platform_present_screen(opening_screen);
+  platform_write_text(10u, 3u, P2WP_BUILD_TIMESTAMP);
+  ui_footer();
+}
+
+/* Public API contract: see ui.h. */
+void ui_save_prompt(void) {
+  lz4_decompress(save_prompt_lz4, opening_screen, sizeof(save_prompt_lz4));
+  platform_present_screen(opening_screen);
+  ui_footer();
 }
 
 /* Public API contract: see ui.h. */

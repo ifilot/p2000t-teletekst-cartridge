@@ -10,8 +10,6 @@ compile_commands.json
 *.lab
 *.lis
 *.sym
-/src/*.bin
-/src/build-c/
 
 # Native protocol-test executable
 firmware/tests/p2wp-test

@@ -309,8 +309,7 @@ static uint8_t connect_selected(p2wp_session_t *s, uint8_t index) {
 static void offer_save(p2wp_session_t *s) {
   uint8_t payload[1 + MAX_PASSWORD], n, key;
   p2wp_response_t r;
-  platform_clear_screen();
-  platform_write_text(6, 0, "WIFI-PROFIEL BEWAREN? J/N");
+  ui_save_prompt();
   do {
     key = platform_read_ascii();
     key = platform_lower_ascii(key);
@@ -318,13 +317,13 @@ static void offer_save(p2wp_session_t *s) {
   if (key == 'n') return;
   payload[0] = password_length;
   for (n = 0; n != password_length; ++n) payload[1u + n] = password[n];
-  platform_write_text(8, 0, "PROFIEL VERSLEUTELEN...");
+  ui_action(16u, "PROFIEL VERSLEUTELEN...");
   if (request_ok(s, PROFILE_SAVE, payload, (uint16_t)(1u + password_length),
                  &r) &&
       r.payload_length == 0u && poll_profile(s))
-    platform_write_text(10, 0, "WIFI-PROFIEL BEWAARD");
+    ui_action(16u, "WIFI-PROFIEL BEWAARD");
   else
-    platform_write_text(10, 0, "OPSLAAN MISLUKT");
+    ui_action(16u, "OPSLAAN MISLUKT");
 }
 
 /**

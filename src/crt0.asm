@@ -42,15 +42,22 @@ org CRT_ORG_CODE
 defb $5e
 defw 0
 defw 0
-defm "P2WP C DEV "
+defm "P2K-TELETXT"
 
 ; @brief Initializes the C runtime and transfers control to main().
 ; @return Does not return; main() ultimately enters platform_halt().
 start:
+    di
     INCLUDE "crt/classic/crt_init_sp.inc"
     call crt0_init
     INCLUDE "crt/classic/crt_init_atexit.inc"
     INCLUDE "crt/classic/crt_init_heap.inc"
+    ; The monitor writes Shift/lock status at (0x6014)+1, and an
+    ; attribute byte 0x800 bytes above it. Keep both writes outside
+    ; the visible 40 columns of the 80-byte video row stride.
+    ; On the T, the attribute address can alias the same video RAM.
+    ld hl,$5028
+    ld ($6014),hl
     ei
     call _main
 
