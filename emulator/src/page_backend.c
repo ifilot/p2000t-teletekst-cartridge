@@ -31,7 +31,8 @@ unsigned char page_backend_fetch(void *argument,unsigned char source,
     struct page_backend *backend=argument; struct buffer body={0};
     unsigned char error=P2WP_TELETEKST_ERROR_INVALID_DATA;
     char url[224];
-    if(source==P2WP_TELETEKST_SOURCE_CUSTOM){
+    if(source==P2WP_TELETEKST_SOURCE_CUSTOM ||
+       source==P2WP_TELETEKST_SOURCE_INTERNATIONAL){
         custom_endpoint_t endpoint;char path[CUSTOM_ENDPOINT_REQUEST_PATH_MAX];
         if(!custom_url||!custom_endpoint_parse(custom_url,strlen(custom_url),&endpoint)||
            !custom_endpoint_page_path(&endpoint,page,subpage,path,sizeof(path)))

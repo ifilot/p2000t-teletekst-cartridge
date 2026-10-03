@@ -24,7 +24,7 @@ Teletekst project:
 
 - `src/` is the 16 KiB slot-1 cartridge client.
 - `firmware/` is the Raspberry Pi Pico W firmware for the slot-2 interface.
-- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2–7 link protocol
+- [`docs/protocol.md`](docs/protocol.md) defines the P2WP/2–8 link protocol
   between them.
 - [`docs/custom-server.md`](docs/custom-server.md) gives the small HTTP/JSON
   contract needed to host your own pages.
@@ -127,11 +127,27 @@ The printable enclosure and label models are available in [`enclosure/`](enclosu
 
 ## Documentation
 
-The source menu offers NOS, P2000T Teletekst, TeletekstArchief.nl, and a custom
+The source menu offers NOS, P2000T Teletekst, TeletekstArchief.nl, international channels through PetsciiProxy, and a custom
 server. Press `A` on that menu to choose which source should start after the
 opening screen has been left untouched for 60 seconds; cycle to `UIT` to disable
 auto-start. The opening prompt shows the remaining `AUTO-MODE` seconds beside
 `DRUK OP EEN TOETS`. An automatic start also enables automatic next-page mode.
+
+Choose **1 - NOS TELETEKST** for `https://teletekst-data.nos.nl`. For example,
+page 101 is available at `https://teletekst-data.nos.nl/json/101-0`; the NOS
+source already uses this service, so no custom server URL is needed.
+
+Choose **4 - PETSCIIPROXY.NL** for the channels at
+[`http://petsciiproxy.nl:8080`](http://petsciiproxy.nl:8080). Use `P`/`N` or the
+arrow keys to browse four lists, `1`–`9` to select a channel, and `STOP` to
+return. The 35 presets include ARD, ZDF, ORF, Ceefax, Teefax, Nordic and Swiss
+services, and community channels. This requires updated Pico firmware supporting
+P2WP/8. Channel selection lasts for the session; the saved custom URL and
+autostart choice are preserved. Availability depends on the upstream service;
+MTVA is omitted because upstream lists it as offline. Accented letters use
+Viewdata fallbacks where the P2000T character set cannot display them.
+The cartridge date/time overlay is disabled for these channels so their own
+header clock remains visible. This default is configured in the cartridge ROM.
 
 ### Keymap
 
@@ -156,7 +172,7 @@ page and subpage fixed until you resume.
 | Page | `H` | Open the on-screen help page; any key returns |
 | Page | `W` | Return to Wi-Fi setup |
 | Page | `STOP` | Return to source selection |
-| Source menu | `1`, `2`, `3`, or `0` | Choose NOS, P2000T, P2WP/7 Archive, or a custom server |
+| Source menu | `1`, `2`, `3`, `4`, or `0` | Choose NOS, P2000T, Archive, international channels, or a custom server |
 | Source menu | `A` | Cycle the persistent 60-second auto-start source |
 | Source menu | `H` | Open the on-screen help page |
 | Input dialog | Backspace | Delete the last character or digit |
@@ -176,7 +192,7 @@ server](docs/custom-server.md) for the required routes and response fields.
 > you trust. The built-in services continue to use verified HTTPS. Archive
 > requires P2WP/7 so it always uses the dedicated, verified transport.
 
-[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–7 interface
+[`docs/protocol.md`](docs/protocol.md) is the canonical P2WP/2–8 interface
 specification. The Sphinx documentation also includes a
 [P2000T BASIC](docs/basic.rst) client guide.
 

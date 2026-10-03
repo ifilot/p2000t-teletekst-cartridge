@@ -23,6 +23,7 @@ enum {
   SOURCE_P2000T = 1,
   SOURCE_CUSTOM = 2,
   SOURCE_ARCHIVE = 3,
+  SOURCE_INTERNATIONAL = 4,
   MAX_CUSTOM_URL = 96,
   SCREEN_SIZE = 960,
   CHUNK_SIZE = 240,
@@ -31,6 +32,12 @@ enum {
   EMULATOR_STOP_KEY = 0x58,
   AUTOSTART_DISABLED = 0xff,
 };
+
+/** ROM policy for the date/time overlay; providers may draw their own clock. */
+#define CLOCK_OVERLAY_ENABLED 1
+/** Enable the overlay on international channels; disabled to preserve headers.
+ */
+#define CLOCK_OVERLAY_INTERNATIONAL 0
 
 /**
  * @brief Mutable navigation, rendering, clock, and error state for the viewer.
@@ -77,6 +84,8 @@ static uint8_t fetch_request[5u + MAX_CUSTOM_URL];
 static uint8_t custom_url[MAX_CUSTOM_URL];
 /** Number of populated bytes in custom_url. */
 static uint8_t custom_url_length;
+/** Selected international channel, or 0xff for the catalogue. */
+static uint8_t international_channel = 0xffu;
 /** Saved source-menu digit, or AUTOSTART_DISABLED. */
 static uint8_t auto_start_source = AUTOSTART_DISABLED;
 /** Video row temporarily replaced by the fetch indicator. */
@@ -113,41 +122,46 @@ static const uint8_t error_text_lz4[] = {
     0x20u, 0xbbu, 0x00u, 0x06u, 0x04u, 0x01u, 0x07u, 0x55u, 0x00u, 0x06u, 0xfeu,
     0x00u, 0x01u, 0xe7u, 0x00u, 0x00u};
 
-/** Raw LZ4 block for the complete 24x40 SAA5050 help screen. */
-static const uint8_t help_screen_lz4[] =
-    "\xff\x0c\x04\x1d\x07\x20\x50\x32\x30\x30\x30\x54\x20\x54\x45"
-    "\x4c\x45\x54\x45\x4b\x53\x54\x20\x20\x48\x55\x4c\x50\x20\x01"
-    "\x00\x22\x8f\x03\x20\x50\x41\x47\x49\x4e\x41\x3d\x00\x0d\xff"
-    "\x01\x06\x20\x31\x30\x30\x2d\x38\x39\x39\x07\x20\x20\x4b\x49"
-    "\x45\x53\x37\x00\x05\xf4\x03\x06\x20\x53\x54\x41\x52\x54\x20"
-    "\x2f\x20\x49\x07\x20\x49\x4e\x44\x45\x58\x2a\x00\x37\x31\x30"
-    "\x30\x65\x00\xf0\x07\x06\x5b\x20\x2f\x20\x50\x07\x20\x56\x4f"
-    "\x52\x49\x47\x45\x20\x20\x06\x5d\x20\x2f\x20\x4e\x10\x00\x64"
-    "\x4c\x47\x45\x4e\x44\x45\x2b\x00\x96\x06\x20\x56\x07\x20\x41"
-    "\x55\x54\x4f\x1a\x00\x0f\xb1\x00\x13\x0f\x02\x00\x04\x52\x03"
-    "\x20\x53\x55\x42\x42\x00\x2f\x27\x53\x24\x00\x04\x00\x02\x00"
-    "\x70\x06\x20\x3c\x20\x2f\x20\x3e\x91\x00\x01\xa1\x00\x16\x2f"
-    "\x80\x00\x00\x1f\x00\x05\x02\x00\x42\x06\x20\x53\x07\x11\x01"
-    "\x36\x45\x45\x4e\x5c\x00\x05\x20\x00\x04\x02\x00\xf4\x08\x06"
-    "\x20\x4c\x20\x2f\x20\x41\x07\x20\x4c\x55\x53\x53\x45\x4e\x20"
-    "\x41\x41\x4e\x2f\x55\x49\x54\x1f\x00\x05\x02\x00\x9b\x03\x20"
-    "\x57\x45\x45\x52\x47\x41\x56\x68\x00\x0c\x02\x00\xf2\x04\x06"
-    "\x20\x3f\x20\x2f\x20\x52\x07\x20\x56\x45\x52\x42\x4f\x52\x47"
-    "\x45\x4e\x20\x0c\x02\x5c\x54\x4f\x4e\x45\x4e\x2e\x00\x0f\x02"
-    "\x00\x0f\x11\x03\x49\x00\x6f\x49\x4e\x44\x49\x4e\x47\x2e\x00"
-    "\x09\x37\x06\x20\x57\xf0\x00\xf4\x03\x41\x4e\x44\x45\x52\x20"
-    "\x57\x49\x46\x49\x2d\x4e\x45\x54\x57\x45\x52\x4b\x3c\x00\x00"
-    "\x08\x02\x32\x4f\x50\x07\x22\x00\x16\x45\xac\x02\x3f\x42\x52"
-    "\x4f\x9e\x00\x20\x00\xa0\x00\x00\x3a\x00\x4f\x4b\x45\x55\x5a"
-    "\x19\x01\x0b\x10\x06\x64\x01\x00\x30\x02\x01\x87\x02\x00\x34"
-    "\x00\x60\x20\x57\x49\x4a\x5a\x49\x21\x01\x00\x48\x00\x04\x02"
-    "\x00\x42\x06\x20\x48\x07\x37\x03\x90\x56\x41\x4e\x41\x46\x20"
-    "\x44\x45\x20\x2d\x00\x0d\x61\x00\x00\x70\x03\x41\x44\x52\x55"
-    "\x4b\xdf\x01\xf2\x06\x54\x4f\x45\x54\x53\x20\x4f\x4d\x20\x54"
-    "\x45\x52\x55\x47\x20\x54\x45\x20\x47\x41\x41\x58\x00\x34\x04"
-    "\x1d\x07\x97\x03\xf0\x0e\x65\x6c\x65\x74\x65\x6b\x73\x74\x20"
-    "\x43\x61\x72\x74\x72\x69\x64\x67\x65\x20\x20\x20\x20\x20\x76"
-    "\x30\x2e\x35\x2e\x30";
+/** Raw LZ4 help screen; the current version footer is drawn separately. */
+static const uint8_t help_screen_lz4[] = {
+    0xffu, 0x0cu, 0x04u, 0x1du, 0x07u, 0x20u, 0x50u, 0x32u, 0x30u, 0x30u, 0x30u,
+    0x54u, 0x20u, 0x54u, 0x45u, 0x4cu, 0x45u, 0x54u, 0x45u, 0x4bu, 0x53u, 0x54u,
+    0x20u, 0x20u, 0x48u, 0x55u, 0x4cu, 0x50u, 0x20u, 0x01u, 0x00u, 0x22u, 0x8fu,
+    0x03u, 0x20u, 0x50u, 0x41u, 0x47u, 0x49u, 0x4eu, 0x41u, 0x28u, 0x00u, 0x0du,
+    0xfeu, 0x01u, 0x06u, 0x20u, 0x31u, 0x30u, 0x30u, 0x2du, 0x38u, 0x39u, 0x39u,
+    0x07u, 0x20u, 0x20u, 0x4bu, 0x49u, 0x45u, 0x53u, 0x37u, 0x00u, 0x04u, 0x28u,
+    0x00u, 0xf3u, 0x01u, 0x53u, 0x54u, 0x41u, 0x52u, 0x54u, 0x20u, 0x2fu, 0x20u,
+    0x49u, 0x07u, 0x20u, 0x49u, 0x4eu, 0x44u, 0x45u, 0x58u, 0x2au, 0x00u, 0x00u,
+    0x40u, 0x00u, 0x08u, 0x28u, 0x00u, 0xf0u, 0x06u, 0x5bu, 0x20u, 0x2fu, 0x20u,
+    0x50u, 0x07u, 0x20u, 0x56u, 0x4fu, 0x52u, 0x49u, 0x47u, 0x45u, 0x20u, 0x20u,
+    0x06u, 0x5du, 0x20u, 0x2fu, 0x20u, 0x4eu, 0x10u, 0x00u, 0x66u, 0x4cu, 0x47u,
+    0x45u, 0x4eu, 0x44u, 0x45u, 0x50u, 0x00u, 0x76u, 0x56u, 0x07u, 0x20u, 0x41u,
+    0x55u, 0x54u, 0x4fu, 0x1au, 0x00u, 0x0eu, 0xb1u, 0x00u, 0x0fu, 0xf0u, 0x00u,
+    0x1au, 0x32u, 0x53u, 0x55u, 0x42u, 0x42u, 0x00u, 0x2fu, 0x27u, 0x53u, 0xf0u,
+    0x00u, 0x0au, 0x55u, 0x3cu, 0x20u, 0x2fu, 0x20u, 0x3eu, 0xa1u, 0x00u, 0x1du,
+    0x2fu, 0x9au, 0x00u, 0x05u, 0xf0u, 0x00u, 0x12u, 0x07u, 0x11u, 0x01u, 0x36u,
+    0x45u, 0x45u, 0x4eu, 0x5cu, 0x00u, 0x1eu, 0x20u, 0x50u, 0x00u, 0xfeu, 0x07u,
+    0x4cu, 0x20u, 0x2fu, 0x20u, 0x41u, 0x07u, 0x20u, 0x4cu, 0x55u, 0x53u, 0x53u,
+    0x45u, 0x4eu, 0x20u, 0x41u, 0x41u, 0x4eu, 0x2fu, 0x55u, 0x49u, 0x54u, 0x20u,
+    0xa0u, 0x00u, 0x8fu, 0x57u, 0x45u, 0x45u, 0x52u, 0x47u, 0x41u, 0x56u, 0x45u,
+    0x90u, 0x01u, 0x0du, 0xf2u, 0x02u, 0x3fu, 0x20u, 0x2fu, 0x20u, 0x52u, 0x07u,
+    0x20u, 0x56u, 0x45u, 0x52u, 0x42u, 0x4fu, 0x52u, 0x47u, 0x45u, 0x4eu, 0x20u,
+    0x0cu, 0x02u, 0x5fu, 0x54u, 0x4fu, 0x4eu, 0x45u, 0x4eu, 0x18u, 0x01u, 0x21u,
+    0x00u, 0x49u, 0x00u, 0x6fu, 0x49u, 0x4eu, 0x44u, 0x49u, 0x4eu, 0x47u, 0x78u,
+    0x00u, 0x0bu, 0x17u, 0x57u, 0xf0u, 0x00u, 0xf8u, 0x03u, 0x41u, 0x4eu, 0x44u,
+    0x45u, 0x52u, 0x20u, 0x57u, 0x49u, 0x46u, 0x49u, 0x2du, 0x4eu, 0x45u, 0x54u,
+    0x57u, 0x45u, 0x52u, 0x4bu, 0x08u, 0x02u, 0x32u, 0x4fu, 0x50u, 0x07u, 0x22u,
+    0x00u, 0x16u, 0x45u, 0xacu, 0x02u, 0x4fu, 0x42u, 0x52u, 0x4fu, 0x4eu, 0xb8u,
+    0x01u, 0x23u, 0x00u, 0x3au, 0x00u, 0x5fu, 0x4bu, 0x45u, 0x55u, 0x5au, 0x45u,
+    0x18u, 0x01u, 0x0cu, 0x12u, 0x41u, 0x30u, 0x02u, 0x01u, 0x87u, 0x02u, 0x01u,
+    0x6eu, 0x00u, 0x50u, 0x57u, 0x49u, 0x4au, 0x5au, 0x49u, 0x21u, 0x01u, 0x0au,
+    0x28u, 0x00u, 0x22u, 0x48u, 0x07u, 0x37u, 0x03u, 0x8fu, 0x56u, 0x41u, 0x4eu,
+    0x41u, 0x46u, 0x20u, 0x44u, 0x45u, 0x61u, 0x00u, 0x03u, 0x00u, 0x70u, 0x03u,
+    0x41u, 0x44u, 0x52u, 0x55u, 0x4bu, 0xefu, 0x00u, 0xffu, 0x06u, 0x54u, 0x4fu,
+    0x45u, 0x54u, 0x53u, 0x20u, 0x4fu, 0x4du, 0x20u, 0x54u, 0x45u, 0x52u, 0x55u,
+    0x47u, 0x20u, 0x54u, 0x45u, 0x20u, 0x47u, 0x41u, 0x41u, 0xcfu, 0x00u, 0x16u,
+    0x50u, 0x20u, 0x20u, 0x20u, 0x20u, 0x20u,
+};
 
 /** Six animation frames for the top-left page-fetch indicator. */
 static const uint8_t indicator_frames[6][4] = {
@@ -165,8 +179,7 @@ static void present_page(const viewer_state_t *state);
 static void show_help(const viewer_state_t *state) {
   uint8_t key;
 help_controls:
-  lz4_decompress(help_screen_lz4, display_screen,
-                 (uint16_t)(sizeof(help_screen_lz4) - 1u));
+  lz4_decompress(help_screen_lz4, display_screen, sizeof(help_screen_lz4));
   platform_present_screen(display_screen);
   ui_footer();
   ui_action(22u, "2: INFO   ANDERE TOETS: TERUG");
@@ -244,21 +257,20 @@ static void save_settings(p2wp_session_t *session) {
  * @param[in] session Active protocol session.
  */
 static void show_auto_start(p2wp_session_t *session) {
-  const char *text = "\006A\007 AUTOSTART VEREIST P2WP/6";
-  if (session->version >= 6u) {
-    if (auto_start_source == AUTOSTART_DISABLED)
-      text = "\006A\007 AUTOSTART NA 60S: UIT";
-    else if (auto_start_source == 0u)
-      text = "\006A\007 AUTOSTART NA 60S: EIGEN";
-    else if (auto_start_source == 1u)
-      text = "\006A\007 AUTOSTART NA 60S: NOS";
-    else if (auto_start_source == 2u)
-      text = "\006A\007 AUTOSTART NA 60S: P2000T";
-    else
-      text = "\006A\007 AUTOSTART NA 60S: ARCHIEF";
-  }
-  platform_clear_line(20u);
-  platform_write_text(20u, 0u, text);
+  const char *text = "UIT";
+  if (session->version < 6u)
+    text = "VEREIST P2WP/6";
+  else if (auto_start_source == 0u)
+    text = "EIGEN";
+  else if (auto_start_source == 1u)
+    text = "NOS";
+  else if (auto_start_source == 2u)
+    text = "P2000T";
+  else if (auto_start_source == 3u)
+    text = "ARCHIEF";
+  platform_clear_line(21u);
+  platform_write_text(21u, 0u, "\006A\007 AUTOSTART NA 60S: ");
+  platform_write_text(21u, 22u, text);
 }
 
 /**
@@ -288,6 +300,7 @@ static uint8_t select_menu_source(p2wp_session_t *session, uint8_t menu,
     return 1u;
   }
   if (menu == 0u && session->version >= 4u) {
+    international_channel = 0xffu;
     load_custom_url(session);
     if (custom_url_length != 0u) {
       *source = SOURCE_CUSTOM;
@@ -303,26 +316,14 @@ static uint8_t select_menu_source(p2wp_session_t *session, uint8_t menu,
  * @return One when a nonempty URL is accepted, or zero when cancelled.
  */
 static uint8_t choose_custom_url(p2wp_session_t *session) {
+  international_channel = 0xffu;
   uint8_t index;
   uint8_t key;
   uint8_t row = 9u;
   uint8_t column = 4u;
 
   load_custom_url(session);
-  platform_clear_screen();
-  ui_title(1u, " P2000T  EIGEN TELETEKSTSERVER");
-  ui_rule(2u);
-  ui_panel(3u, " BASISADRES VAN UW EIGEN SERVER");
-  ui_panel(4u, " PICO ONTHOUDT ALLEEN EEN NIEUW ADRES");
-  ui_panel(5u, " VOORBEELD  http://terra:8080");
-  ui_panel(6u, " HTTPS: CERTIFICAATCONTROLE STAAT UIT");
-  ui_action(8u, " SERVERADRES                 MAX. 96");
-  ui_panel(9u, " ");
-  ui_panel(10u, " ");
-  ui_panel(11u, " ");
-  ui_panel(13u, " ENTER OPSLAAN BS WIS STOP TERUG");
-  ui_rule(22u);
-  ui_footer();
+  ui_custom_setup();
   for (index = 0u; index != custom_url_length; ++index) {
     platform_write_bytes(row, column, custom_url + index, 1u);
     if (++column == 36u) {
@@ -363,15 +364,50 @@ static uint8_t choose_custom_url(p2wp_session_t *session) {
   }
 }
 
+/** Fetch implementation shared by the viewer and the Pico-rendered picker. */
+static uint8_t fetch_page(p2wp_session_t *session, viewer_state_t *state);
+
+/**
+ * @brief Chooses a channel from the Pico-rendered international catalogue.
+ * @param[in,out] session Active session for catalogue fetches.
+ * @param[in,out] state Viewer workspace shared with catalogue rendering.
+ * @return One after selection, or zero after STOP cancellation or link failure.
+ */
+static uint8_t choose_international_channel(p2wp_session_t *session,
+                                            viewer_state_t *state) {
+  uint8_t key;
+  uint8_t first;
+  uint8_t group = 0u;
+  state->source = SOURCE_INTERNATIONAL;
+  state->page = 100u;
+  international_channel = 0xffu;
+  for (;;) {
+    state->subpage = group;
+    if (!fetch_page(session, state)) return 0u;
+    key = platform_read_key();
+    if (key == P2000T_KEY_STOP || key == EMULATOR_STOP_KEY) return 0u;
+    key = platform_lower_ascii(platform_translate_key(key));
+    first = group * 9u;
+    if (key >= '1' && key <= '9' && first + key - '1' < 35u) {
+      international_channel = first + key - '1';
+      return 1u;
+    }
+    if ((key == 'n' || key == P2000T_KEY_RIGHT) && group < 3u) ++group;
+    if ((key == 'p' || key == P2000T_KEY_LEFT) && group != 0u) --group;
+  }
+}
+
 /**
  * @brief Shows the source menu or resolves a configured automatic source.
  * @param[in,out] session Active session; requests advance its sequence.
  * @param[in] use_autostart Whether the saved autostart source may be used.
  * @param[out] started_automatically Set when no menu interaction was needed.
+ * @param[in,out] state Viewer workspace shared with channel selection.
  * @return Selected wire source identifier.
  */
 static uint8_t choose_source(p2wp_session_t *session, uint8_t use_autostart,
-                             uint8_t *started_automatically) {
+                             uint8_t *started_automatically,
+                             viewer_state_t *state) {
   uint8_t key;
   uint8_t source;
   *started_automatically = 0u;
@@ -390,16 +426,22 @@ draw_menu:
                       session->version >= 7u
                           ? "\0063\007  TELETEKSTARCHIEF.NL"
                           : "\0063\007  ARCHIEF VEREIST P2WP/7");
-  platform_write_text(18u, 0u, "\0060\007  EIGEN SERVER");
+  platform_write_text(18u, 0u, "\0064\007  PETSCIIPROXY.NL (P2WP/8)");
+  platform_write_text(19u, 0u, "\0060\007  EIGEN SERVER");
   show_auto_start(session);
-  platform_write_text(21u, 0u, "\006H\007 HULP");
+  platform_write_text(22u, 0u, "\006H\007 HULP");
   ui_footer();
   for (;;) {
     key = platform_read_ascii();
     key = platform_lower_ascii(key);
-    if (key == '1' && select_menu_source(session, 1u, &source)) return source;
-    if (key == '2' && select_menu_source(session, 2u, &source)) return source;
-    if (key == '3' && select_menu_source(session, 3u, &source)) return source;
+    if (key >= '1' && key <= '3' &&
+        select_menu_source(session, key - '0', &source))
+      return source;
+    if (key == '4' && session->version >= 8u) {
+      if (choose_international_channel(session, state))
+        return SOURCE_INTERNATIONAL;
+      goto draw_menu;
+    }
     if (key == '0' && session->version >= 4u && choose_custom_url(session))
       return SOURCE_CUSTOM;
     if (key == 'a' && session->version >= 6u) {
@@ -601,6 +643,11 @@ static uint8_t fetch_page(p2wp_session_t *session, viewer_state_t *state) {
       fetch_request[5u + chunk] = custom_url[chunk];
     request_length = (uint8_t)(5u + custom_url_length);
   }
+  if (state->source == SOURCE_INTERNATIONAL) {
+    fetch_request[4] = international_channel;
+    request_length = 5u;
+  }
+
   result = p2wp_request(session, P2WP_TYPE_TELETEKST_FETCH_START, fetch_request,
                         request_length, &reply);
   if (result != P2WP_OK) return request_failure(state, result, &reply);
@@ -633,6 +680,11 @@ static uint8_t fetch_page(p2wp_session_t *session, viewer_state_t *state) {
   state->next_subpage = reply.payload[4];
   if (session->version >= 3u) {
     state->clock_valid = reply.payload[8];
+#if !CLOCK_OVERLAY_ENABLED
+    state->clock_valid = 0u;
+#elif !CLOCK_OVERLAY_INTERNATIONAL
+    state->clock_valid &= state->source != SOURCE_INTERNATIONAL;
+#endif
     state->hour = reply.payload[5];
     state->minute = reply.payload[6];
     state->second = reply.payload[7];
@@ -1044,9 +1096,6 @@ void teletekst_start(p2wp_session_t *session, uint8_t opening_timed_out) {
   uint8_t started_automatically;
   load_settings(session);
   for (;;) {
-    state.source =
-        choose_source(session, opening_timed_out, &started_automatically);
-    opening_timed_out = 0u;
     state.page = 100u;
     state.subpage = 0u;
     state.next_subpage = 0u;
@@ -1055,8 +1104,14 @@ void teletekst_start(p2wp_session_t *session, uint8_t opening_timed_out) {
     state.rotation_paused = 0u;
     state.cycle_started = 0u;
     state.reveal = 0u;
-    state.auto_page = started_automatically;
+    state.auto_page = 0u;
     state.auto_retry = 0u;
+    state.source = choose_source(session, opening_timed_out,
+                                 &started_automatically, &state);
+    opening_timed_out = 0u;
+    state.page = 100u;
+    state.subpage = 0u;
+    state.auto_page = started_automatically;
     if (!fetch_page(session, &state)) show_fetch_error(&state);
     if (viewer_loop(session, &state) != 0u) {
       (void)wifi_reconfigure(session);

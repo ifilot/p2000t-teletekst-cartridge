@@ -28,10 +28,12 @@ typedef struct {
 } teletekst_metadata_t;
 
 /**
- * @brief Decode a compatible JSON response and its navigation metadata.
+ * @brief Decode NOS JSON or PetsciiProxy raw Teletext and navigation metadata.
  *
  * `prevPage` and `nextPage` are optional. Missing or empty values become zero.
- * The legacy `nextSubPage` field remains required for API compatibility.
+ * The legacy `nextSubPage` field remains required for JSON API compatibility.
+ * PetsciiProxy uses optional pn= navigation lines and exactly 1000 raw bytes
+ * between <pre> and </pre>; its final Fastext row is omitted.
  */
 bool teletekst_decode_json(
     const char *json,

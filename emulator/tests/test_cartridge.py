@@ -32,6 +32,7 @@ def run_emulator(
     resume_frame: int | None = None,
     fixture: Path | None = None,
     auto_source: int | None = None,
+    auto_channel: int | None = None,
     custom_server: str | None = None,
     flash: Path | None = None,
     auto_source_cycles: int = 0,
@@ -74,6 +75,8 @@ def run_emulator(
         command.append("--clock-invalid")
     if auto_source is not None:
         command.extend(("--auto-source", str(auto_source)))
+    if auto_channel is not None:
+        command.extend(("--auto-channel", str(auto_channel)))
     if custom_server is not None:
         command.extend(("--custom-server", custom_server))
     if flash is not None:
@@ -142,6 +145,47 @@ def test_cartridge_end_to_end() -> None:
             check=True,
         )
 
+        # Exercise each picker page, including its short final page, through
+        # real cartridge execution and the production raw Teletext decoder.
+        for channel in (0, 9, 18, 27, 34):
+            international = run_emulator(
+                build / "p2000t-emulator", monitor,
+                temp / f"channel-{channel}.bin", 650, True,
+                auto_source=4, auto_channel=channel,
+                fixture=EMU / "tests" / "fixtures" / "petscii-100.txt",
+            )
+            assert b"PetsciiProxy fixture" in international
+            # Keep the provider header intact across fetches and live clock ticks.
+            assert international[:40] == b"PROVIDER 03 OCT 2026 21:00:00".ljust(40)
+
+        cancelled_picker = run_emulator(
+            build / "p2000t-emulator", monitor, temp / "picker-cancel.bin",
+            650, True, auto_source=4,
+            fixture=EMU / "tests" / "fixtures" / "petscii-100.txt",
+            auto_keys="STOP,4,N,STOP",
+        )
+        assert b"KIES UW TELETEKSTBRON" in cancelled_picker
+        old_picker = run_emulator(
+            build / "p2000t-emulator", monitor, temp / "picker-old.bin",
+            650, True, auto_source=4, protocol_version=7,
+        )
+        assert b"KIES UW TELETEKSTBRON" in old_picker
+        assert b"P2WP/8" in old_picker
+
+        preserved_flash = temp / "international-flash.bin"
+        run_emulator(
+            build / "p2000t-emulator", monitor, temp / "custom-seed.bin",
+            650, True, auto_source=0, custom_server="http://terra:8080",
+            flash=preserved_flash,
+        )
+        saved_custom = preserved_flash.read_bytes()
+        run_emulator(
+            build / "p2000t-emulator", monitor, temp / "preserved-custom.bin",
+            650, True, auto_source=4, auto_channel=3, flash=preserved_flash,
+            fixture=EMU / "tests" / "fixtures" / "petscii-100.txt",
+        )
+        assert preserved_flash.read_bytes() == saved_custom
+
         before = run_emulator(
             build / "p2000t-emulator", monitor, temp / "before.bin", 10, False
         )
@@ -206,8 +250,10 @@ def test_cartridge_end_to_end() -> None:
         )
         assert b"KIES UW TELETEKSTBRON" in source_menu[14 * 40 : 15 * 40]
         assert b"0\x07  EIGEN SERVER" in source_menu
-        assert b"A\x07 AUTOSTART NA 60S: UIT" in source_menu[20 * 40 : 21 * 40]
-        assert b"H\x07 HULP" in source_menu[21 * 40 : 22 * 40]
+        assert b"4\x07  PETSCIIPROXY.NL (P2WP/8)" in source_menu[18 * 40 : 19 * 40]
+        assert source_menu[20 * 40 : 21 * 40] == b" " * 40
+        assert b"A\x07 AUTOSTART NA 60S: UIT" in source_menu[21 * 40 : 22 * 40]
+        assert b"H\x07 HULP" in source_menu[22 * 40 : 23 * 40]
         shifted_menu = run_emulator(
             build / "p2000t-emulator", monitor, temp / "shifted-menu.bin",
             650, True, auto_keys="STOP,LSHIFT,RSHIFT",

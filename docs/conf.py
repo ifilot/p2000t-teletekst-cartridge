@@ -18,7 +18,7 @@ nitpicky = True
 myst_heading_anchors = 3
 
 html_theme = "sphinx_rtd_theme"
-html_title = "P2WP/2–7 Interface Protocol"
+html_title = "P2WP/2–8 Interface Protocol"
 html_show_sourcelink = False
 
 html_theme_options = {

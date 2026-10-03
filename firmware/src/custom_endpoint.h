@@ -33,4 +33,13 @@ bool custom_endpoint_page_path(
     size_t capacity
 );
 
+#define PETSCII_CHANNEL_COUNT 35u
+#define PETSCII_CATALOGUE 0xffu
+
+/** Resolve a predefined PetsciiProxy channel's base URL. */
+bool petscii_channel_url(uint8_t channel, char *url, size_t capacity);
+
+/** Render one of four catalogue screens for the P2000T. */
+bool petscii_catalogue(uint8_t group, uint8_t screen[960]);
+
 #endif

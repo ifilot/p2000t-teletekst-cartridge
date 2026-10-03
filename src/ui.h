@@ -67,4 +67,14 @@ void ui_build_info(void);
  */
 void ui_save_prompt(void);
 
+/**
+ * @brief Shows the static custom-server editor panels.
+ */
+void ui_custom_setup(void);
+
+/**
+ * @brief Shows the static Wi-Fi scanning panels.
+ */
+void ui_wifi_scan(void);
+
 #endif  // P2000T_UI_H_

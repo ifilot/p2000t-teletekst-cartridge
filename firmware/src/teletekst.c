@@ -1040,6 +1040,81 @@ bool teletekst_decode_nos_json(
     ) == TELETEKST_DECODE_OK;
 }
 
+/**
+ * @brief Decode bounded PetsciiProxy metadata and its 25-row raw Teletext block.
+ *
+ * Extended mosaics use bit 7; Latin-1 alpha characters use the existing
+ * Viewdata transliteration. The final Fastext row is omitted as with NOS.
+ */
+static bool decode_petscii(
+    const char *body, size_t length, uint16_t requested_page,
+    uint8_t screen[TELETEKST_SCREEN_SIZE], teletekst_metadata_t *metadata
+) {
+    const char *end = body + length;
+    const char *cursor = body;
+    teletekst_metadata_t parsed = {0};
+    while ((size_t)(end - cursor) >= 5u && memcmp(cursor, "<pre>", 5u) != 0) {
+        const char *line_end = memchr(cursor, '\n', (size_t)(end - cursor));
+        if (line_end == NULL) return false;
+        if ((size_t)(line_end - cursor) >= 5u &&
+            memcmp(cursor, "pn=", 3u) == 0) {
+            const char *number = cursor + 5u;
+            uint16_t page = 0u;
+            uint16_t subpage = 0u;
+            bool previous = memcmp(cursor + 3u, "p_", 2u) == 0;
+            bool following = memcmp(cursor + 3u, "n_", 2u) == 0;
+            bool next_subpage = memcmp(cursor + 3u, "ns", 2u) == 0;
+            if (previous || following || next_subpage) {
+                /* Several services advertise empty previous/next page links. */
+                if (number == line_end) {
+                    cursor = line_end + 1u;
+                    continue;
+                }
+                if (line_end - number < 5 || number[3] != '-') return false;
+                for (size_t i = 0u; i < 3u; ++i) {
+                    if (number[i] < '0' || number[i] > '9') return false;
+                    page = page * 10u + (uint16_t)(number[i] - '0');
+                }
+                number += 4u;
+                if (line_end - number > 2) return false;
+                while (number < line_end) {
+                    if (*number < '0' || *number > '9') return false;
+                    subpage = subpage * 10u + (uint16_t)(*number++ - '0');
+                }
+                if (page < 100u || page > 899u || subpage > 99u) return false;
+                if (previous) parsed.previous_page = page;
+                if (following) parsed.next_page = page;
+                if (next_subpage) {
+                    if (page != requested_page) return false;
+                    parsed.next_subpage = (uint8_t)subpage;
+                }
+            }
+        }
+        cursor = line_end + 1u;
+    }
+    const size_t raw_size = TELETEKST_COLUMNS * TELETEKST_SOURCE_ROWS;
+    if ((size_t)(end - cursor) != 5u + raw_size + 6u ||
+        memcmp(cursor, "<pre>", 5u) != 0 ||
+        memcmp(cursor + 5u + raw_size, "</pre>", 6u) != 0) return false;
+    cursor += 5u;
+    for (size_t row = 0u; row < TELETEKST_DISPLAY_ROWS; ++row) {
+        bool graphics = false;
+        for (size_t column = 0u; column < TELETEKST_COLUMNS; ++column) {
+            const size_t index = row * TELETEKST_COLUMNS + column;
+            uint8_t character = (uint8_t)cursor[index];
+            if (character <= 7u) graphics = false;
+            if (character >= 0x10u && character <= 0x17u) graphics = true;
+            if (character >= 0x80u) {
+                character = graphics ? (character & 0x7fu)
+                                     : transliterate(character);
+            }
+            screen[index] = character;
+        }
+    }
+    *metadata = parsed;
+    return true;
+}
+
 /** @copydoc teletekst_decode_json */
 bool teletekst_decode_json(
     const char *json,
@@ -1048,8 +1123,16 @@ bool teletekst_decode_json(
     uint8_t screen[TELETEKST_SCREEN_SIZE],
     teletekst_metadata_t *metadata
 ) {
-    if (metadata == NULL) {
+    if (metadata == NULL || json == NULL || screen == NULL ||
+        requested_page < 100u || requested_page > 899u) {
         return false;
+    }
+    if (json_length >= 3u && (memcmp(json, "pn=", 3u) == 0 ||
+        (json_length >= 5u && (memcmp(json, "<pre>", 5u) == 0 ||
+                              memcmp(json, "ftl=", 4u) == 0 ||
+                              memcmp(json, "lnk=", 4u) == 0 ||
+                              memcmp(json, "ct=", 3u) == 0)))) {
+        return decode_petscii(json, json_length, requested_page, screen, metadata);
     }
     teletekst_metadata_t parsed = {0};
     if (!teletekst_decode_nos_json(

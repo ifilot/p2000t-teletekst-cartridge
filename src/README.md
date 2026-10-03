@@ -102,7 +102,7 @@ make -C src
 ```
 
 This produces `build/p2wp-cartridge.bin`. To test the runtime, keyboard shim,
-viewer, and P2WP/2–7 negotiation in the emulator, install
+viewer, and P2WP/2–8 negotiation in the emulator, install
 `emulator/tests/requirements.txt` and run:
 
 ```sh
@@ -196,7 +196,7 @@ Initial `HELLO` negotiation and every later local-link transaction have a
 two-second overall timeout. A missing or unresponsive Pico W therefore shows a
 clear error instead of leaving the cartridge waiting indefinitely. Each
 transaction still makes up to three attempts within that deadline.
-The v0.5 cartridge advertises P2WP/2–7 and selects the newest revision shared
+The v0.5 cartridge advertises P2WP/2–8 and selects the newest revision shared
 with the Pico. P2WP/2 remains fully usable, but the cartridge displays a
 one-time compatibility warning recommending a Pico firmware update. A HELLO
 response with no common revision displays a dedicated protocol-incompatibility
@@ -205,9 +205,14 @@ screen instead of being reported as an Internet or server failure.
 The cartridge then starts an asynchronous connection and polls until the Pico
 has either acquired an IP address or reported a specific failure. Open networks
 skip password entry. Once connected, a matching blue, white, and black screen
-offers the NOS API, the P2000T Teletekst API at
+offers the NOS API at `https://teletekst-data.nos.nl` as **1 - NOS TELETEKST**,
+the P2000T Teletekst API at
 `https://teletekst.philips-p2000t.nl`, TeletekstArchief.nl at
-`https://teletekstarchief.nl`, or a custom HTTP(S) server.
+`https://teletekstarchief.nl`, international channels via PetsciiProxy at
+`http://petsciiproxy.nl:8080`, or a custom HTTP(S) server.
+**4 - PETSCIIPROXY.NL** requires P2WP/8 and opens a paged channel picker:
+`P`/`N` or arrows browse, `1`–`9` choose, and `STOP` returns. The selected
+channel is kept for the session without changing the saved custom URL.
 The selection lasts for the current session and is attached to every request.
 The custom URL may contain a DNS name, IPv4 address, port, and base path. With
 P2WP/5 it is restored from Pico flash when the dialog opens and saved only if
@@ -319,3 +324,13 @@ the 12-byte keyboard FIFO. Cartridge buffers live at `0x7000` and above, away
 from the monitor workspace at `0x6000`. For conventional case-sensitive
 password entry, unshifted letter keys produce lower-case text and Shift produces
 upper-case text.
+
+### Clock overlay ROM settings
+
+In `teletekst.c`, `CLOCK_OVERLAY_ENABLED` enables the cartridge date/time
+visualization globally (default `1`). `CLOCK_OVERLAY_INTERNATIONAL` controls
+whether it is also shown on PetsciiProxy channels (default `0`). Set either
+constant to `0` or `1` and rebuild the cartridge ROM to change the policy.
+Disabling the overlay preserves the provider's header bytes and prevents live
+clock ticks from overwriting them. Other sources keep their existing clock
+behavior. This is a ROM setting; there is no viewer key or flash setting.

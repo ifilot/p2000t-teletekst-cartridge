@@ -1973,6 +1973,21 @@ static uint8_t pico_teletekst_fetch_start(
         mutex_exit(&wifi_mutex);
         return P2WP_ERROR_WIFI_BUSY;
     }
+    if (source == P2WP_TELETEKST_SOURCE_INTERNATIONAL &&
+        frame->payload[4] == PETSCII_CATALOGUE) {
+        petscii_catalogue(frame->payload[2], teletekst_screen);
+        teletekst_next_subpage = 0u;
+        teletekst_previous_page = teletekst_next_page = 0u;
+        teletekst_error = TELETEKST_ERROR_NONE;
+        teletekst_http_length = 0u;
+        teletekst_http_result = 0u;
+        teletekst_lwip_error = 0;
+        teletekst_http_status = 0u;
+        teletekst_fetch_state = TELETEKST_FETCH_COMPLETE;
+        mutex_exit(&wifi_mutex);
+        response->payload_length = 0u;
+        return P2WP_FIRMWARE_COMMAND_OK;
+    }
     teletekst_requested_page = page;
     teletekst_requested_subpage = frame->payload[2];
     teletekst_requested_source = source;
@@ -1988,6 +2003,12 @@ static uint8_t pico_teletekst_fetch_start(
             teletekst_custom_url_length
         );
         teletekst_custom_url[teletekst_custom_url_length] = '\0';
+    }
+    if (source == P2WP_TELETEKST_SOURCE_INTERNATIONAL) {
+        petscii_channel_url(frame->payload[4], teletekst_custom_url,
+                           sizeof(teletekst_custom_url));
+        teletekst_custom_url_length = strlen(teletekst_custom_url);
+        teletekst_requested_source = P2WP_TELETEKST_SOURCE_CUSTOM;
     }
     teletekst_http_length = 0u;
     teletekst_http_overflow = false;

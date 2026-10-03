@@ -254,3 +254,16 @@ uint8_t ui_wait_opening(void) {
     }
   }
 }
+
+/* Public API contract: see ui.h. */
+void ui_custom_setup(void) {
+  lz4_decompress(custom_setup_lz4, opening_screen, sizeof(custom_setup_lz4));
+  platform_present_screen(opening_screen);
+  ui_footer();
+}
+
+/* Public API contract: see ui.h. */
+void ui_wifi_scan(void) {
+  lz4_decompress(wifi_scan_lz4, opening_screen, sizeof(wifi_scan_lz4));
+  platform_present_screen(opening_screen);
+}

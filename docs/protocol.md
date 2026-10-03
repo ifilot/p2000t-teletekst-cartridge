@@ -1,11 +1,11 @@
-# P2000T to Pico W Protocol (P2WP/2–7)
+# P2000T to Pico W Protocol (P2WP/2–8)
 
 P2WP is a reliable, version-negotiated request/response protocol carried by the three
 I/O ports on the P2000T Pico W interface. Multi-byte fields are little-endian.
 
 ## Status and conformance
 
-This document is the normative specification for protocol versions 2 through 7. The key
+This document is the normative specification for protocol versions 2 through 8. The key
 words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and
 **MAY** describe conformance requirements.
 
@@ -113,7 +113,7 @@ The unescaped body is:
 
 | Offset | Size | Field |
 | ---: | ---: | --- |
-| 0 | 1 | Negotiated protocol version (`0x02` through `0x07`) |
+| 0 | 1 | Negotiated protocol version (`0x02` through `0x08`) |
 | 1 | 1 | Flags |
 | 2 | 1 | Message type |
 | 3 | 1 | Sequence number |
@@ -275,7 +275,7 @@ subsequent frame header. A peripheral selects the newest revision in the
 intersection of its supported range and the host's advertised range. If that
 intersection is empty, it returns `UNSUPPORTED_VERSION` in a bootstrap-version
 error response. Later peripherals MUST retain version 2 operation, and a
-version 7 peripheral MUST retain earlier operation. This allows both a new
+version 8 peripheral MUST retain earlier operation. This allows both a new
 cartridge with old Pico firmware and an old cartridge with new Pico firmware
 to remain usable.
 
@@ -415,6 +415,31 @@ Teletekst retrieval is asynchronous. Source `0` uses the public JSON endpoint
 at `teletekst-data.nos.nl` over verified HTTPS; source `1` uses the compatible
 P2000T Teletekst endpoint at `teletekst.philips-p2000t.nl` over verified HTTPS.
 Source `2`, introduced in P2WP/4, uses a custom base URL supplied by the host.
+P2WP/8 adds dedicated source `4` for PetsciiProxy at
+`http://petsciiproxy.nl:8080`. Its fetch-start payload has five bytes: the same
+page, subpage, and source fields as built-in sources, followed by a channel
+index (0–34). Requests use `/CHANNEL/PAGE-SUBPAGE`, including `-0` for the
+default subpage. The preset order is defined by `petscii_channels` in the
+reference firmware. Index `0xff` requests a locally generated channel catalogue;
+subpage 0–3 selects the catalogue screen. No HTTP request is made for catalogues.
+Other indices and catalogue subpages MUST be rejected as invalid payloads.
+Fetch-status and row payloads remain unchanged from P2WP/7.
+
+The reference cartridge exposes this source through **4 - PETSCIIPROXY.NL**
+only after negotiating P2WP/8. Selection is retained for the cartridge session
+and does not overwrite the saved custom-server URL or autostart setting.
+Custom source `2` also recognises public PetsciiProxy URLs with channel paths.
+
+PetsciiProxy responses contain optional newline-delimited `pn=p_PAGE-SUBPAGE`,
+`pn=n_PAGE-SUBPAGE`, and `pn=nsPAGE-SUBPAGE` navigation fields, followed by
+`<pre>`, exactly 1000 raw Teletext bytes, and `</pre>`. Previous/next page links
+must be in 100–899; a next subpage must belong to the requested page and be in
+0–99. Empty link values mean no advertised link. The final row is omitted from
+the 24-row P2000T screen. Graphics-mode bytes with bit 7 set are reduced to seven-bit mosaics; extended Latin-1 alpha
+characters use the existing Viewdata transliteration. Other metadata, such as
+Fastext and link coordinates, is ignored. Fetch errors retain their P2WP/7
+meanings.
+
 Source `3`, introduced in P2WP/7, uses `teletekstarchief.nl` over verified
 HTTPS. Its trust store includes both ISRG Root X1 and X2 because the service can
 present either its RSA or ECDSA Let's Encrypt chain.
@@ -424,7 +449,7 @@ fetch. On expiry it aborts and releases the active connection before reporting
 `TIMEOUT`, so a later fetch is not blocked behind stale network work. Hosts use
 a longer fallback deadline for an unresponsive peripheral.
 
-For a built-in source, a `TELETEKST_FETCH_START` request contains four bytes:
+For NOS, P2000T, or Archive, a `TELETEKST_FETCH_START` request contains four bytes:
 
 | Offset | Field |
 | ---: | --- |

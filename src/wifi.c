@@ -130,15 +130,7 @@ static uint8_t try_profile(p2wp_session_t *s) {
 }
 
 /* Public API contract: see wifi.h. */
-void wifi_show_scanning(void) {
-  platform_clear_screen();
-  ui_title(1u, wifi_title);
-  ui_action(2u, "   WIFI-NETWERKEN ZOEKEN...");
-  ui_panel(3u, " LINK ACTIEF - POLL 0000 |");
-  ui_panel(4u, " NETWERKEN GEVONDEN: 0");
-  ui_action(5u, "   RADIO: STARTEN");
-  ui_rule(6u);
-}
+void wifi_show_scanning(void) { ui_wifi_scan(); }
 
 /**
  * @brief Runs a scan and renders up to nine validated network records.

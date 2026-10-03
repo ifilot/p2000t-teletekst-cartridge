@@ -134,6 +134,14 @@ bool custom_endpoint_page_path(
         page < 100u || page > 899u || subpage > 99u) {
         return false;
     }
+    /* PetsciiProxy serves /CHANNEL/PAGE-SUBPAGE rather than NOS JSON routes. */
+    if (strlen(endpoint->host) == 15u &&
+        prefix_equal(endpoint->host, "petsciiproxy.nl", 15u) &&
+        endpoint->base_path[0] == '/' && endpoint->base_path[1] != '\0') {
+        const int length = snprintf(path, capacity, "%s/%u-%u",
+                                    endpoint->base_path, page, subpage);
+        return length >= 0 && (size_t)length < capacity;
+    }
     const int length = subpage == 0u
         ? snprintf(path, capacity, "%s/json/%u", endpoint->base_path, page)
         : snprintf(
@@ -145,4 +153,68 @@ bool custom_endpoint_page_path(
             subpage
         );
     return length >= 0 && (size_t)length < capacity;
+}
+
+/** Stable P2WP/8 channel indices; inactive MTVA is intentionally excluded. */
+static const char *const petscii_channels[PETSCII_CHANNEL_COUNT] = {
+    "NOS-TT",
+    "NOSNEWS",
+    "BMN1",
+    "ARD-TEXT",
+    "ZDF-TEXT",
+    "ZDFINFO",
+    "ZDFNEO",
+    "3SAT",
+    "WDR-TEXT",
+    "HR-TEXT",
+    "SWR-BW",
+    "SWR-RP",
+    "ORF1",
+    "ORF2",
+    "ORF3",
+    "ORFSPORT",
+    "CEEFAX",
+    "TEEFAX",
+    "CHUNKYTEXT",
+    "WEBFAX1",
+    "WEBFAX2",
+    "SPARK",
+    "TEKSTI-TV",
+    "HBN-TEKSTI-TV",
+    "SVT-TEXT",
+    "DR-TEKST-TV",
+    "SRF1",
+    "SRF2",
+    "SRFINFO",
+    "RTS1",
+    "RTS2",
+    "RSILA1",
+    "RSILA2",
+    "FORUM64",
+    "TELETEXT64",
+};
+
+bool petscii_channel_url(uint8_t channel, char *url, size_t capacity) {
+    if (channel >= PETSCII_CHANNEL_COUNT || url == NULL) return false;
+    const int length = snprintf(url, capacity, "http://petsciiproxy.nl:8080/%s",
+                                petscii_channels[channel]);
+    return length >= 0 && (size_t)length < capacity;
+}
+
+bool petscii_catalogue(uint8_t group, uint8_t screen[960]) {
+    if (group >= 4u || screen == NULL) return false;
+    memset(screen, ' ', 960u);
+    memcpy(screen + 40u, "\004\035\007 INTERNATIONALE TELETEKST", 28u);
+    memcpy(screen + 120u, " PETSCIIPROXY.NL", 15u);
+    for (uint8_t i = 0u; i < 9u && group * 9u + i < PETSCII_CHANNEL_COUNT; ++i) {
+        uint8_t *row = screen + (5u + i) * 40u;
+        row[1] = '1' + i;
+        memcpy(row + 4u, petscii_channels[group * 9u + i],
+               strlen(petscii_channels[group * 9u + i]));
+    }
+    memcpy(screen + 640u, " P / N: VORIGE / VOLGENDE LIJST", 29u);
+    memcpy(screen + 720u, " 1-9: KIES ZENDER   STOP: TERUG", 29u);
+    screen[3u * 40u + 30u] = '1' + group;
+    memcpy(screen + 3u * 40u + 31u, "/4", 2u);
+    return true;
 }

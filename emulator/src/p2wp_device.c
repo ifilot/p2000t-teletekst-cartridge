@@ -214,6 +214,19 @@ static uint8_t teletekst_fetch_start(
     if (request->payload[3] == P2WP_TELETEKST_SOURCE_CUSTOM) {
         memcpy(custom_url, request->payload + 5u, request->payload[4]);
     }
+    if (request->payload[3] == P2WP_TELETEKST_SOURCE_INTERNATIONAL) {
+        if (request->payload[4] == PETSCII_CATALOGUE) {
+            fetch_error = petscii_catalogue(request->payload[2], screen)
+                ? 0u : P2WP_TELETEKST_ERROR_INVALID_DATA;
+            next_subpage = 0u;
+            previous_page = next_page = 0u;
+            fetch_state = fetch_error ? 4u : 3u;
+            response->payload_length = 0u;
+            return P2WP_FIRMWARE_COMMAND_OK;
+        }
+        if (!petscii_channel_url(request->payload[4], custom_url, sizeof(custom_url)))
+            return P2WP_ERROR_INVALID_PAYLOAD;
+    }
     previous_page = 0u;
     next_page = 0u;
     if (fetch_stall_after >= 0 &&

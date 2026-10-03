@@ -20,6 +20,7 @@ static const uint32_t palette[8] = {0xff000000, 0xffff0000, 0xff00ff00,
                                     0xff00ffff, 0xffffffff};
 static int running = 1, headless = 0, auto_keys = 0, auto_source = 1;
 static int auto_source_cycles;
+static int auto_channel, auto_channel_page;
 static const char *auto_custom_server;
 static const char *auto_action;
 static int auto_wait_opening;
@@ -320,11 +321,22 @@ static void automatic_keyboard(int frame) {
       source_cycles_done++;
       source_action_frame = frame + 12;
     } else {
-      code = auto_source == 3   ? 4
+      code = auto_source == 4   ? ascii_keycode('4')
+             : auto_source == 3   ? 4
              : auto_source == 2 ? 63
              : auto_source == 1 ? 46
                                 : 45;
-      stage = auto_source == 0 ? 4 : 5;
+      stage = (auto_source == 0 || auto_source == 4) ? 4 : 5;
+    }
+  } else if (stage == 4 && pressed < 0 && auto_source == 4 &&
+             screen_has("INTERNATIONALE TELETEKST")) {
+    if (auto_channel_page < auto_channel / 9) {
+      code = ascii_keycode('n');
+      ++auto_channel_page;
+    } else {
+      code = ascii_keycode('1' + auto_channel % 9);
+      stage = 5;
+      next_action_frame = frame + 60;
     }
   } else if (stage == 4 && pressed < 0 && auto_source == 0 &&
              screen_has("SERVERADRES")) {
@@ -337,11 +349,12 @@ static void automatic_keyboard(int frame) {
       stage = 5;
     }
   } else if (stage == 5 && auto_action &&
-             (screen_has("NOS Telet") || screen_has("TYP PAGINA") ||
+             (auto_source == 4 || screen_has("NOS Telet") || screen_has("TYP PAGINA") ||
               screen_has("TYP EEN NIEUW") ||
               screen_has("FOUTCODE:") ||
               (screen_has("S:") && !screen_has("AUTOSTART")) ||
               screen_has("KIES UW TELETEKSTBRON") ||
+              screen_has("INTERNATIONALE TELETEKST") ||
               screen_has("DRUK EEN TOETS OM TERUG") ||
               screen_has("2: INFO") ||
               previous_action_code == ascii_keycode('w')) &&
@@ -356,7 +369,7 @@ static void automatic_keyboard(int frame) {
       next_action_frame = frame + 1;
     } else if (code >= 0) {
       previous_action_code = code;
-      next_action_frame = frame + 12;
+      next_action_frame = frame + (auto_source == 4 ? 60 : 12);
     } else {
       stage = 6;
     }
@@ -486,6 +499,8 @@ int main(int argc, char **argv) {
       auto_keys = 1;
     else if (!strcmp(argv[i], "--auto-source") && ++i < argc)
       auto_source = atoi(argv[i]);
+    else if (!strcmp(argv[i], "--auto-channel") && ++i < argc)
+      auto_channel = atoi(argv[i]);
     else if (!strcmp(argv[i], "--auto-source-cycles") && ++i < argc)
       auto_source_cycles = atoi(argv[i]);
     else if (!strcmp(argv[i], "--custom-server") && ++i < argc)
@@ -531,7 +546,8 @@ int main(int argc, char **argv) {
       return 2;
     }
   }
-  if (!monitor || !cart || auto_source < 0 || auto_source > 3 ||
+  if (!monitor || !cart || auto_source < 0 || auto_source > 4 ||
+      auto_channel < 0 || auto_channel > 34 ||
       auto_source_cycles < 0 ||
       (auto_source == 0 && auto_keys && !auto_custom_server && !flash_path) ||
       protocol_version < 0 || protocol_version > 255 || wifi_security < 0 ||
@@ -543,7 +559,7 @@ int main(int argc, char **argv) {
       ((fail_page == 0) != (fail_error == 0))) {
     fprintf(stderr,
             "Usage: p2000t-emulator --monitor ROM --cartridge ROM "
-            "[--live|--fixture JSON] [--auto-source 0|1|2|3 --custom-server "
+            "[--live|--fixture JSON] [--auto-source 0|1|2|3|4 --auto-channel 0..34 --custom-server "
             "URL] [--flash FILE] [--p2wp-version N] [--p2wp-status-length "
             "5|9|13|17|21] [--wifi-profile] [--wifi-security 0|1] "
             "[--wifi-password-visible] [--clock-invalid] "

@@ -54,6 +54,51 @@ static void test_custom_endpoint(void) {
     assert(!custom_endpoint_parse("http://terra/path?q=1", 21u, &endpoint));
 }
 
+/** Verify PetsciiProxy routes, raw mosaics, alpha accents and strict framing. */
+static void test_petscii(void) {
+    custom_endpoint_t endpoint;
+    static const char url[] = "http://petsciiproxy.nl:8080/ARD-TEXT";
+    assert(custom_endpoint_parse(url, sizeof(url) - 1u, &endpoint));
+    char path[CUSTOM_ENDPOINT_REQUEST_PATH_MAX];
+    assert(custom_endpoint_page_path(&endpoint, 100u, 0u, path, sizeof(path)));
+    assert(strcmp(path, "/ARD-TEXT/100-0") == 0);
+    assert(custom_endpoint_page_path(&endpoint, 100u, 2u, path, sizeof(path)));
+    assert(strcmp(path, "/ARD-TEXT/100-2") == 0);
+    assert(!custom_endpoint_page_path(&endpoint, 100u, 0u, path, 5u));
+
+    static const char header[] = "pn=p_\npn=n_\npn=p_199-1\npn=n_201-1\npn=ns200-2\n<pre>";
+    char body[sizeof(header) - 1u + 1000u + 6u];
+    memcpy(body, header, sizeof(header) - 1u);
+    char *raw = body + sizeof(header) - 1u;
+    memset(raw, ' ', 1000u);
+    raw[0] = 0x17; raw[1] = (char)0xf0;
+    raw[2] = 0x07; raw[3] = (char)0xf6;
+    raw[40] = (char)0xe4; /* Graphics mode resets at each row. */
+    memcpy(raw + 1000u, "</pre>", 6u);
+    uint8_t screen[TELETEKST_SCREEN_SIZE];
+    teletekst_metadata_t metadata;
+    assert(teletekst_decode_json(body, sizeof(body), 200u, screen, &metadata));
+    assert(metadata.previous_page == 199u && metadata.next_page == 201u);
+    assert(metadata.next_subpage == 2u);
+    assert(screen[1] == 0x70u && screen[3] == 'o' && screen[40] == 'a');
+    assert(!teletekst_decode_json(body, sizeof(body), 201u, screen, &metadata));
+    assert(!teletekst_decode_json(body, sizeof(body) - 1u, 200u, screen, &metadata));
+    char channel_url[97];
+    assert(petscii_channel_url(3u, channel_url, sizeof(channel_url)));
+    assert(strcmp(channel_url, "http://petsciiproxy.nl:8080/ARD-TEXT") == 0);
+    assert(!petscii_channel_url(35u, channel_url, sizeof(channel_url)));
+    assert(!petscii_channel_url(0u, channel_url, 5u));
+    for (uint8_t group = 0u; group < 4u; ++group) {
+        assert(petscii_catalogue(group, screen));
+        assert(memcmp(screen + 44u, "INTERNATIONALE TELETEKST", 23u) == 0);
+        assert(screen[151u] == '/');
+    }
+    assert(!petscii_catalogue(4u, screen));
+    raw[1000u] = 'x';
+    assert(!teletekst_decode_json(body, sizeof(body), 200u, screen, &metadata));
+    assert(!teletekst_decode_json(NULL, 0u, 200u, screen, &metadata));
+}
+
 /** Verify bounded GitHub release-tag parsing and malformed input rejection. */
 static void test_release_version_parsing(void) {
     static const char response[] =
@@ -776,6 +821,53 @@ static void test_firmware_core(void) {
     assert(platform.command_calls == 0u);
 }
 
+/** Verify P2WP/8 channel and catalogue requests and revision gating. */
+static void test_international_requests(void) {
+    p2wp_firmware_core_t core;
+    fake_firmware_platform_t platform = {0};
+    p2wp_frame_t response;
+    p2wp_firmware_core_init(&core, &fake_operations, &platform,
+                           P2WP_HARDWARE_PICO_W);
+    p2wp_frame_t request = {
+        .version = 2u, .type = P2WP_TYPE_HELLO, .payload_length = 8u,
+        .payload = {'P', '2', 'W', 'P', 2u, 8u, 240u, 0u},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.payload[4] == 8u);
+    request = (p2wp_frame_t){
+        .version = 8u, .type = P2WP_TYPE_TELETEKST_FETCH_START,
+        .sequence = 1u, .payload_length = 5u,
+        .payload = {100u, 0u, 0u, P2WP_TELETEKST_SOURCE_INTERNATIONAL, 3u},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) == 0u);
+    request.sequence++;
+    request.payload[4] = 35u;
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+    request.sequence++;
+    request.payload[4] = PETSCII_CATALOGUE;
+    request.payload[2] = 3u;
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert((response.flags & P2WP_FLAG_ERROR) == 0u);
+    request.sequence++;
+    request.payload[2] = 4u;
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+    request = (p2wp_frame_t){
+        .version = 2u, .type = P2WP_TYPE_HELLO, .payload_length = 8u,
+        .payload = {'P', '2', 'W', 'P', 2u, 7u, 240u, 0u},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    request = (p2wp_frame_t){
+        .version = 7u, .type = P2WP_TYPE_TELETEKST_FETCH_START,
+        .sequence = 1u, .payload_length = 5u,
+        .payload = {100u, 0u, 0u, P2WP_TELETEKST_SOURCE_INTERNATIONAL, 3u},
+    };
+    p2wp_firmware_core_handle(&core, &request, &response);
+    assert(response.payload[0] == P2WP_ERROR_INVALID_PAYLOAD);
+}
+
 /**
  * @brief Run all native framing and Teletekst decoder regression tests.
  *
@@ -789,6 +881,8 @@ int main(void) {
     test_corruption();
     test_profile_save_round_trip();
     test_custom_endpoint();
+    test_petscii();
+    test_international_requests();
     test_teletekst_conversion();
     test_exact_binary_display();
     test_navigation_metadata();

@@ -6,6 +6,22 @@ in this file. The format is based on [Keep a Changelog].
 Entries through version 0.2.0 were reconstructed from the tagged Git history
 and release diffs.
 
+## [Unreleased]
+
+### Changed
+
+- Disabled the cartridge date/time overlay for international channels by
+  default, preserving provider clocks; added ROM configuration constants.
+
+### Added
+
+- Added **4 - INTERNATIONAAL** with a paged picker for 35 PetsciiProxy channels,
+  keeping the saved custom server URL intact.
+- Added P2WP/8 support for PetsciiProxy page routes, raw Teletext decoding,
+  navigation metadata, and Latin-1 character fallbacks.
+- Added automatic international channel selection and an offline fixture to
+  the emulator, plus native decoder and cartridge integration coverage.
+
 ## [0.5.0] - 2026-08-30
 
 ### Added

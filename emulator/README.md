@@ -34,7 +34,8 @@ make run EMUFLAGS="--fixture emulator/tests/fixtures/nos-100.json"
 
 The emulator presents one open network named `Emulated WiFi`; select it with
 `1`, decline profile storage with `N`, then choose NOS with `1`. Choose `2` for
-P2000T Teletekst, `3` for TeletekstArchief.nl, or `0` to type a custom server
+P2000T Teletekst, `3` for TeletekstArchief.nl, `4` for the international
+channel picker (P2WP/8), or `0` to type a custom server
 URL. Regular host
 letter, number, arrow, Enter, Backspace, Shift and keypad-Enter (P2000 STOP)
 keys are mapped to the P2000T keyboard matrix. Press `F11` for a warm reset or
@@ -111,3 +112,8 @@ Stalled fetches reproduce the Pico firmware's 60-second HTTP timeout. Pass
 
 The vendored M2000 core retains its upstream copyright and is GPL-3.0; see
 `LICENSE` and `vendor/m2000/UPSTREAM.md`.
+
+For automatic international channel selection, use `--auto --auto-source 4
+--auto-channel 3` (ARD). Channel indices follow the cartridge preset table,
+starting at zero. Use `--live` for public PetsciiProxy access, or
+`--fixture emulator/tests/fixtures/petscii-100.txt` for offline decoding.

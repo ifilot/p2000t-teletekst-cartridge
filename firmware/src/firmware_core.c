@@ -156,6 +156,11 @@ static bool platform_payload_is_valid(const p2wp_frame_t *request) {
                 return request->version >= 7u &&
                     request->payload_length == 4u;
             }
+            if (request->payload[3] == P2WP_TELETEKST_SOURCE_INTERNATIONAL) {
+                return request->version >= 8u && request->payload_length == 5u &&
+                    (request->payload[4] < 35u ||
+                     (request->payload[4] == 0xffu && request->payload[2] < 4u));
+            }
             if (request->payload[3] != P2WP_TELETEKST_SOURCE_CUSTOM ||
                 request->version < 4u || request->payload_length < 5u) {
                 return false;

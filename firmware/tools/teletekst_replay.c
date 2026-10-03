@@ -40,7 +40,7 @@ static void usage(const char *program) {
 }
 
 /**
- * @brief Replay a captured JSON response through the production decoder.
+ * @brief Replay a captured NOS JSON or PetsciiProxy response through the production decoder.
  *
  * @param argc Number of command-line arguments.
  * @param argv Page number, optional input path, and optional screen output path.
@@ -95,7 +95,11 @@ int main(int argc, char **argv) {
     uint8_t screen[TELETEKST_SCREEN_SIZE];
     uint8_t next_subpage = 0u;
     uint8_t failed_row = 0u;
-    const teletekst_decode_result_t result =
+    teletekst_metadata_t metadata;
+    const bool decoded = teletekst_decode_json(
+        json, json_length, (uint16_t)page, screen, &metadata
+    );
+    const teletekst_decode_result_t result = decoded ? TELETEKST_DECODE_OK :
         teletekst_decode_nos_json_diagnostic(
             json,
             json_length,
@@ -113,6 +117,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    if (decoded) next_subpage = metadata.next_subpage;
+
     if (argc == 4) {
         FILE *output = fopen(argv[3], "wb");
         if (output == NULL) {
@@ -127,7 +133,7 @@ int main(int argc, char **argv) {
         }
     }
     printf(
-        "page %lu: ok (%zu JSON bytes, next subpage %u, %u screen bytes)\n",
+        "page %lu: ok (%zu response bytes, next subpage %u, %u screen bytes)\n",
         page,
         json_length,
         next_subpage,
