@@ -13,6 +13,7 @@ compile_commands.json
 
 # Native protocol-test executable
 firmware/tests/p2wp-test
+firmware/tests/http/http-test
 
 # Sphinx documentation output
 docs/_build/

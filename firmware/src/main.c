@@ -213,6 +213,8 @@ static bool teletekst_fetch_requested;
 static bool teletekst_http_overflow;
 static bool teletekst_tls_cleanup_pending;
 static bool teletekst_http_active;
+static bool teletekst_dns_pending;
+static uintptr_t teletekst_dns_generation;
 static bool teletekst_forced_timeout;
 static absolute_time_t teletekst_fetch_deadline;
 static struct altcp_pcb *teletekst_http_connection;
@@ -228,6 +230,7 @@ static uint16_t teletekst_next_page;
 static char teletekst_custom_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
 static uint8_t teletekst_custom_url_length;
 static char teletekst_host[CUSTOM_ENDPOINT_HOST_MAX + 1u];
+static uint16_t teletekst_port;
 static char teletekst_path[CUSTOM_ENDPOINT_REQUEST_PATH_MAX];
 static struct altcp_tls_config *teletekst_tls_config;
 static const char *teletekst_tls_hostname;
@@ -716,6 +719,60 @@ static void teletekst_cleanup_tls(void) {
 }
 
 /**
+ * @brief Start HTTP only after DNS has completed and cached the hostname.
+ *
+ * Called immediately after a cached lookup or from the DNS callback, before
+ * another poll can expire the cache entry. This preserves the original Host
+ * header and TLS hostname without giving lwIP HTTP a pending DNS callback.
+ */
+static void teletekst_start_http(void) {
+    const err_t result = httpc_get_file_dns(
+        teletekst_host,
+        teletekst_port,
+        teletekst_path,
+        &teletekst_http_settings,
+        teletekst_receive,
+        NULL,
+        NULL
+    );
+    if (result != ERR_OK) {
+        teletekst_http_connection = NULL;
+        mutex_enter_blocking(&wifi_mutex);
+        teletekst_http_active = false;
+        teletekst_lwip_error = (int8_t)result;
+        mutex_exit(&wifi_mutex);
+        if (teletekst_tls_config != NULL) {
+            altcp_tls_free_config(teletekst_tls_config);
+            teletekst_tls_config = NULL;
+        }
+        teletekst_set_failed(teletekst_request_start_error(result));
+    }
+}
+
+/** Ignore expired DNS replies so they cannot affect a subsequent fetch. */
+static void teletekst_dns_found(
+    const char *name,
+    const ip_addr_t *address,
+    void *argument
+) {
+    (void)name;
+    if (!teletekst_dns_pending ||
+        (uintptr_t)argument != teletekst_dns_generation) {
+        return;
+    }
+    teletekst_dns_pending = false;
+    if (address != NULL) {
+        teletekst_start_http();
+        return;
+    }
+    mutex_enter_blocking(&wifi_mutex);
+    teletekst_http_active = false;
+    mutex_exit(&wifi_mutex);
+    teletekst_tls_cleanup_pending = true;
+    teletekst_set_failed(TELETEKST_ERROR_DNS);
+}
+
+/**
  * @brief Start a Teletekst request queued by the mailbox core.
  *
  * This core-0 routine selects the endpoint and trust root, formats the API
@@ -805,7 +862,11 @@ static void teletekst_start_requested_fetch(void) {
         return;
     }
 
-    teletekst_tls_hostname = host;
+    if (host != teletekst_host) {
+        snprintf(teletekst_host, sizeof(teletekst_host), "%s", host);
+    }
+    teletekst_port = port;
+    teletekst_tls_hostname = teletekst_host;
     teletekst_tls_insecure = source == P2WP_TELETEKST_SOURCE_CUSTOM;
     teletekst_tls_config = NULL;
     teletekst_http_connection = NULL;
@@ -841,26 +902,29 @@ static void teletekst_start_requested_fetch(void) {
     teletekst_http_active = true;
     mutex_exit(&wifi_mutex);
     teletekst_fetch_deadline = make_timeout_time_ms(TELETEKST_FETCH_TIMEOUT_MS);
-    const err_t result = httpc_get_file_dns(
-        host,
-        port,
-        teletekst_path,
-        &teletekst_http_settings,
-        teletekst_receive,
-        NULL,
-        NULL
+    // Resolve before HTTP allocates its state. Aborting httpc while its DNS
+    // callback is pending would leave that callback pointing to freed memory.
+    ip_addr_t address;
+    ++teletekst_dns_generation;
+    teletekst_dns_pending = true;
+    const err_t result = dns_gethostbyname(
+        teletekst_host,
+        &address,
+        teletekst_dns_found,
+        (void *)teletekst_dns_generation
     );
-    if (result != ERR_OK) {
-        teletekst_http_connection = NULL;
+    if (result == ERR_OK) {
+        teletekst_dns_pending = false;
+        teletekst_start_http();
+    } else if (result != ERR_INPROGRESS) {
+        teletekst_dns_pending = false;
         mutex_enter_blocking(&wifi_mutex);
         teletekst_http_active = false;
         teletekst_lwip_error = (int8_t)result;
         mutex_exit(&wifi_mutex);
-        if (teletekst_tls_config != NULL) {
-            altcp_tls_free_config(teletekst_tls_config);
-            teletekst_tls_config = NULL;
-        }
-        teletekst_set_failed(teletekst_request_start_error(result));
+        teletekst_tls_cleanup_pending = true;
+        teletekst_set_failed(result == ERR_MEM
+            ? TELETEKST_ERROR_OUT_OF_MEMORY : TELETEKST_ERROR_DNS);
     }
 }
 
@@ -877,8 +941,14 @@ static void teletekst_check_fetch_deadline(void) {
         altcp_abort(connection);
         return;
     }
-    // DNS is still pending. Keep the request active so its eventual callback
-    // can release the HTTP state, but expose a terminal timeout immediately.
+    // DNS owns only a generation token, not HTTP/TLS state. Invalidate the
+    // reply and release this fetch immediately so a corrected URL can retry.
+    teletekst_dns_pending = false;
+    teletekst_forced_timeout = false;
+    mutex_enter_blocking(&wifi_mutex);
+    teletekst_http_active = false;
+    mutex_exit(&wifi_mutex);
+    teletekst_tls_cleanup_pending = true;
     teletekst_set_failed(TELETEKST_ERROR_TIMEOUT);
 }
 

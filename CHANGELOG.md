@@ -8,6 +8,11 @@ and release diffs.
 
 ## [Unreleased]
 
+### Fixed
+
+- Release timed-out DNS fetches and ignore their late replies, preventing
+  stale HTTP callbacks from corrupting retries after correcting a custom URL.
+
 ### Changed
 
 - Store the viewer core as a ZX0-compressed runtime unpacked into RAM at

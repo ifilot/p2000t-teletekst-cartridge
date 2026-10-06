@@ -125,6 +125,11 @@ jobs:
           path: pico-sdk
           submodules: recursive
 
+      - name: Test HTTP recovery
+        env:
+          PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
+        run: make -C firmware/tests http-test
+
       - name: Build firmware
         env:
           PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk

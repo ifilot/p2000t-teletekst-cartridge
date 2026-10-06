@@ -1,0 +1,14 @@
+#define NO_SYS 1
+#define LWIP_SOCKET 0
+#define LWIP_NETCONN 0
+#define MEM_LIBC_MALLOC 1
+#define MEMP_MEM_MALLOC 1
+#define MEM_ALIGNMENT 8
+#define LWIP_DNS 1
+#define LWIP_ALTCP 1
+#define LWIP_ALTCP_TLS 1
+#define LWIP_IPV6 0
+#define LWIP_STATS 0
+#define LWIP_TCP_KEEPALIVE 1
+#define SYS_LIGHTWEIGHT_PROT 0
+#define PBUF_POOL_FREE_OOSEQ 0
