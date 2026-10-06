@@ -10,6 +10,10 @@ and release diffs.
 
 ### Changed
 
+- Store the viewer core as a ZX0-compressed runtime unpacked into RAM at
+  startup, recovering 2,292 cartridge bytes while retaining 16 KiB RAM support
+  and a protected 1 KiB stack reserve. Validate the layout during build and
+  verification, and check RAM-code integrity in the emulator regressions.
 - Disabled the cartridge date/time overlay for international channels by
   default, preserving provider clocks; added ROM configuration constants.
 

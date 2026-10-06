@@ -11,6 +11,7 @@
 DEFC ROM_Start = $1000
 DEFC RAM_Start = $7000
 DEFC Stack_Top = $9ff0
+DEFC Runtime_Start = $8000
 
 MODULE p2000t_crt0
 
@@ -50,6 +51,7 @@ start:
     di
     INCLUDE "crt/classic/crt_init_sp.inc"
     call crt0_init
+    call unpack_runtime
     INCLUDE "crt/classic/crt_init_atexit.inc"
     INCLUDE "crt/classic/crt_init_heap.inc"
     ; The monitor writes Shift/lock status at (0x6014)+1, and an
@@ -72,7 +74,13 @@ __Exit:
 l_dcal:
     jp (hl)
 
+INCLUDE "runtime_loader.asm"
 INCLUDE "crt/classic/crt_runtime_selection.inc"
 
 defc __crt_model = 1
 INCLUDE "crt/classic/crt_section.inc"
+
+; This explicit origin emits a separate binary, compressed into the ROM after
+; linking. All calls and data references are resolved for their final addresses.
+SECTION runtime_code
+org Runtime_Start

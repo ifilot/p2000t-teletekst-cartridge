@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 ROOT = Path(__file__).resolve().parents[2]
 EMU = ROOT / "emulator"
 CARTRIDGE = ROOT / "build" / "p2wp-cartridge.bin"
+RUNTIME = ROOT / "build" / "cartridge" / "p2wp-cartridge_runtime_code.bin"
 
 
 def run_emulator(
@@ -60,6 +61,8 @@ def run_emulator(
         str(frames),
         "--dump-screen",
         str(screen),
+        "--dump-ram",
+        str(screen.with_suffix(".ram")),
     ]
     if inject_key:
         command.append("--auto")
@@ -112,6 +115,13 @@ def run_emulator(
         command,
         check=True,
     )
+    ram = screen.with_suffix(".ram").read_bytes()
+    assert len(ram) == 16 * 1024
+    runtime = RUNTIME.read_bytes()
+    assert ram[0x2000:0x2000 + len(runtime)] == runtime, "RAM runtime was corrupted"
+    # Unused memory below the protected 1 KiB stack stays untouched. This
+    # catches stack growth beyond its reserve even before code is overwritten.
+    assert not any(ram[0x2000 + len(runtime):0x3BF0]), "Stack reserve was exceeded"
     return screen.read_bytes()
 
 
@@ -187,7 +197,7 @@ def test_cartridge_end_to_end() -> None:
         assert preserved_flash.read_bytes() == saved_custom
 
         before = run_emulator(
-            build / "p2000t-emulator", monitor, temp / "before.bin", 10, False
+            build / "p2000t-emulator", monitor, temp / "before.bin", 30, False
         )
         assert before[0:3] == bytes((0x04, 0x1D, 0x07))
         assert b"P2000T  INTERNET TELETEKST" in before
@@ -205,7 +215,7 @@ def test_cartridge_end_to_end() -> None:
             build / "p2000t-emulator",
             monitor,
             temp / "scanning.bin",
-            10,
+            21,
             True,
         )
         assert scanning[1 * 40 : 2 * 40] == (

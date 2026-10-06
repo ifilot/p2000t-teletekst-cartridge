@@ -30,7 +30,7 @@ static int status_length = 0;
 static int wifi_profile = 0;
 static int wifi_security = 0;
 static int wifi_password_visible = 0;
-static const char *dump_path, *dump_frame_path, *dump_fetches_path,
+static const char *dump_path, *dump_frame_path, *dump_fetches_path, *dump_ram_path,
     *dump_pages_path, *dump_sources_path;
 static const char *flash_path;
 static int fail_page, fail_error;
@@ -411,6 +411,16 @@ static int dump_frame(void) {
   fclose(f);
   return ok;
 }
+static int dump_ram(void) {
+  if (!dump_ram_path)
+    return 1;
+  FILE *f = fopen(dump_ram_path, "wb");
+  if (!f)
+    return 0;
+  size_t size = (size_t)RAMSizeKb * 1024;
+  int ok = fwrite(RAM, 1, size, f) == size;
+  return fclose(f) == 0 && ok;
+}
 static int dump_fetches(const struct page_backend *backend) {
   if (!dump_fetches_path)
     return 1;
@@ -529,6 +539,8 @@ int main(int argc, char **argv) {
       auto_resume_frame = atoi(argv[i]);
     else if (!strcmp(argv[i], "--dump-screen") && ++i < argc)
       dump_path = argv[i];
+    else if (!strcmp(argv[i], "--dump-ram") && ++i < argc)
+      dump_ram_path = argv[i];
     else if (!strcmp(argv[i], "--dump-frame") && ++i < argc)
       dump_frame_path = argv[i];
     else if (!strcmp(argv[i], "--dump-fetches") && ++i < argc)
@@ -590,6 +602,8 @@ int main(int argc, char **argv) {
   EightyColumnsCard = 0;
   Z80_IPeriod = 2500000 / 50;
   UPeriod = 1;
+  // Exercise the smallest supported machine, including monitor workspace.
+  RAMSizeKb = 16;
   if (!InitP2000(m, c))
     return 1;
   struct page_backend backend = {.fixture = fixture,
@@ -630,7 +644,7 @@ int main(int argc, char **argv) {
   if (auto_keys)
     fprintf(stderr, "auto: final PC=0x%04x queue=%zu\n", Z80_GetPC(),
             queued_tail - queued_head);
-  int ok = dump_screen() && dump_frame() && dump_fetches(&backend) &&
+  int ok = dump_screen() && dump_frame() && dump_ram() && dump_fetches(&backend) &&
            dump_pages(&backend) && dump_sources(&backend);
   TrashP2000();
   SDL_Quit();

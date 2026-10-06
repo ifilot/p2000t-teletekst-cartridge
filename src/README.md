@@ -19,8 +19,10 @@ following deliberately narrow modules:
 | `platform.c` / `platform.h` | Portable key translation plus the public boundary for all P2000T-specific operations. |
 | `platform.asm` | Size-critical monitor, video-RAM, clock, and cartridge-port implementations behind `platform.h`; it contains no application policy. |
 | `crt0.asm` | Cartridge header, ROM/RAM map, C-runtime initialization, and terminal exit trap. |
+| `runtime_loader.asm` | ROM-resident ZX0 loader that unpacks the viewer core before `main`. |
 | `lz4_z80.asm` / `lz4_z80.h` | Isolated raw-LZ4 decoder used for resident screen assets. |
-| `make_cartridge_rom.py` | Joins Z88DK code and initialized data, validates the header, and pads the ROM. |
+| `prepare_runtime.py` | Places optimized viewer functions in the RAM linker section without changing instructions. |
+| `make_cartridge_rom.py` | Validates ROM/RAM layout, round-trip decoding and stack space; packages and pads the ROM. |
 | `sign_cartridge.py` | Writes and verifies the monitor-compatible additive checksum. |
 | `check_doxygen_style.py` | Enforces C, assembly, and Python documentation contracts used by `make lint`. |
 
@@ -39,8 +41,8 @@ clobbers; the Python build tools use the same Doxygen tags in docstrings.
 ## Z88DK C cartridge
 
 The application, protocol, Wi-Fi, and viewer state machines are implemented in
-C. Three focused Z80 support modules provide CRT startup, monitor/port/video
-primitives, and raw-LZ4 decoding. The build pads and signs the result and emits
+C. Focused Z80 support modules provide CRT startup, monitor/port/video
+primitives, screen decoding and the viewer-core loader. The build pads and signs the result and emits
 `p2wp-cartridge.bin`. The reusable P2WP layer implements framing, CRC, retry,
 sequence, protocol-error, and HELLO validation. `DEVICE_INFO` supplies the Pico
 version shown on the source menu.
@@ -121,8 +123,8 @@ daylight-saving adjustment and a CET/CEST label. The build host needs Python's
 timezone database (system tzdata or the Python tzdata package).
 The 11-byte ROM name is `P2K-TELETXT`.
 
-Every C ROM build reports code/read-only-data bytes, initialized-data bytes,
-and the remaining padding capacity in the 16 KiB cartridge. The generated ROM
+Every C ROM build reports resident code/read-only-data bytes, initialized-data
+bytes, ZX0-packed runtime bytes, and the remaining capacity in the 16 KiB cartridge. The generated ROM
 itself is always exactly 16,384 bytes after padding and signing.
 
 The opening logo, help page, and error-description tables use a
@@ -135,17 +137,29 @@ headers.
 
 The generated map and intermediate binaries are placed in `build/cartridge`.
 The ROM is placed in `build/p2wp-cartridge.bin`. The ROM
-builder appends Z88DK's initialized-data image after code and read-only data so
-the CRT can copy it to RAM during startup. ROM code starts at `0x1000`,
-execution starts at `0x1010`, mutable sections start at `0x7000`, and the stack
-starts at `0x9ff0`. Keep platform-specific entry, monitor-call and port-I/O
+builder appends initialized DATA followed by the ZX0-compressed viewer core.
+The core is linked at its final RAM address before compression. Startup copies
+DATA and unpacks the core once, with interrupts disabled, before calling `main`.
+ROM code starts at `0x1000`, execution starts at `0x1010`, mutable sections start
+at `0x7000`, the viewer core starts at `0x8000`, and SP starts at `0x9ff0`.
+The complete layout supports **16 KiB RAM**, including monitor workspace, and
+protects **1 KiB for the stack**. Build and verification reject overlaps,
+inconsistent linker addresses, decoding mismatches, and capacity violations.
+The current build uses 14,069 ROM bytes, leaving 2,315 bytes free; its 5,255-byte
+runtime leaves 1,897 RAM bytes for growth after the stack reserve.
+`build/cartridge/measurements.json` records the actual budget on every build.
+The emulator uses 16 KiB RAM, and cartridge tests verify the decoded code and
+the unused space below the stack reserve after every scenario.
+
+Keep platform-specific entry, monitor-call and port-I/O
 details in the Z80 shim; application and protocol logic belongs in C
 modules.
 
 `p2wp-cartridge.bin` is a generated ROM image and is not stored in Git. Build it
 with `make -C src`; this requires Docker and the pinned Z88DK image. The build
 signs the image with the P2000T additive 16-bit cartridge checksum.
-Use `make -C src verify` to validate it. This is an integrity checksum, not a
+Use `make -C src verify` to validate the linked layout, packaged payload and
+checksum. This is an integrity checksum, not a
 cryptographic signature.
 The cartridge release version is `v0.5.0`. `../VERSION`, the cartridge
 constants, and the Pico firmware constants are checked together during tests
