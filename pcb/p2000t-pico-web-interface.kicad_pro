@@ -77,20 +77,7 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [
-        [
-          "footprint_type_mismatch|61703000|29704000|32057f86-a531-4779-aafb-f7aa6ee89134|00000000-0000-0000-0000-000000000000",
-          ""
-        ],
-        [
-          "items_not_allowed|86703000|21914000|234846e2-be7e-4239-98f1-af6feee7cfc9|00000000-0000-0000-0000-000000000000",
-          ""
-        ],
-        [
-          "items_not_allowed|86703000|41294000|f71ed794-7048-4f92-b4af-28562f64a616|00000000-0000-0000-0000-000000000000",
-          ""
-        ]
-      ],
+      "drc_exclusions": [],
       "meta": {
         "version": 2
       },
@@ -730,7 +717,7 @@
         "uuid": "075aea89-321c-44ba-b0b1-8b82a6b1f518"
       }
     ],
-    "used_designators": "",
+    "used_designators": "R1-2,#PWR77,#PWR80,D1-2",
     "variants": []
   },
   "sheets": [
