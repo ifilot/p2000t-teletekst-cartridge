@@ -46,10 +46,17 @@ set_source_files_properties(
     src/wifi_profile.c
     PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror"
 )
+# ECDSA verification exceeds the SDK scratch-bank stack on RP2040. Keep the
+# allocation and startup symbols in sync; see README's firmware stack layout.
+set(P2WP_NETWORK_STACK_SIZE 8192)
 target_compile_definitions(p2wp-pico PRIVATE
+    PICO_STACK_SIZE=${P2WP_NETWORK_STACK_SIZE}
     PICO_CORE1_STACK_SIZE=4096
+    PICO_USE_STACK_GUARDS=1
     ALTCP_MBEDTLS_AUTHMODE=MBEDTLS_SSL_VERIFY_REQUIRED
 )
+include(cmake/network_stack.cmake)
+p2wp_configure_network_stack(p2wp-pico ${P2WP_NETWORK_STACK_SIZE})
 target_link_libraries(p2wp-pico PRIVATE
     pico_stdlib
     pico_multicore

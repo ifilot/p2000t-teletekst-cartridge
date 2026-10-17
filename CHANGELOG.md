@@ -8,8 +8,14 @@ and release diffs.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-17
+
 ### Fixed
 
+- Prevent Pico W TLS certificate verification from overwriting the mailbox
+  stack when selecting the P2000T service. Reserve an 8 KiB network stack in
+  main RAM, constrain heap growth, enable stack guards, and check the memory
+  layout at link time on both Pico variants.
 - Release timed-out DNS fetches and ignore their late replies, preventing
   stale HTTP callbacks from corrupting retries after correcting a custom URL.
 
@@ -24,6 +30,9 @@ and release diffs.
 
 ### Added
 
+- Added `make dist` to build the cartridge ROM and both Pico firmware images,
+  plus `make firmware` and an explicit `PYTHON` interpreter override for the
+  cartridge build.
 - Added **4 - INTERNATIONAAL** with a paged picker for 35 PetsciiProxy channels,
   keeping the saved custom server URL intact.
 - Added P2WP/8 support for PetsciiProxy page routes, raw Teletext decoding,

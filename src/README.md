@@ -161,7 +161,7 @@ signs the image with the P2000T additive 16-bit cartridge checksum.
 Use `make -C src verify` to validate the linked layout, packaged payload and
 checksum. This is an integrity checksum, not a
 cryptographic signature.
-The cartridge release version is `v0.5.0`. `../VERSION`, the cartridge
+The cartridge release version is `v0.6.0`. `../VERSION`, the cartridge
 constants, and the Pico firmware constants are checked together during tests
 so both release artifacts always identify the same version.
 
@@ -181,7 +181,7 @@ continuing to Wi-Fi setup. Its first two rows extend the blue background, its
 centered title is a full white-on-blue bar without a page number, and the bold `P2000T` mark is a
 centered blue mosaic badge with a white border matching the Teletekst motif.
 The P2000T contour and upper Teletekst frame share a mosaic row, making them a
-single stacked logo. Its footer identifies cartridge version 0.5.0. The four
+single stacked logo. Its footer identifies cartridge version 0.6.0. The four
 original slogan rows remain on the opening screen. After Wi-Fi connects, the
 two spare rows below the source menu's function-key list show the cartridge and
 Pico versions and latest published release. All cartridge UI text

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 ROM := ../build/p2wp-cartridge.bin
+PYTHON ?= python3
 SIGNER := sign_cartridge.py
 Z88DK_IMAGE := z88dk/z88dk:2.4@sha256:7da21d721a76bf25db518f2415b859b2dfe215ccd059f117cb6ec052251ac2ae
 Z88DK_DOCKER := docker run --rm \
@@ -34,16 +35,16 @@ all: $(ROM)
 
 lint:
 	clang-format --dry-run --Werror *.c *.h
-	python3 check_doxygen_style.py *.c *.h \
+	$(PYTHON) check_doxygen_style.py *.c *.h \
 		$(ASM_SOURCES) $(PYTHON_SOURCES)
 	cd .. && doxygen docs/Doxyfile.cartridge
 
 $(ROM): $(C_SOURCES) $(C_HEADERS) make_cartridge_rom.py prepare_runtime.py $(SIGNER) build_info.py Makefile
 	mkdir -p $(BUILD)
-	python3 build_info.py > $(BUILD)/build_info.h
+	$(PYTHON) build_info.py > $(BUILD)/build_info.h
 	$(Z88DK_DOCKER) /opt/z88dk/bin/zcc +embedded $(ZCC_FLAGS) \
 		-a -o $(BUILD)/teletekst.asm teletekst.c
-	python3 prepare_runtime.py $(BUILD)/teletekst.asm \
+	$(PYTHON) prepare_runtime.py $(BUILD)/teletekst.asm \
 		$(BUILD)/teletekst-runtime.asm --manifest $(BUILD)/runtime-functions.json
 	$(Z88DK_DOCKER) /opt/z88dk/bin/zcc +embedded $(ZCC_FLAGS) \
 		-crt0=crt0.asm \
@@ -55,26 +56,26 @@ $(ROM): $(C_SOURCES) $(C_HEADERS) make_cartridge_rom.py prepare_runtime.py $(SIG
 		$(BUILD)/p2wp-cartridge_runtime_code.bin $(BUILD)/runtime.zx0
 	$(Z88DK_DOCKER) /opt/z88dk/bin/z88dk-dzx0 -f \
 		$(BUILD)/runtime.zx0 $(BUILD)/runtime.roundtrip.bin
-	python3 make_cartridge_rom.py $(PACK_ARGS) \
+	$(PYTHON) make_cartridge_rom.py $(PACK_ARGS) \
 		$(BUILD)/p2wp-cartridge $(ROM)
-	python3 $(SIGNER) $(ROM)
-	python3 $(SIGNER) --verify $(ROM)
+	$(PYTHON) $(SIGNER) $(ROM)
+	$(PYTHON) $(SIGNER) --verify $(ROM)
 
 smoke: $(ROM)
-	python3 -m pytest -q tests ../emulator/tests/test_cartridge.py
+	$(PYTHON) -m pytest -q tests ../emulator/tests/test_cartridge.py
 
 sign: $(ROM)
-	python3 $(SIGNER) $(ROM)
+	$(PYTHON) $(SIGNER) $(ROM)
 
 check-version:
-	python3 ../firmware/tests/check_release_version.py
+	$(PYTHON) ../firmware/tests/check_release_version.py
 
 verify: check-version $(ROM)
 	$(Z88DK_DOCKER) /opt/z88dk/bin/z88dk-dzx0 -f \
 		$(BUILD)/runtime.zx0 $(BUILD)/runtime.roundtrip.bin
-	python3 make_cartridge_rom.py $(PACK_ARGS) --verify \
+	$(PYTHON) make_cartridge_rom.py $(PACK_ARGS) --verify \
 		$(BUILD)/p2wp-cartridge $(ROM)
-	python3 $(SIGNER) --verify $(ROM)
+	$(PYTHON) $(SIGNER) --verify $(ROM)
 
 clean:
 	rm -f $(ROM)

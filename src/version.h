@@ -13,10 +13,10 @@
 /** Cartridge release major version. */
 #define P2WP_CARTRIDGE_VERSION_MAJOR 0u
 /** Cartridge release minor version. */
-#define P2WP_CARTRIDGE_VERSION_MINOR 5u
+#define P2WP_CARTRIDGE_VERSION_MINOR 6u
 /** Cartridge release patch version. */
 #define P2WP_CARTRIDGE_VERSION_PATCH 0u
 /** Cartridge release version formatted for display. */
-#define P2WP_CARTRIDGE_VERSION "0.5.0"
+#define P2WP_CARTRIDGE_VERSION "0.6.0"
 
 #endif  // P2000T_VERSION_H_

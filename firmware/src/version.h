@@ -8,9 +8,9 @@
 // Firmware release version. Keep this independent from P2WP_VERSION, which
 // identifies the wire-protocol revision.
 #define P2WP_FIRMWARE_VERSION_MAJOR 0u
-#define P2WP_FIRMWARE_VERSION_MINOR 5u
+#define P2WP_FIRMWARE_VERSION_MINOR 6u
 #define P2WP_FIRMWARE_VERSION_PATCH 0u
-#define P2WP_FIRMWARE_VERSION_STRING "v0.5.0"
+#define P2WP_FIRMWARE_VERSION_STRING "v0.6.0"
 
 typedef struct {
     uint8_t major;

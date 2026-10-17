@@ -2,6 +2,7 @@
 #
 # The emulator needs CMake, Ninja, SDL2 and libcurl; the cartridge needs
 # Docker for the pinned Z88DK toolchain.
+# Firmware needs CMake, Ninja, the ARM cross-compiler and PICO_SDK_PATH.
 
 EMULATOR := emulator/build/p2000t-emulator
 MONITOR ?= $(if $(P2000_MONITOR_ROM),$(P2000_MONITOR_ROM),emulator/assets/P2000ROM.bin)
@@ -17,9 +18,12 @@ ARGS ?=
 run_emulator = $(EMULATOR) --monitor $(MONITOR) --cartridge $(1) --font $(FONT) \
 	$(EMUFLAGS) $(ARGS)
 
-.PHONY: all run emulator check-emulator-deps rom test clean
+.PHONY: all dist run emulator check-emulator-deps rom firmware test clean
 
 all: emulator rom
+
+# Build the three release artifacts without requiring the emulator.
+dist: rom firmware
 
 # Build the emulator and cartridge, then boot the cartridge.
 run: emulator rom
@@ -40,9 +44,19 @@ check-emulator-deps:
 rom:
 	$(MAKE) -C src
 
+firmware:
+	cmake -S firmware -B build/pico_w -G Ninja -DPICO_BOARD=pico_w
+	cmake --build build/pico_w
+	cp build/pico_w/p2wp-pico.uf2 build/p2wp-pico-w.uf2
+	cmake -S firmware -B build/pico2_w -G Ninja -DPICO_BOARD=pico2_w
+	cmake --build build/pico2_w
+	cp build/pico2_w/p2wp-pico.uf2 build/p2wp-pico-2-w.uf2
+
 test: emulator rom
 	$(MAKE) -C emulator test
 
 clean:
 	$(MAKE) -C emulator clean
 	$(MAKE) -C src clean
+	rm -rf build/pico_w build/pico2_w
+	rm -f build/p2wp-pico-w.uf2 build/p2wp-pico-2-w.uf2

@@ -219,6 +219,21 @@ boots it in the emulator. This needs the dependencies listed in
 `ARGS`, for example `make run ARGS="--p2wp-version 2"`, or replace the network
 mode with `EMUFLAGS`.
 
+To build the cartridge ROM and firmware for both Pico W and Pico 2 W, run:
+
+```sh
+make dist
+```
+
+This produces `build/p2wp-cartridge.bin`, `build/p2wp-pico-w.uf2`, and
+`build/p2wp-pico-2-w.uf2`. It requires Docker for the pinned Z88DK toolchain,
+Python 3, CMake, Ninja, the ARM cross-compiler (`arm-none-eabi-gcc`), and a
+Raspberry Pi Pico SDK with submodules checked out and `PICO_SDK_PATH` pointing
+to it. The release workflow uses SDK 2.1.1. The emulator is not required.
+
+To select a Python interpreter explicitly (for example, to bypass a pyenv
+shim), use `make dist PYTHON=/usr/bin/python3`.
+
 ### Cartridge
 
 Build the production C cartridge in the pinned Z88DK Docker toolchain and run
@@ -234,9 +249,38 @@ This produces the sole release image, `build/p2wp-cartridge.bin`. See
 
 ### PICO Firmware
 
+Run `make firmware` from the repository root to build both firmware variants
+with the release filenames listed above.
+
 Build the firmware with `cmake -S firmware -B firmware/build -G Ninja` followed
 by `cmake --build firmware/build`; this requires `PICO_SDK_PATH` to point to a
 Raspberry Pi Pico SDK.
+
+#### Firmware stack layout
+
+Core 0 runs Wi-Fi, lwIP and TLS; core 1 handles the P2000T mailbox. Keep the
+network stack at **8 KiB or larger**, separately reserved in main RAM, and the
+mailbox stack at **4 KiB or larger** in its scratch bank. The build adapts the
+SDK linker script in [`firmware/cmake/network_stack.cmake`](firmware/cmake/network_stack.cmake),
+limits heap growth below the network stack, checks the layout at link time,
+and enables SDK stack guards on both cores. Review this adaptation when
+upgrading the Pico SDK; configuration fails if the expected linker layout changes.
+
+The original SDK default gave core 0 a 2 KiB stack reservation in a 4 KiB
+scratch bank adjacent to the mailbox stack. ARM compiler analysis found an
+ECDSA certificate-verification path using about 4,144 bytes on Pico W,
+compared with about 3,688 bytes on Pico 2 W. Selecting the P2000T service
+(option 2) can take this path and overwrite the mailbox stack on Pico W,
+causing cartridge timeout `81` and subsequent "PICO W niet gevonden" errors.
+A P2000T reset does not reset the Pico. Increasing only a timeout or the
+stack-size macro without fixing the linker reservation does not address this.
+
+When changing TLS configuration, compiler flags, or the SDK, check stack use
+on **both boards**, including the nested ECDSA/internal-DRBG path. Host HTTP
+recovery tests stub TLS and cannot detect this overflow. Hardware validation
+should repeat NOS → STOP → option 2 → STOP → NOS, starting with a fully
+power-cycled Pico, and confirm that page fetching and the local link remain
+responsive. Also test selecting option 2 first after power-on.
 
 The host-side replay tool fetches a live NOS response and passes it through the
 same size limit and JSON-to-SAA5050 decoder as the Pico firmware:

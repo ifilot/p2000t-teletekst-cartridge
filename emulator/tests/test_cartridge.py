@@ -236,13 +236,13 @@ def test_cartridge_end_to_end() -> None:
                 frame, True,
             )
             if (b"WIFI-PROFIEL BEWAREN? J/N" in save_prompt and
-                    b"v0.5.0" in save_prompt[23 * 40:]):
+                    b"v0.6.0" in save_prompt[23 * 40:]):
                 break
         assert b"WIFI-PROFIEL BEWAREN? J/N" in save_prompt
         assert save_prompt[6 * 40:6 * 40 + 3] == bytes((7, 29, 4))
         assert b"J: BEWAREN VOOR VOLGENDE KEER" in save_prompt
         assert b"N: ALLEEN DEZE SESSIE" in save_prompt
-        assert b"v0.5.0" in save_prompt[23 * 40:]
+        assert b"v0.6.0" in save_prompt[23 * 40:]
         for row in range(24):
             assert save_prompt[row * 40:row * 40 + 2] in (
                 bytes((4, 29)), bytes((7, 29)),
@@ -585,7 +585,7 @@ def test_cartridge_end_to_end() -> None:
         help_row(20, (0x06, " A"), (0x07, " AUTOSTARTBRON WIJZIGEN"))
         help_row(21, (0x06, " H"), (0x07, " HULP VANAF DE BRONKEUZE"))
         help_band(22, "2: INFO   ANDERE TOETS: TERUG")
-        help_band(23, "P2000T Teletekst Cartridge     v0.5.0")
+        help_band(23, "P2000T Teletekst Cartridge     v0.6.0")
         assert help_page == expected_help
 
         info_page = run_emulator(
@@ -794,7 +794,7 @@ def test_cartridge_end_to_end() -> None:
         )
         assert b"FOUTCODE: 81" in fallback_timeout
         assert b"STOP: BRON" in fallback_timeout
-        assert b"v0.5.0" in fallback_timeout[23 * 40:]
+        assert b"v0.6.0" in fallback_timeout[23 * 40:]
         assert b"FOUT: TIMEOUT" in fallback_timeout
 
         wifi_return = run_emulator(
