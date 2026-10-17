@@ -196,6 +196,17 @@ def test_cartridge_end_to_end() -> None:
         )
         assert preserved_flash.read_bytes() == saved_custom
 
+        # An unavailable flash destination must keep the URL dialog open and
+        # offer a retry, rather than fetching a page after an unreported loss.
+        failed_save = run_emulator(
+            build / "p2000t-emulator", monitor, temp / "failed-url-save.bin",
+            650, True, auto_source=0, custom_server="http://terra:8080",
+            flash=temp / "missing-directory" / "flash.bin",
+        )
+        assert b"OPSLAAN MISLUKT" in failed_save
+        assert b"ENTER: OPNIEUW" in failed_save
+        assert b"SERVERADRES" in failed_save
+
         before = run_emulator(
             build / "p2000t-emulator", monitor, temp / "before.bin", 30, False
         )

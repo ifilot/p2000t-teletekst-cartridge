@@ -20,6 +20,11 @@ resolving, connecting and complete. Every successful retry passes an HTTP 200
 response through the real HTTP parser and page decoder. HTTP and HTTPS cases
 check connection/configuration cleanup and retain the original Host header.
 
+They also cover exclusive version-check ownership through deferred TLS cleanup,
+including disconnected, allocation and synchronous startup failures; URL and
+auto-start save failures, busy reads and explicit retries; and Dutch clock
+transitions in leap and non-leap years using independent UTC fixtures.
+
 AddressSanitizer and UndefinedBehaviorSanitizer detect invalid memory access.
 In environments where LeakSanitizer cannot inspect the process, run with
 `ASAN_OPTIONS=detect_leaks=0`; the tests also count TCP and TLS allocations.

@@ -22,6 +22,11 @@ static unsigned allocations;
 static unsigned frees;
 static unsigned tls_allocations;
 static unsigned tls_frees;
+static bool fail_tls_config;
+static custom_url_store_result_t save_result = CUSTOM_URL_STORE_OK;
+static char saved_url[CUSTOM_ENDPOINT_URL_MAX + 1u];
+static uint8_t saved_url_length;
+static uint8_t saved_source = 0xffu;
 static err_t connect_error;
 static err_t dns_error;
 static char last_request[256];
@@ -98,6 +103,7 @@ struct altcp_tls_config *altcp_tls_create_config_client(const u8_t *ca,
                                                         size_t length) {
     (void)ca;
     (void)length;
+    if (fail_tls_config) return NULL;
     tls_allocations++;
     return (struct altcp_tls_config *)malloc(1);
 }
@@ -223,6 +229,120 @@ static void test_dns_timeout(const char *scheme, bool new_dns_pending,
     assert(teletekst_next_page == 101);
 }
 
+/** A queued/running check owns its TLS configuration through deferred cleanup. */
+static void test_version_check_ownership(void) {
+    p2wp_frame_t request = {0}, response = {0};
+    assert(pico_version_check_start(NULL, &request, &response) == 0u);
+    version_start_requested_check();
+    struct altcp_pcb *pcb = test_connection;
+    assert(pcb->connected(pcb->arg, pcb, ERR_OK) == ERR_OK);
+    const char body[] = "{\"tag_name\":\"v1.2.3\"}";
+    char reply[128];
+    const int length = snprintf(reply, sizeof(reply),
+        "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\n\r\n%s", sizeof(body) - 1u, body);
+    assert(length > 0 && (size_t)length < sizeof(reply));
+    struct pbuf *data = pbuf_alloc(PBUF_RAW, (u16_t)length, PBUF_RAM);
+    assert(data != NULL);
+    memcpy(data->payload, reply, (size_t)length);
+    assert(pcb->recv(pcb->arg, pcb, data, ERR_OK) == ERR_OK);
+    assert(pcb->recv(pcb->arg, pcb, NULL, ERR_OK) == ERR_OK);
+    assert(version_check_state == P2WP_VERSION_CHECK_COMPLETE);
+    assert(latest_release_version.major == 1u && latest_release_version.minor == 2u &&
+           latest_release_version.patch == 3u);
+    assert(pico_version_check_start(NULL, &request, &response) == P2WP_ERROR_WIFI_BUSY);
+    version_cleanup_tls();
+    assert(!version_check_active && allocations == frees && tls_allocations == tls_frees);
+    for (unsigned failure = 0u; failure < 4u; ++failure) {
+        wifi_connection_state = failure == 1u ? WIFI_DISCONNECTED : WIFI_CONNECTED;
+        fail_tls_config = failure == 2u;
+        connect_error = failure == 3u ? ERR_CONN : ERR_OK;
+        assert(pico_version_check_start(NULL, &request, &response) == 0u);
+        assert(pico_version_check_start(NULL, &request, &response) == P2WP_ERROR_WIFI_BUSY);
+        version_start_requested_check();
+        assert(pico_version_check_start(NULL, &request, &response) == P2WP_ERROR_WIFI_BUSY);
+        if (failure == 0u) {
+            struct altcp_tls_config *config = version_tls_config;
+            const unsigned allocated = tls_allocations;
+            version_start_requested_check();
+            assert(version_tls_config == config && tls_allocations == allocated);
+            altcp_abort(test_connection);
+        }
+        assert(version_check_state == P2WP_VERSION_CHECK_FAILED);
+        assert(version_check_active);
+        assert(pico_version_check_start(NULL, &request, &response) == P2WP_ERROR_WIFI_BUSY);
+        version_cleanup_tls();
+        assert(!version_check_active && version_tls_config == NULL);
+        assert(allocations == frees && tls_allocations == tls_frees);
+    }
+    wifi_connection_state = WIFI_CONNECTED;
+    fail_tls_config = false;
+    connect_error = ERR_OK;
+}
+
+/** Save failures remain observable, and an explicit retry can recover. */
+static void test_persistence_failures(void) {
+    p2wp_frame_t request = {0}, response = {0};
+    const char *url = "http://server";
+    request.payload[0] = (uint8_t)strlen(url);
+    memcpy(request.payload + 1u, url, strlen(url));
+    assert(pico_teletekst_custom_url_save(NULL, &request, &response) == 0u);
+    assert(pico_teletekst_custom_url_load(NULL, &request, &response) == P2WP_ERROR_WIFI_BUSY);
+    assert(pico_teletekst_custom_url_save(NULL, &request, &response) == P2WP_ERROR_WIFI_BUSY);
+    save_result = CUSTOM_URL_STORE_FAILED;
+    custom_url_store_service();
+    assert(pico_teletekst_custom_url_load(NULL, &request, &response) == P2WP_ERROR_INTERNAL);
+    assert(pico_teletekst_settings_load(NULL, &request, &response) == 0u);
+    assert(pico_teletekst_custom_url_save(NULL, &request, &response) == 0u);
+    save_result = CUSTOM_URL_STORE_OK;
+    custom_url_store_service();
+    assert(pico_teletekst_custom_url_load(NULL, &request, &response) == 0u);
+    assert(response.payload[0] == strlen(url));
+    assert(memcmp(response.payload + 1u, url, strlen(url)) == 0);
+
+    request.payload[0] = 2u;
+    assert(pico_teletekst_settings_save(NULL, &request, &response) == 0u);
+    assert(pico_teletekst_settings_load(NULL, &request, &response) == P2WP_ERROR_WIFI_BUSY);
+    save_result = CUSTOM_URL_STORE_FAILED;
+    custom_url_store_service();
+    assert(pico_teletekst_settings_load(NULL, &request, &response) == P2WP_ERROR_INTERNAL);
+    assert(pico_teletekst_custom_url_load(NULL, &request, &response) == 0u);
+    assert(pico_teletekst_settings_save(NULL, &request, &response) == 0u);
+    save_result = CUSTOM_URL_STORE_OK;
+    custom_url_store_service();
+    assert(pico_teletekst_settings_load(NULL, &request, &response) == 0u);
+    assert(response.payload_length == 1u && response.payload[0] == 2u);
+    assert(pico_teletekst_settings_save(NULL, &request, &response) == 0u);
+    save_result = CUSTOM_URL_STORE_UNCHANGED;
+    custom_url_store_service();
+    assert(pico_teletekst_settings_load(NULL, &request, &response) == 0u);
+    save_result = CUSTOM_URL_STORE_OK;
+}
+
+/** UTC fixtures independently calculated using Europe/Amsterdam tzdata. */
+static void test_clock_transitions(void) {
+    static const struct { uint32_t utc; uint8_t expected[7]; } cases[] = {
+        {1711846799u, {1u, 59u, 59u, 31u, 3u, 24u, 0u}}, // 2024-03-31T00:59:59 UTC
+        {1711846800u, {3u, 0u, 0u, 31u, 3u, 24u, 0u}}, // 2024-03-31T01:00:00 UTC
+        {1729990799u, {2u, 59u, 59u, 27u, 10u, 24u, 0u}}, // 2024-10-27T00:59:59 UTC
+        {1729990800u, {2u, 0u, 0u, 27u, 10u, 24u, 0u}}, // 2024-10-27T01:00:00 UTC
+        {1774745999u, {1u, 59u, 59u, 29u, 3u, 26u, 0u}}, // 2026-03-29T00:59:59 UTC
+        {1774746000u, {3u, 0u, 0u, 29u, 3u, 26u, 0u}}, // 2026-03-29T01:00:00 UTC
+        {1792889999u, {2u, 59u, 59u, 25u, 10u, 26u, 0u}}, // 2026-10-25T00:59:59 UTC
+        {1792890000u, {2u, 0u, 0u, 25u, 10u, 26u, 0u}}, // 2026-10-25T01:00:00 UTC
+        {1793361600u, {13u, 0u, 0u, 30u, 10u, 26u, 5u}}, // 2026-10-30T12:00:00 UTC
+        {1793496600u, {2u, 30u, 0u, 1u, 11u, 26u, 0u}}, // 2026-11-01T01:30:00 UTC
+        {1824944399u, {2u, 59u, 59u, 31u, 10u, 27u, 0u}}, // 2027-10-31T00:59:59 UTC
+        {1824944400u, {2u, 0u, 0u, 31u, 10u, 27u, 0u}}, // 2027-10-31T01:00:00 UTC
+        {1798759800u, {0u, 30u, 0u, 1u, 1u, 27u, 5u}}, // 2026-12-31T23:30:00 UTC
+    };
+    uint8_t actual[7];
+    assert(!clock_local_components(0u, actual));
+    for (size_t i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        assert(clock_local_components(cases[i].utc, actual));
+        assert(memcmp(actual, cases[i].expected, sizeof(actual)) == 0);
+    }
+}
+
 int main(void) {
     mutex_init(&wifi_mutex);
     wifi_init_state = WIFI_INIT_READY;
@@ -283,8 +403,10 @@ int main(void) {
         start(good_url);
         complete();
     }
-    puts("HTTP recovery tests passed (HTTP/TLS, port correction, DNS, late "
-         "replies)");
+    test_clock_transitions();
+    test_version_check_ownership();
+    test_persistence_failures();
+    puts("HTTP recovery, version ownership and persistence tests passed");
 }
 
 void mbedtls_platform_zeroize(void *p, size_t n) { memset(p, 0, n); }
@@ -293,12 +415,30 @@ void gpio_put(uint gpio, bool value) {
     (void)value;
 }
 custom_url_store_result_t custom_url_store_settings_load(uint8_t *source) {
-    *source = 0xff;
-    return CUSTOM_URL_STORE_NOT_FOUND;
+    *source = saved_source;
+    return CUSTOM_URL_STORE_OK;
 }
 custom_url_store_result_t
 custom_url_store_load(char url[CUSTOM_ENDPOINT_URL_MAX + 1u], uint8_t *length) {
-    url[0] = 0;
-    *length = 0;
-    return CUSTOM_URL_STORE_NOT_FOUND;
+    memcpy(url, saved_url, saved_url_length + 1u);
+    *length = saved_url_length;
+    return saved_url_length ? CUSTOM_URL_STORE_OK : CUSTOM_URL_STORE_NOT_FOUND;
+}
+
+custom_url_store_result_t custom_url_store_save(const char *url, size_t length) {
+    assert(stored_custom_url_operation == CUSTOM_URL_OPERATION_SAVE);
+    assert(custom_url_store_status(false) == P2WP_ERROR_WIFI_BUSY);
+    if (save_result == CUSTOM_URL_STORE_OK) {
+        memcpy(saved_url, url, length);
+        saved_url[length] = '\0';
+        saved_url_length = (uint8_t)length;
+    }
+    return save_result;
+}
+
+custom_url_store_result_t custom_url_store_settings_save(uint8_t source) {
+    assert(stored_custom_url_operation == CUSTOM_URL_OPERATION_SETTINGS_SAVE);
+    assert(custom_url_store_status(true) == P2WP_ERROR_WIFI_BUSY);
+    if (save_result == CUSTOM_URL_STORE_OK) saved_source = source;
+    return save_result;
 }

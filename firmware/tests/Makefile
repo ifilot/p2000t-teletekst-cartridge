@@ -11,6 +11,7 @@ check-version:
 
 test: check-version p2wp-test
 	./p2wp-test
+	python3 -m unittest -q test_release_version
 
 # Uses the same lwIP HTTP client as the firmware; hardware/DNS/TCP are adapters.
 # Keep this separate from portable tests because it requires the Pico SDK.
@@ -19,7 +20,7 @@ http-test:
 	$(CC) $(CFLAGS) -Wno-unused-function -Wno-return-type \
 		-ffunction-sections -fdata-sections -fsanitize=address,undefined -g \
 		-Ihttp/stubs -I$(PICO_SDK_PATH)/lib/lwip/src/include -I../src \
-		http/test_http_recovery.c ../src/custom_endpoint.c ../src/teletekst.c \
+		http/test_http_recovery.c ../src/custom_endpoint.c ../src/teletekst.c ../src/version.c \
 		$(PICO_SDK_PATH)/lib/lwip/src/apps/http/http_client.c \
 		$(PICO_SDK_PATH)/lib/lwip/src/core/altcp.c \
 		$(PICO_SDK_PATH)/lib/lwip/src/core/mem.c \

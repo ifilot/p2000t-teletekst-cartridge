@@ -8,6 +8,17 @@ and release diffs.
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject overlapping firmware-version lookups until TLS cleanup has finished,
+  preventing an earlier request from releasing a later request's configuration.
+- Correct the end of Dutch summer time in non-leap years, including October 2026.
+- Report custom URL and auto-start flash-save failures through the load commands;
+  the cartridge confirms saved values and offers an explicit retry on failure.
+- Reject advertised subpages above 99 before automatic navigation can request them.
+- Check embedded display strings and Git release tags against `VERSION` before
+  publishing, with regression coverage for stale and mismatched versions.
+
 ## [0.6.0] - 2026-10-17
 
 ### Fixed

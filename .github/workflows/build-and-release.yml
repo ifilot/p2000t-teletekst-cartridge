@@ -117,6 +117,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes cmake gcc-arm-none-eabi libnewlib-arm-none-eabi ninja-build
 
+      - name: Check release versions and tag
+        run: python3 firmware/tests/check_release_version.py
+
       - name: Check out Pico SDK
         uses: actions/checkout@v5
         with:

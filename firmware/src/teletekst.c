@@ -312,7 +312,7 @@ static bool parse_next_subpage(
             have_subpage = true;
             subpage = subpage * 10u + (unsigned)(character - '0');
         }
-        if (page > 999u || subpage > UINT8_MAX) {
+        if (page > 999u || subpage > 99u) {
             return false;
         }
     }

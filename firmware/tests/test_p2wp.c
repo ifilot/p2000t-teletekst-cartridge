@@ -506,6 +506,27 @@ static void test_exact_binary_display(void) {
     ));
 }
 
+/** Reject next-subpage metadata that cannot be requested over P2WP. */
+static void test_subpage_boundaries(void) {
+    const unsigned subpages[] = {99u, 100u, 255u};
+    for (size_t index = 0u; index < sizeof(subpages) / sizeof(subpages[0]); ++index) {
+        char json[1400];
+        size_t length = (size_t)sprintf(json,
+            "{\"nextSubPage\":\"100-%u\",\"binaryDisplay\":\"", subpages[index]);
+        for (unsigned group = 0u; group < 320u; ++group) {
+            memcpy(json + length, "ICAg", 4u);
+            length += 4u;
+        }
+        memcpy(json + length, "\"}", 2u);
+        length += 2u;
+        uint8_t screen[TELETEKST_SCREEN_SIZE];
+        teletekst_metadata_t metadata;
+        const bool valid = teletekst_decode_json(json, length, 100u, screen, &metadata);
+        assert(valid == (subpages[index] == 99u));
+        if (valid) assert(metadata.next_subpage == 99u);
+    }
+}
+
 static void test_navigation_metadata(void) {
     char json[18000];
     const size_t length = build_teletekst_json(json, sizeof(json));
@@ -886,6 +907,7 @@ int main(void) {
     test_teletekst_conversion();
     test_exact_binary_display();
     test_navigation_metadata();
+    test_subpage_boundaries();
     test_firmware_core();
     puts("p2wp tests passed");
     return 0;

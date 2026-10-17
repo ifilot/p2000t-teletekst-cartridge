@@ -198,6 +198,8 @@ static uint8_t stored_profile_password[WIFI_PROFILE_MAX_PASSWORD];
 static uint8_t stored_profile_password_length;
 static uint32_t stored_profile_auth;
 static uint8_t stored_custom_url_operation;
+static bool stored_custom_url_failed;
+static bool stored_settings_failed;
 static uint8_t stored_custom_url_length;
 static char stored_custom_url[CUSTOM_ENDPOINT_URL_MAX];
 static uint8_t stored_auto_start_source;
@@ -247,6 +249,7 @@ static absolute_time_t ntp_request_deadline;
 static uint8_t version_check_state;
 static uint8_t version_check_error;
 static bool version_check_requested;
+static bool version_check_active;
 static bool version_http_overflow;
 static bool version_tls_cleanup_pending;
 static size_t version_http_length;
@@ -302,7 +305,7 @@ static bool clock_local_components(uint32_t unix_time, uint8_t result[7]) {
                       year % 400u == 0u;
     // Sunday is zero; Unix day zero (1970-01-01) was Thursday.
     const uint32_t march_31 = first_day + 31u + 28u + (leap ? 1u : 0u) + 30u;
-    const uint32_t october_31 = first_day + 304u;
+    const uint32_t october_31 = first_day + 303u + (leap ? 1u : 0u);
     const uint32_t dst_start_day = march_31 - ((march_31 + 4u) % 7u);
     const uint32_t dst_end_day = october_31 - ((october_31 + 4u) % 7u);
     const uint32_t dst_start = dst_start_day * 86400u + 3600u;
@@ -1076,6 +1079,9 @@ static void version_cleanup_tls(void) {
         altcp_tls_free_config(version_tls_config);
         version_tls_config = NULL;
     }
+    mutex_enter_blocking(&wifi_mutex);
+    version_check_active = false;
+    mutex_exit(&wifi_mutex);
 }
 
 /** Start an explicitly queued latest-release lookup. */
@@ -1089,6 +1095,7 @@ static void version_start_requested_check(void) {
         return;
     }
     if (!connected) {
+        version_tls_cleanup_pending = true;
         version_set_failed(VERSION_CHECK_ERROR_NOT_CONNECTED);
         return;
     }
@@ -1099,6 +1106,7 @@ static void version_start_requested_check(void) {
         sizeof(github_root_ca)
     );
     if (version_tls_config == NULL) {
+        version_tls_cleanup_pending = true;
         version_set_failed(VERSION_CHECK_ERROR_TLS_CONFIG);
         return;
     }
@@ -1124,6 +1132,7 @@ static void version_start_requested_check(void) {
     if (result != ERR_OK) {
         altcp_tls_free_config(version_tls_config);
         version_tls_config = NULL;
+        version_tls_cleanup_pending = true;
         version_set_failed(VERSION_CHECK_ERROR_REQUEST_START);
     }
 }
@@ -1486,20 +1495,34 @@ static void custom_url_store_service(void) {
 
     mutex_enter_blocking(&wifi_mutex);
     const uint8_t operation = stored_custom_url_operation;
+    if (operation == CUSTOM_URL_OPERATION_NONE) {
+        mutex_exit(&wifi_mutex);
+        return;
+    }
     const uint8_t auto_start_source = stored_auto_start_source;
     if (operation == CUSTOM_URL_OPERATION_SAVE) {
         url_length = stored_custom_url_length;
         memcpy(url, stored_custom_url, url_length);
     }
-    stored_custom_url_operation = CUSTOM_URL_OPERATION_NONE;
     mutex_exit(&wifi_mutex);
 
+    custom_url_store_result_t result;
     if (url_length != 0u) {
-        (void)custom_url_store_save(url, url_length);
+        result = custom_url_store_save(url, url_length);
         memset(url, 0, sizeof(url));
-    } else if (operation == CUSTOM_URL_OPERATION_SETTINGS_SAVE) {
-        (void)custom_url_store_settings_save(auto_start_source);
+    } else {
+        result = custom_url_store_settings_save(auto_start_source);
     }
+    mutex_enter_blocking(&wifi_mutex);
+    const bool failed = result != CUSTOM_URL_STORE_OK &&
+        result != CUSTOM_URL_STORE_UNCHANGED;
+    if (operation == CUSTOM_URL_OPERATION_SAVE) {
+        stored_custom_url_failed = failed;
+    } else {
+        stored_settings_failed = failed;
+    }
+    stored_custom_url_operation = CUSTOM_URL_OPERATION_NONE;
+    mutex_exit(&wifi_mutex);
 }
 
 /**
@@ -1757,6 +1780,13 @@ static uint8_t pico_version_check_start(
     (void)context;
     (void)frame;
     mutex_enter_blocking(&wifi_mutex);
+    // The result callback precedes deferred TLS cleanup. Terminal status alone
+    // does not mean a new request can safely reuse the shared configuration.
+    if (version_check_active) {
+        mutex_exit(&wifi_mutex);
+        return P2WP_ERROR_WIFI_BUSY;
+    }
+    version_check_active = true;
     version_check_state = P2WP_VERSION_CHECK_RUNNING;
     version_check_error = VERSION_CHECK_ERROR_NONE;
     memset(&latest_release_version, 0, sizeof(latest_release_version));
@@ -2172,6 +2202,16 @@ static uint8_t pico_teletekst_fetch_rows(
     return P2WP_FIRMWARE_COMMAND_OK;
 }
 
+/** Report queued writes and retain storage errors until an explicit retry. */
+static uint8_t custom_url_store_status(bool settings) {
+    mutex_enter_blocking(&wifi_mutex);
+    const bool busy = stored_custom_url_operation != CUSTOM_URL_OPERATION_NONE;
+    const bool failed = settings ? stored_settings_failed : stored_custom_url_failed;
+    mutex_exit(&wifi_mutex);
+    return busy ? P2WP_ERROR_WIFI_BUSY
+        : failed ? P2WP_ERROR_INTERNAL : P2WP_FIRMWARE_COMMAND_OK;
+}
+
 static uint8_t pico_teletekst_custom_url_load(
     void *context,
     const p2wp_frame_t *frame,
@@ -2179,6 +2219,10 @@ static uint8_t pico_teletekst_custom_url_load(
 ) {
     (void)context;
     (void)frame;
+    const uint8_t status = custom_url_store_status(false);
+    if (status != P2WP_FIRMWARE_COMMAND_OK) {
+        return status;
+    }
     char url[CUSTOM_ENDPOINT_URL_MAX + 1u];
     uint8_t url_length;
     const custom_url_store_result_t result = custom_url_store_load(
@@ -2222,6 +2266,7 @@ static uint8_t pico_teletekst_custom_url_save(
         return P2WP_ERROR_WIFI_BUSY;
     }
     stored_custom_url_length = url_length;
+    stored_custom_url_failed = false;
     memcpy(stored_custom_url, frame->payload + 1u, url_length);
     stored_custom_url_operation = CUSTOM_URL_OPERATION_SAVE;
     mutex_exit(&wifi_mutex);
@@ -2236,6 +2281,10 @@ static uint8_t pico_teletekst_settings_load(
 ) {
     (void)context;
     (void)frame;
+    const uint8_t status = custom_url_store_status(true);
+    if (status != P2WP_FIRMWARE_COMMAND_OK) {
+        return status;
+    }
     uint8_t auto_start_source = P2WP_TELETEKST_AUTOSTART_DISABLED;
     const custom_url_store_result_t result =
         custom_url_store_settings_load(&auto_start_source);
@@ -2261,6 +2310,7 @@ static uint8_t pico_teletekst_settings_save(
         return P2WP_ERROR_WIFI_BUSY;
     }
     stored_auto_start_source = frame->payload[0];
+    stored_settings_failed = false;
     stored_custom_url_operation = CUSTOM_URL_OPERATION_SETTINGS_SAVE;
     mutex_exit(&wifi_mutex);
     response->payload_length = 0u;

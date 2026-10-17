@@ -211,18 +211,50 @@ static void load_custom_url(p2wp_session_t *session) {
 }
 
 /**
- * @brief Persists the current custom URL when supported by the protocol.
- * @param[in,out] session Active session; requests advance its sequence.
+ * @brief Waits for flash completion and verifies the saved value by reading it.
+ * @param[in,out] session Active protocol session.
+ * @param[in] type Load command corresponding to the queued save.
+ * @param[in] expected Expected complete response payload.
+ * @param[in] length Expected response length.
+ * @return One after verified completion, or zero on failure or timeout.
  */
-static void save_custom_url(p2wp_session_t *session) {
+static uint8_t confirm_saved(p2wp_session_t *session, uint8_t type,
+                             const uint8_t *expected, uint8_t length) {
+  p2wp_response_t reply;
+  uint8_t tries = 75u;
+  uint8_t index;
+  enum p2wp_result result;
+  while (tries-- != 0u) {
+    platform_wait_ticks(1u);
+    result = p2wp_request(session, type, 0, 0u, &reply);
+    if (result == P2WP_REMOTE_ERROR &&
+        reply.remote_error == P2WP_ERROR_WIFI_BUSY)
+      continue;
+    if (result != P2WP_OK || reply.payload_length != length) return 0u;
+    for (index = 0u; index != length; ++index)
+      if (reply.payload[index] != expected[index]) return 0u;
+    return 1u;
+  }
+  return 0u;
+}
+
+/**
+ * @brief Persists and verifies the current custom URL when supported.
+ * @param[in,out] session Active session; requests advance its sequence.
+ * @return One after success, or zero when the user must retry.
+ */
+static uint8_t save_custom_url(p2wp_session_t *session) {
   p2wp_response_t reply;
   uint8_t index;
-  if (session->version < 5u) return;
+  if (session->version < 5u) return 1u;
   fetch_request[0] = custom_url_length;
   for (index = 0u; index != custom_url_length; ++index)
     fetch_request[1u + index] = custom_url[index];
-  (void)p2wp_request(session, P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE,
-                     fetch_request, (uint16_t)(custom_url_length + 1u), &reply);
+  if (p2wp_request(session, P2WP_TYPE_TELETEKST_CUSTOM_URL_SAVE, fetch_request,
+                   (uint16_t)(custom_url_length + 1u), &reply) != P2WP_OK)
+    return 0u;
+  return confirm_saved(session, P2WP_TYPE_TELETEKST_CUSTOM_URL_LOAD,
+                       fetch_request, (uint8_t)(custom_url_length + 1u));
 }
 
 /**
@@ -245,11 +277,15 @@ static void load_settings(p2wp_session_t *session) {
 /**
  * @brief Saves the current source-menu autostart setting.
  * @param[in] session Active protocol session.
+ * @return One after verified completion, otherwise zero.
  */
-static void save_settings(p2wp_session_t *session) {
+static uint8_t save_settings(p2wp_session_t *session) {
   p2wp_response_t reply;
-  (void)p2wp_request(session, P2WP_TYPE_TELETEKST_SETTINGS_SAVE,
-                     &auto_start_source, 1u, &reply);
+  if (p2wp_request(session, P2WP_TYPE_TELETEKST_SETTINGS_SAVE,
+                   &auto_start_source, 1u, &reply) != P2WP_OK)
+    return 0u;
+  return confirm_saved(session, P2WP_TYPE_TELETEKST_SETTINGS_LOAD,
+                       &auto_start_source, 1u);
 }
 
 /**
@@ -337,8 +373,8 @@ static uint8_t choose_custom_url(p2wp_session_t *session) {
     key = platform_translate_key(key);
     if (key == 13u) {
       if (custom_url_length != 0u) {
-        save_custom_url(session);
-        return 1u;
+        if (save_custom_url(session)) return 1u;
+        ui_action(14u, "OPSLAAN MISLUKT - ENTER: OPNIEUW");
       }
       continue;
     }
@@ -445,6 +481,7 @@ draw_menu:
     if (key == '0' && session->version >= 4u && choose_custom_url(session))
       return SOURCE_CUSTOM;
     if (key == 'a' && session->version >= 6u) {
+      source = auto_start_source;
       if (auto_start_source == AUTOSTART_DISABLED)
         auto_start_source = 1u;
       else if (auto_start_source == 0u)
@@ -453,7 +490,12 @@ draw_menu:
         auto_start_source = 0u;
       else if (auto_start_source == 4u)
         auto_start_source = 0u;
-      save_settings(session);
+      if (!save_settings(session)) {
+        auto_start_source = source;
+        ui_action(20u, "OPSLAAN MISLUKT - A: OPNIEUW");
+      } else {
+        platform_clear_line(20u);
+      }
       show_auto_start(session);
     }
     if (key == 'h') {

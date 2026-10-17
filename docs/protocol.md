@@ -298,7 +298,9 @@ running firmware was compiled; zero and unrecognized values are reserved.
 
 `VERSION_CHECK_START` starts an asynchronous HTTPS lookup of the repository's
 latest GitHub release. It requires a working Internet connection and returns an
-empty acknowledgement once queued. `VERSION_CHECK_STATUS` has a five-byte
+empty acknowledgement once queued. Another start returns `WIFI_BUSY` until
+the previous request and its deferred TLS cleanup have finished, even if its
+status has already become complete or failed. `VERSION_CHECK_STATUS` has a five-byte
 response:
 
 | Offset | Field |
@@ -481,6 +483,14 @@ length byte (`0` when no valid value is stored), followed by that many URL
 bytes. `TELETEKST_CUSTOM_URL_SAVE` uses the same length-plus-bytes shape in its
 request, requires a length of `1` through `96`, and returns an empty response.
 Both commands use the same URL validation rules as a custom fetch.
+
+On the Pico, a save acknowledgement confirms that the operation was queued.
+While either a URL or auto-start save is queued or writing flash, both load
+commands return `WIFI_BUSY`. Once finished, the corresponding load command
+returns the committed value, or `INTERNAL` if the write failed. That error is
+retained until another save of the same kind is queued; saving again explicitly
+retries the operation. Hosts should poll the load command with a finite timeout
+and compare the returned value before presenting a save as successful.
 
 The reference Pico implementation uses the penultimate flash sector; the final
 sector remains reserved for the encrypted Wi-Fi profile. Before erasing or
